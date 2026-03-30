@@ -55,7 +55,7 @@ Next.js 16 (Vercel)          Modal.com (Python)
    ```bash
    git clone <repo-url>
    cd atlas
-   npm install
+   pnpm install
    ```
 
 2. **Configure environment:**
@@ -77,7 +77,7 @@ Next.js 16 (Vercel)          Modal.com (Python)
 
 5. **Start development:**
    ```bash
-   npm run dev
+   pnpm dev
    ```
 
 ## Project Structure
