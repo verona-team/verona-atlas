@@ -1,0 +1,8 @@
+stagehand
+supabase
+anthropic
+agentmail
+httpx
+pydantic
+pyjwt
+cryptography
