@@ -33,7 +33,7 @@ export function TriggerRunButton({ projectId }: TriggerRunButtonProps) {
       toast.success('Test run triggered successfully!')
       router.push(`/projects/${projectId}/runs/${data.id}`)
       router.refresh()
-    } catch (error) {
+    } catch {
       toast.error('Failed to trigger test run')
     } finally {
       setLoading(false)
