@@ -1,9 +1,15 @@
 const SLACK_API_BASE = "https://slack.com/api"
 
+export function getSlackRedirectUri(): string {
+  const base = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ?? 'http://localhost:3000'
+  return `${base}/api/integrations/slack/callback`
+}
+
 interface SlackOAuthAccessResponse {
   ok: boolean
   error?: string
   access_token?: string
+  bot_user_id?: string
   team?: { id?: string; name?: string }
 }
 
@@ -19,11 +25,18 @@ interface SlackPostMessageResponse {
 }
 
 export function buildOAuthURL(state: string): string {
+  const clientId = process.env.SLACK_CLIENT_ID
+  if (!clientId) {
+    throw new Error('SLACK_CLIENT_ID is not set')
+  }
+
   const params = new URLSearchParams({
-    client_id: process.env.SLACK_CLIENT_ID!,
-    scope: "chat:write,channels:read",
-    redirect_uri: `${process.env.NEXT_PUBLIC_APP_URL}/api/integrations/slack/callback`,
+    client_id: clientId,
+    scope: 'channels:history,channels:read,chat:write,chat:write.public,users:read,team:read',
+    user_scope: '',
+    redirect_uri: getSlackRedirectUri(),
     state,
+    response_type: 'code',
   })
   return `https://slack.com/oauth/v2/authorize?${params.toString()}`
 }
@@ -32,15 +45,22 @@ export async function exchangeCodeForToken(code: string): Promise<{
   botToken: string
   teamName: string
   teamId: string
+  botUserId?: string
 }> {
+  const clientId = process.env.SLACK_CLIENT_ID
+  const clientSecret = process.env.SLACK_CLIENT_SECRET
+  if (!clientId || !clientSecret) {
+    throw new Error('SLACK_CLIENT_ID or SLACK_CLIENT_SECRET is not set')
+  }
+
   const response = await fetch(`${SLACK_API_BASE}/oauth.v2.access`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
-      client_id: process.env.SLACK_CLIENT_ID!,
-      client_secret: process.env.SLACK_CLIENT_SECRET!,
+      client_id: clientId,
+      client_secret: clientSecret,
       code,
-      redirect_uri: `${process.env.NEXT_PUBLIC_APP_URL}/api/integrations/slack/callback`,
+      redirect_uri: getSlackRedirectUri(),
     }),
   })
 
@@ -53,6 +73,7 @@ export async function exchangeCodeForToken(code: string): Promise<{
     botToken: data.access_token,
     teamName: data.team?.name ?? "Unknown",
     teamId: data.team?.id ?? "",
+    botUserId: data.bot_user_id,
   }
 }
 
