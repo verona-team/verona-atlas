@@ -20,31 +20,17 @@ export function TriggerRunButton({ projectId }: TriggerRunButtonProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_id: projectId }),
       })
-
       const data = await response.json()
-
-      if (!response.ok) {
-        toast.error(data.error || 'Failed to trigger test run')
-        return
-      }
-
-      toast.success('Test run triggered successfully!')
+      if (!response.ok) { toast.error(data.error || 'Failed to trigger test run'); return }
+      toast.success('Test run triggered')
       router.push(`/projects/${projectId}/runs/${data.id}`)
       router.refresh()
-    } catch {
-      toast.error('Failed to trigger test run')
-    } finally {
-      setLoading(false)
-    }
+    } catch { toast.error('Failed to trigger test run') } finally { setLoading(false) }
   }
 
   return (
-    <button
-      onClick={handleTrigger}
-      disabled={loading}
-      className="text-xs uppercase tracking-wider border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#fffef9] px-3 py-1.5 hover:bg-[#333] disabled:opacity-50 transition-colors"
-    >
-      {loading ? '...' : '▶ Run Tests'}
+    <button onClick={handleTrigger} disabled={loading} className="text-sm underline disabled:opacity-30">
+      {loading ? 'Running...' : 'Run Tests'}
     </button>
   )
 }

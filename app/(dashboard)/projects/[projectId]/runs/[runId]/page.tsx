@@ -52,269 +52,118 @@ export default function RunDetailPage() {
         setResults(data.results)
         setProjectName(data.project?.name || '')
       }
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false)
-    }
+    } catch { /* ignore */ } finally { setLoading(false) }
   }, [runId])
 
-  useEffect(() => {
-    fetchRunData()
-  }, [fetchRunData])
+  useEffect(() => { fetchRunData() }, [fetchRunData])
 
   useEffect(() => {
     const supabase = createClient()
     const channel = supabase
       .channel(`test-run-${runId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'test_runs',
-          filter: `id=eq.${runId}`,
-        },
-        (payload) => {
-          setRun(payload.new as TestRun)
-          if (['completed', 'failed'].includes((payload.new as TestRun).status)) {
-            fetchRunData()
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'test_results',
-          filter: `test_run_id=eq.${runId}`,
-        },
-        () => {
-          fetchRunData()
-        }
-      )
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'test_runs', filter: `id=eq.${runId}` },
+        (payload) => { setRun(payload.new as TestRun); if (['completed', 'failed'].includes((payload.new as TestRun).status)) fetchRunData() })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'test_results', filter: `test_run_id=eq.${runId}` },
+        () => { fetchRunData() })
       .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
+    return () => { supabase.removeChannel(channel) }
   }, [runId, fetchRunData])
 
-  if (loading) {
-    return (
-      <div className="max-w-3xl mx-auto text-center py-12">
-        <p className="text-xs text-[#6b6555] uppercase tracking-wider animate-pulse">
-          Loading...
-        </p>
-      </div>
-    )
-  }
+  if (loading) return <p className="text-sm opacity-30 py-8">Loading...</p>
+  if (!run) return <p className="text-sm opacity-30 py-8">Run not found</p>
 
-  if (!run) {
-    return (
-      <div className="max-w-3xl mx-auto text-center py-12">
-        <p className="text-xs text-[#6b6555] uppercase">Run not found</p>
-      </div>
-    )
-  }
-
-  const summary = run.summary as { total?: number; passed?: number; failed?: number; errors?: number; skipped?: number; ai_analysis?: string; [key: string]: unknown } | null
-  const duration =
-    run.started_at && run.completed_at
-      ? `${Math.round(
-          (new Date(run.completed_at).getTime() - new Date(run.started_at).getTime()) / 1000
-        )}s`
-      : run.started_at
-        ? 'In progress...'
-        : 'Not started'
+  const summary = run.summary as { total?: number; passed?: number; failed?: number; errors?: number; ai_analysis?: string; [key: string]: unknown } | null
+  const duration = run.started_at && run.completed_at
+    ? `${Math.round((new Date(run.completed_at).getTime() - new Date(run.started_at).getTime()) / 1000)}s`
+    : run.started_at ? 'Running...' : '—'
 
   return (
-    <div className="max-w-3xl mx-auto space-y-4">
-      <div className="mb-2">
-        <Link
-          href={`/projects/${projectId}/runs`}
-          className="text-[10px] text-[#6b6555] hover:text-[#1a1a1a] uppercase tracking-wider transition-colors"
-        >
-          ← Back to runs
+    <div className="max-w-2xl space-y-6">
+      <div>
+        <Link href={`/projects/${projectId}/runs`} className="text-xs opacity-40 hover:opacity-70">
+          ← Runs
         </Link>
-      </div>
-
-      <div className="window-chrome">
-        <div className="window-title-bar">
-          <span className="close-box" />
-          Run Detail — {projectName}
-        </div>
-        <div className="window-body space-y-4">
-          <div className="flex items-center justify-between">
-            <RunStatusBadge status={run.status} />
-            <span className="text-[10px] text-[#6b6555]">{run.id.slice(0, 8)}</span>
-          </div>
-
-          <div className="grid grid-cols-4 border-2 border-[#1a1a1a] text-xs">
-            <div className="border-r-2 border-[#1a1a1a] px-3 py-2">
-              <p className="text-[10px] text-[#6b6555] uppercase tracking-wider">Trigger</p>
-              <p className="uppercase text-[#1a1a1a]">{run.trigger}</p>
-            </div>
-            <div className="border-r-2 border-[#1a1a1a] px-3 py-2">
-              <p className="text-[10px] text-[#6b6555] uppercase tracking-wider">Started</p>
-              <p className="text-[#1a1a1a]">{run.started_at ? new Date(run.started_at).toLocaleString() : '—'}</p>
-            </div>
-            <div className="border-r-2 border-[#1a1a1a] px-3 py-2">
-              <p className="text-[10px] text-[#6b6555] uppercase tracking-wider">Duration</p>
-              <p className="text-[#1a1a1a]">{duration}</p>
-            </div>
-            <div className="px-3 py-2">
-              <p className="text-[10px] text-[#6b6555] uppercase tracking-wider">Completed</p>
-              <p className="text-[#1a1a1a]">{run.completed_at ? new Date(run.completed_at).toLocaleString() : '—'}</p>
-            </div>
-          </div>
-
-          {summary && typeof summary.total === 'number' && (
-            <div className="grid grid-cols-4 border-2 border-[#1a1a1a]">
-              <div className="border-r-2 border-[#1a1a1a] px-3 py-2 text-center">
-                <p className="text-lg font-bold text-[#1a1a1a]">{Number(summary.total)}</p>
-                <p className="text-[10px] text-[#6b6555] uppercase tracking-wider">Total</p>
-              </div>
-              <div className="border-r-2 border-[#1a1a1a] px-3 py-2 text-center">
-                <p className="text-lg font-bold text-[#2a7a2a]">{Number(summary.passed || 0)}</p>
-                <p className="text-[10px] text-[#6b6555] uppercase tracking-wider">Passed</p>
-              </div>
-              <div className="border-r-2 border-[#1a1a1a] px-3 py-2 text-center">
-                <p className="text-lg font-bold text-[#c43333]">{Number(summary.failed || 0)}</p>
-                <p className="text-[10px] text-[#6b6555] uppercase tracking-wider">Failed</p>
-              </div>
-              <div className="px-3 py-2 text-center">
-                <p className="text-lg font-bold text-[#b07d10]">{Number(summary.errors || 0)}</p>
-                <p className="text-[10px] text-[#6b6555] uppercase tracking-wider">Errors</p>
-              </div>
-            </div>
-          )}
+        <div className="flex items-center gap-3 mt-1">
+          <h1 className="text-lg">{projectName}</h1>
+          <RunStatusBadge status={run.status} />
         </div>
       </div>
 
-      {summary?.ai_analysis && (
-        <div className="window-chrome">
-          <div className="window-title-bar">
-            <span className="close-box" />
-            AI Analysis
-          </div>
-          <div className="window-body">
-            <pre className="text-xs whitespace-pre-wrap text-[#6b6555]">
-              {String(summary.ai_analysis)}
-            </pre>
-          </div>
+      <div className="flex gap-8 text-sm">
+        <div><span className="opacity-40">Trigger</span> {run.trigger}</div>
+        <div><span className="opacity-40">Duration</span> {duration}</div>
+        <div><span className="opacity-40">ID</span> {run.id.slice(0, 8)}</div>
+      </div>
+
+      {summary && typeof summary.total === 'number' && (
+        <div className="flex gap-8 text-sm">
+          <div>{summary.total} total</div>
+          <div className="text-green-700">{summary.passed || 0} passed</div>
+          <div className="text-red-700">{summary.failed || 0} failed</div>
+          <div className="text-amber-700">{summary.errors || 0} errors</div>
         </div>
       )}
 
-      <div className="window-chrome">
-        <div className="window-title-bar">
-          <span className="close-box" />
-          Test Results ({results.length})
+      {summary?.ai_analysis && (
+        <div>
+          <h2 className="text-sm opacity-40 mb-1">AI Analysis</h2>
+          <pre className="text-xs whitespace-pre-wrap opacity-60">{String(summary.ai_analysis)}</pre>
         </div>
-        <div className="window-body">
-          {results.length === 0 ? (
-            <div className="py-6 text-center">
-              <p className="text-xs text-[#6b6555] uppercase">
-                {run.status === 'pending' || run.status === 'planning' || run.status === 'running'
-                  ? 'Tests are executing...'
-                  : 'No test results available'}
-              </p>
-            </div>
-          ) : (
-            <div className="border-2 border-[#1a1a1a] divide-y divide-[#b8b3a4]">
-              {results.map((result) => (
-                <div key={result.id}>
-                  <button
-                    className="flex items-center justify-between w-full px-3 py-2 text-left hover:bg-[#e8e4d9] transition-colors"
-                    onClick={() =>
-                      setExpandedResult(
-                        expandedResult === result.id ? null : result.id
-                      )
-                    }
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className={
-                        result.status === 'passed' ? 'text-[#2a7a2a]' :
-                        result.status === 'failed' ? 'text-[#c43333]' :
-                        'text-[#b07d10]'
-                      }>
-                        {result.status === 'passed' ? '■' : result.status === 'failed' ? '✗' : '▲'}
-                      </span>
-                      <span className="text-xs uppercase tracking-wider text-[#1a1a1a]">
-                        {result.test_templates?.name || 'Unknown'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      {result.duration_ms && (
-                        <span className="text-[10px] text-[#6b6555]">
-                          {(result.duration_ms / 1000).toFixed(1)}s
-                        </span>
-                      )}
-                      <span className="text-[10px] uppercase tracking-wider border border-[#b8b3a4] px-2 py-0.5 text-[#6b6555]">
-                        {result.status}
-                      </span>
-                    </div>
-                  </button>
+      )}
 
-                  {expandedResult === result.id && (
-                    <div className="border-t border-[#b8b3a4] px-3 py-3 bg-[#e8e4d9] space-y-3">
-                      {result.error_message && (
-                        <div>
-                          <p className="text-[10px] text-[#c43333] uppercase tracking-wider mb-1">Error</p>
-                          <pre className="text-xs text-[#c43333] whitespace-pre-wrap border border-[#c43333]/30 p-2 bg-[#c43333]/5">
-                            {result.error_message}
-                          </pre>
-                        </div>
-                      )}
+      <div>
+        <h2 className="text-sm opacity-40 mb-2">Results ({results.length})</h2>
+        {results.length === 0 ? (
+          <p className="text-sm opacity-30">
+            {['pending', 'planning', 'running'].includes(run.status) ? 'Running...' : 'No results'}
+          </p>
+        ) : (
+          <div className="divide-y text-sm">
+            {results.map((result) => (
+              <div key={result.id}>
+                <button
+                  className="flex items-center justify-between w-full py-2 text-left"
+                  onClick={() => setExpandedResult(expandedResult === result.id ? null : result.id)}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className={result.status === 'passed' ? 'text-green-700' : result.status === 'failed' ? 'text-red-700' : 'text-amber-700'}>
+                      {result.status === 'passed' ? '✓' : result.status === 'failed' ? '✗' : '!'}
+                    </span>
+                    <span>{result.test_templates?.name || 'Unknown'}</span>
+                  </div>
+                  <span className="text-xs opacity-30">
+                    {result.duration_ms ? `${(result.duration_ms / 1000).toFixed(1)}s` : ''}
+                  </span>
+                </button>
 
-                      {result.ai_analysis && (
-                        <div>
-                          <p className="text-[10px] text-[#6b6555] uppercase tracking-wider mb-1">Analysis</p>
-                          <pre className="text-xs text-[#6b6555] whitespace-pre-wrap">
-                            {result.ai_analysis}
-                          </pre>
-                        </div>
-                      )}
-
-                      {result.console_logs && (
-                        <div>
-                          <p className="text-[10px] text-[#6b6555] uppercase tracking-wider mb-1">Console</p>
-                          <pre className="text-xs text-[#6b6555] whitespace-pre-wrap border border-[#b8b3a4] p-2 max-h-48 overflow-auto">
-                            {JSON.stringify(result.console_logs, null, 2)}
-                          </pre>
-                        </div>
-                      )}
-
-                      {result.screenshots && result.screenshots.length > 0 && (
-                        <div>
-                          <p className="text-[10px] text-[#6b6555] uppercase tracking-wider mb-1">Screenshots</p>
-                          <div className="grid grid-cols-2 gap-2">
-                            {result.screenshots.map((url, i) => (
-                              <a
-                                key={i}
-                                href={url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="border-2 border-[#1a1a1a] overflow-hidden hover:opacity-80 transition"
-                              >
-                                <img
-                                  src={url}
-                                  alt={`Screenshot ${i + 1}`}
-                                  className="w-full h-auto"
-                                />
-                              </a>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                {expandedResult === result.id && (
+                  <div className="pb-3 pl-5 space-y-2 text-xs">
+                    {result.error_message && (
+                      <pre className="whitespace-pre-wrap text-red-700">{result.error_message}</pre>
+                    )}
+                    {result.ai_analysis && (
+                      <pre className="whitespace-pre-wrap opacity-50">{result.ai_analysis}</pre>
+                    )}
+                    {result.console_logs && (
+                      <pre className="whitespace-pre-wrap opacity-40 max-h-40 overflow-auto">
+                        {JSON.stringify(result.console_logs, null, 2)}
+                      </pre>
+                    )}
+                    {result.screenshots && result.screenshots.length > 0 && (
+                      <div className="flex gap-2">
+                        {result.screenshots.map((url, i) => (
+                          <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="border">
+                            <img src={url} alt={`Screenshot ${i + 1}`} className="w-48 h-auto" />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

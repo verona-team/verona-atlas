@@ -66,7 +66,7 @@ export async function signUp(formData: FormData) {
     return { error: `Failed to set up membership: ${memberError.message}` }
   }
 
-  redirect('/projects')
+  return { success: true, email }
 }
 
 export async function signIn(formData: FormData) {
