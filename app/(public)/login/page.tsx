@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { signIn } from '@/app/actions/auth'
+import { MetisLogo } from '@/components/landing/metis-logo'
+import { HalftoneBackground } from '@/components/landing/halftone-background'
 import { toast } from 'sonner'
 
 export default function LoginPage() {
@@ -18,82 +20,82 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
-      <header className="flex items-center justify-between px-6 py-4 border-b border-border">
-        <Link href="/" className="font-bold text-sm tracking-widest uppercase text-foreground hover:text-phosphor-bright">
-          ◆ Verona
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-white">
+      <HalftoneBackground />
+
+      <header className="relative z-10 flex items-center justify-between px-6 py-5 sm:px-10">
+        <Link href="/" className="flex items-center gap-2">
+          <MetisLogo size={20} className="text-[#1a1a1a]" />
         </Link>
         <Link
           href="/signup"
-          className="text-[10px] uppercase tracking-wider text-phosphor-dim hover:text-foreground transition-colors"
+          className="text-[13px] font-medium text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors"
         >
-          [Create account]
+          Create an account
         </Link>
       </header>
 
-      <main className="flex flex-1 items-center justify-center px-4">
-        <div className="w-full max-w-sm">
-          <div className="window-chrome">
-            <div className="window-title-bar">
-              <span className="close-box" />
-              System Login
-            </div>
-            <div className="window-body">
-              <div className="mb-6 text-center">
-                <p className="text-xs text-phosphor-dim uppercase tracking-wider">
-                  Authenticate to continue
-                </p>
-              </div>
-
-              <form action={handleSubmit} className="space-y-4">
-                <div>
-                  <label htmlFor="email" className="block text-xs text-phosphor-dim uppercase tracking-wider mb-1">
-                    Email
-                  </label>
-                  <input
-                    id="email"
-                    name="email"
-                    type="email"
-                    placeholder="you@company.com"
-                    required
-                    autoComplete="email"
-                    className="w-full bg-background border border-border px-3 py-2 text-sm text-foreground placeholder:text-phosphor-dim/50 focus:outline-none focus:border-foreground"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="password" className="block text-xs text-phosphor-dim uppercase tracking-wider mb-1">
-                    Password
-                  </label>
-                  <input
-                    id="password"
-                    name="password"
-                    type="password"
-                    placeholder="••••••••"
-                    required
-                    autoComplete="current-password"
-                    className="w-full bg-background border border-border px-3 py-2 text-sm text-foreground placeholder:text-phosphor-dim/50 focus:outline-none focus:border-foreground"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full border border-foreground bg-foreground text-background text-xs uppercase tracking-wider py-2 hover:bg-phosphor-bright disabled:opacity-50 transition-colors"
-                >
-                  {loading ? 'Authenticating...' : 'Sign In'}
-                </button>
-              </form>
-
-              <p className="mt-6 text-center text-[10px] text-phosphor-dim uppercase tracking-wider">
-                No account?{' '}
-                <Link href="/signup" className="text-foreground hover:text-phosphor-bright transition-colors underline underline-offset-2">
-                  Register
-                </Link>
-              </p>
-            </div>
+      <main className="relative z-10 flex flex-1 items-center justify-center px-4">
+        <div className="w-full max-w-md rounded-2xl bg-white/90 px-10 py-12 shadow-sm backdrop-blur-sm ring-1 ring-[#1a1a1a]/[0.04]">
+          <div className="mb-10 text-center">
+            <h1
+              className="text-3xl font-semibold tracking-tight text-[#1a1a1a] sm:text-4xl"
+            >
+              Welcome back
+            </h1>
+            <p className="mt-2 text-sm text-[#1a1a1a]/50">
+              Sign in to your account to continue
+            </p>
           </div>
+
+          <form action={handleSubmit} className="space-y-5">
+            <div className="space-y-1.5">
+              <label htmlFor="email" className="block text-[13px] font-medium text-[#1a1a1a]/70">
+                Email
+              </label>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                placeholder="you@company.com"
+                required
+                autoComplete="email"
+                className="h-10 w-full rounded-lg border border-[#1a1a1a]/10 bg-white px-3 text-sm text-[#1a1a1a] outline-none transition-colors placeholder:text-[#1a1a1a]/30 focus:border-[#1a1a1a]/30 focus:ring-2 focus:ring-[#1a1a1a]/5"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="password" className="block text-[13px] font-medium text-[#1a1a1a]/70">
+                Password
+              </label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                placeholder="••••••••"
+                required
+                autoComplete="current-password"
+                className="h-10 w-full rounded-lg border border-[#1a1a1a]/10 bg-white px-3 text-sm text-[#1a1a1a] outline-none transition-colors placeholder:text-[#1a1a1a]/30 focus:border-[#1a1a1a]/30 focus:ring-2 focus:ring-[#1a1a1a]/5"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="mt-2 h-10 w-full rounded-lg bg-[#1a1a1a] text-sm font-medium text-white transition-colors hover:bg-[#333] disabled:opacity-50"
+            >
+              {loading ? 'Signing in...' : 'Sign In'}
+            </button>
+          </form>
+
+          <p className="mt-8 text-center text-[13px] text-[#1a1a1a]/40">
+            Don&apos;t have an account?{' '}
+            <Link href="/signup" className="text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors">
+              Sign up
+            </Link>
+          </p>
         </div>
       </main>
+
     </div>
   )
 }

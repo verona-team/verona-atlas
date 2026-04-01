@@ -43,7 +43,7 @@ export default async function RunHistoryPage({ params }: PageProps) {
       <div className="mb-2">
         <Link
           href={`/projects/${projectId}`}
-          className="text-[10px] text-phosphor-dim hover:text-foreground uppercase tracking-wider transition-colors"
+          className="text-[10px] text-[#6b6555] hover:text-[#1a1a1a] uppercase tracking-wider transition-colors"
         >
           ← Back to {project.name}
         </Link>
@@ -56,30 +56,28 @@ export default async function RunHistoryPage({ params }: PageProps) {
         </div>
         <div className="window-body space-y-4">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-phosphor-dim uppercase tracking-wider">
+            <span className="text-xs text-[#6b6555] uppercase tracking-wider">
               {runs?.length ?? 0} runs
             </span>
             <TriggerRunButton projectId={projectId} />
           </div>
 
           {(!runs || runs.length === 0) ? (
-            <div className="border border-dashed border-border py-8 text-center">
-              <p className="text-xs text-phosphor-dim uppercase">
+            <div className="border-2 border-dashed border-[#b8b3a4] py-8 text-center">
+              <p className="text-xs text-[#6b6555] uppercase">
                 No runs found. Trigger a test run to begin.
               </p>
             </div>
           ) : (
-            <div className="border border-border">
-              {/* Header */}
-              <div className="grid grid-cols-5 gap-px bg-border text-[10px] uppercase tracking-wider text-phosphor-dim">
-                <div className="bg-card px-3 py-1.5">Status</div>
-                <div className="bg-card px-3 py-1.5">Trigger</div>
-                <div className="bg-card px-3 py-1.5">Started</div>
-                <div className="bg-card px-3 py-1.5">Duration</div>
-                <div className="bg-card px-3 py-1.5 text-right">Results</div>
+            <div className="border-2 border-[#1a1a1a]">
+              <div className="grid grid-cols-5 border-b-2 border-[#1a1a1a] text-[10px] uppercase tracking-wider text-[#6b6555] bg-[#e8e4d9]">
+                <div className="px-3 py-1.5">Status</div>
+                <div className="px-3 py-1.5">Trigger</div>
+                <div className="px-3 py-1.5">Started</div>
+                <div className="px-3 py-1.5">Duration</div>
+                <div className="px-3 py-1.5 text-right">Results</div>
               </div>
-              {/* Rows */}
-              <div className="divide-y divide-border">
+              <div className="divide-y divide-[#b8b3a4]">
                 {runs.map((run) => {
                   const summary = run.summary as Record<string, number> | null
                   const duration =
@@ -95,29 +93,29 @@ export default async function RunHistoryPage({ params }: PageProps) {
                     <Link
                       key={run.id}
                       href={`/projects/${projectId}/runs/${run.id}`}
-                      className="grid grid-cols-5 text-xs hover:bg-accent transition-colors"
+                      className="grid grid-cols-5 text-xs hover:bg-[#e8e4d9] transition-colors"
                     >
                       <div className="px-3 py-2">
                         <RunStatusBadge status={run.status} />
                       </div>
-                      <div className="px-3 py-2 uppercase">{run.trigger}</div>
-                      <div className="px-3 py-2 text-phosphor-dim">
+                      <div className="px-3 py-2 uppercase text-[#1a1a1a]">{run.trigger}</div>
+                      <div className="px-3 py-2 text-[#6b6555]">
                         {new Date(run.created_at).toLocaleString()}
                       </div>
-                      <div className="px-3 py-2">{duration}</div>
+                      <div className="px-3 py-2 text-[#1a1a1a]">{duration}</div>
                       <div className="px-3 py-2 text-right">
                         {summary && summary.total > 0 ? (
                           <span>
-                            <span className="text-[#33ff33]">{summary.passed}</span>
+                            <span className="text-[#2a7a2a]">{summary.passed}</span>
                             {' / '}
-                            <span className="text-destructive">
+                            <span className="text-[#c43333]">
                               {(summary.failed || 0) + (summary.errors || 0)}
                             </span>
                             {' / '}
                             {summary.total}
                           </span>
                         ) : (
-                          <span className="text-phosphor-dim">—</span>
+                          <span className="text-[#b8b3a4]">—</span>
                         )}
                       </div>
                     </Link>

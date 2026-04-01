@@ -33,55 +33,55 @@ export default async function ProjectsPage() {
         </div>
         <div className="window-body space-y-4">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-phosphor-dim uppercase tracking-wider">
+            <span className="text-xs text-[#6b6555] uppercase tracking-wider">
               {projects?.length ?? 0} project{(projects?.length ?? 0) !== 1 ? 's' : ''} registered
             </span>
             <Link
               href="/projects/new"
-              className="text-xs uppercase tracking-wider border border-border px-3 py-1 hover:bg-primary hover:text-primary-foreground transition-colors"
+              className="text-xs uppercase tracking-wider border-2 border-[#1a1a1a] px-3 py-1 hover:bg-[#1a1a1a] hover:text-[#fffef9] transition-colors"
             >
               + New Project
             </Link>
           </div>
 
           {(!projects || projects.length === 0) ? (
-            <div className="border border-dashed border-border py-12 text-center">
-              <p className="text-sm text-phosphor-dim mb-1">NO PROJECTS FOUND</p>
-              <p className="text-xs text-phosphor-dim">
+            <div className="border-2 border-dashed border-[#b8b3a4] py-12 text-center">
+              <p className="text-sm text-[#6b6555] mb-1">NO PROJECTS FOUND</p>
+              <p className="text-xs text-[#6b6555]">
                 Create your first project to begin autonomous QA testing.
               </p>
               <Link
                 href="/projects/new"
-                className="inline-block mt-4 text-xs uppercase tracking-wider border border-border px-3 py-1 hover:bg-primary hover:text-primary-foreground transition-colors"
+                className="inline-block mt-4 text-xs uppercase tracking-wider border-2 border-[#1a1a1a] px-3 py-1 hover:bg-[#1a1a1a] hover:text-[#fffef9] transition-colors"
               >
                 + Create Project
               </Link>
             </div>
           ) : (
-            <div className="border border-border divide-y divide-border">
+            <div className="border-2 border-[#1a1a1a] divide-y-2 divide-[#1a1a1a]">
               {projects.map((project) => (
                 <Link
                   key={project.id}
                   href={`/projects/${project.id}`}
-                  className="block px-3 py-3 hover:bg-accent transition-colors group"
+                  className="block px-3 py-3 hover:bg-[#e8e4d9] transition-colors group"
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <span className="text-phosphor-dim text-xs">▸</span>
+                      <span className="text-[#6b6555] text-xs">▸</span>
                       <div>
-                        <p className="text-sm font-bold uppercase tracking-wide">
+                        <p className="text-sm font-bold uppercase tracking-wide text-[#1a1a1a]">
                           {project.name}
                         </p>
-                        <p className="text-xs text-phosphor-dim truncate max-w-md">
+                        <p className="text-xs text-[#6b6555] truncate max-w-md">
                           {project.app_url}
                         </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] uppercase tracking-wider text-phosphor-dim border border-border px-2 py-0.5">
+                      <span className="text-[10px] uppercase tracking-wider text-[#6b6555] border border-[#b8b3a4] px-2 py-0.5">
                         {project.agentmail_inbox_address ? 'INBOX OK' : 'NO INBOX'}
                       </span>
-                      <span className="text-phosphor-dim group-hover:text-foreground transition-colors">→</span>
+                      <span className="text-[#b8b3a4] group-hover:text-[#1a1a1a] transition-colors">→</span>
                     </div>
                   </div>
                 </Link>

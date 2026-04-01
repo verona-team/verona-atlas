@@ -31,14 +31,15 @@ export default async function DashboardLayout({
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
+    <div className="vintage flex h-screen flex-col overflow-hidden bg-[#f0ede4]">
+      <div className="vintage-scanlines" />
       <MenuBar userEmail={user.email ?? ''} orgName={org.name} />
       <main className="flex-1 overflow-y-auto p-4 md:p-8">
         {children}
       </main>
-      <footer className="border-t border-border px-4 py-1 text-[11px] text-phosphor-dim flex justify-between">
+      <footer className="border-t border-[#b8b3a4] px-4 py-1 text-[11px] text-[#6b6555] flex justify-between">
         <span>VERONA QA SYSTEM v1.0</span>
-        <span>{new Date().getFullYear()} — ALL RIGHTS RESERVED</span>
+        <span>{new Date().getFullYear()}</span>
       </footer>
     </div>
   )

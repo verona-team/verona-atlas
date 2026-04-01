@@ -41,7 +41,7 @@ export default async function ProjectSettingsPage({ params }: PageProps) {
       <div className="mb-2">
         <Link
           href={`/projects/${project.id}`}
-          className="text-[10px] text-phosphor-dim hover:text-foreground uppercase tracking-wider transition-colors"
+          className="text-[10px] text-[#6b6555] hover:text-[#1a1a1a] uppercase tracking-wider transition-colors"
         >
           ← Back to {project.name}
         </Link>
@@ -54,18 +54,18 @@ export default async function ProjectSettingsPage({ params }: PageProps) {
         </div>
         <div className="window-body space-y-4">
           <div>
-            <p className="text-xs text-phosphor-dim uppercase tracking-wider mb-2">Integrations</p>
+            <p className="text-xs text-[#6b6555] uppercase tracking-wider mb-2">Integrations</p>
             {integrations && integrations.length > 0 ? (
-              <div className="border border-border divide-y divide-border text-sm">
+              <div className="border-2 border-[#1a1a1a] divide-y divide-[#b8b3a4] text-sm">
                 {integrations.map((row) => (
                   <div key={row.type} className="flex justify-between px-3 py-2">
-                    <span className="uppercase text-xs tracking-wider">{row.type}</span>
-                    <span className="text-phosphor-dim text-xs uppercase tracking-wider">{row.status}</span>
+                    <span className="uppercase text-xs tracking-wider text-[#1a1a1a]">{row.type}</span>
+                    <span className="text-[#6b6555] text-xs uppercase tracking-wider">{row.status}</span>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-phosphor-dim">No integrations connected.</p>
+              <p className="text-xs text-[#6b6555]">No integrations connected.</p>
             )}
           </div>
         </div>

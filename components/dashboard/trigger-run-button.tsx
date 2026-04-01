@@ -42,7 +42,7 @@ export function TriggerRunButton({ projectId }: TriggerRunButtonProps) {
     <button
       onClick={handleTrigger}
       disabled={loading}
-      className="text-xs uppercase tracking-wider border border-foreground bg-foreground text-background px-3 py-1.5 hover:bg-phosphor-bright disabled:opacity-50 transition-colors"
+      className="text-xs uppercase tracking-wider border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#fffef9] px-3 py-1.5 hover:bg-[#333] disabled:opacity-50 transition-colors"
     >
       {loading ? '...' : '▶ Run Tests'}
     </button>

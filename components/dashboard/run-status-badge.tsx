@@ -1,11 +1,11 @@
 'use client'
 
 const statusConfig = {
-  pending: { label: 'PENDING', color: 'text-phosphor-dim' },
-  planning: { label: 'PLANNING', color: 'text-[#3388ff]' },
-  running: { label: 'RUNNING', color: 'text-[#ffaa00]' },
-  completed: { label: 'DONE', color: 'text-[#33ff33]' },
-  failed: { label: 'FAILED', color: 'text-destructive' },
+  pending: { label: 'PENDING', color: 'text-[#6b6555]' },
+  planning: { label: 'PLANNING', color: 'text-[#2a5aaa]' },
+  running: { label: 'RUNNING', color: 'text-[#b07d10]' },
+  completed: { label: 'DONE', color: 'text-[#2a7a2a]' },
+  failed: { label: 'FAILED', color: 'text-[#c43333]' },
 } as const
 
 interface RunStatusBadgeProps {

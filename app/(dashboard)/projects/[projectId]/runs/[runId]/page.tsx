@@ -104,7 +104,7 @@ export default function RunDetailPage() {
   if (loading) {
     return (
       <div className="max-w-3xl mx-auto text-center py-12">
-        <p className="text-xs text-phosphor-dim uppercase tracking-wider animate-pulse">
+        <p className="text-xs text-[#6b6555] uppercase tracking-wider animate-pulse">
           Loading...
         </p>
       </div>
@@ -114,7 +114,7 @@ export default function RunDetailPage() {
   if (!run) {
     return (
       <div className="max-w-3xl mx-auto text-center py-12">
-        <p className="text-xs text-phosphor-dim uppercase">Run not found</p>
+        <p className="text-xs text-[#6b6555] uppercase">Run not found</p>
       </div>
     )
   }
@@ -134,13 +134,12 @@ export default function RunDetailPage() {
       <div className="mb-2">
         <Link
           href={`/projects/${projectId}/runs`}
-          className="text-[10px] text-phosphor-dim hover:text-foreground uppercase tracking-wider transition-colors"
+          className="text-[10px] text-[#6b6555] hover:text-[#1a1a1a] uppercase tracking-wider transition-colors"
         >
           ← Back to runs
         </Link>
       </div>
 
-      {/* Run Info Window */}
       <div className="window-chrome">
         <div className="window-title-bar">
           <span className="close-box" />
@@ -149,53 +148,51 @@ export default function RunDetailPage() {
         <div className="window-body space-y-4">
           <div className="flex items-center justify-between">
             <RunStatusBadge status={run.status} />
-            <span className="text-[10px] text-phosphor-dim">{run.id.slice(0, 8)}</span>
+            <span className="text-[10px] text-[#6b6555]">{run.id.slice(0, 8)}</span>
           </div>
 
-          <div className="grid grid-cols-4 gap-px border border-border bg-border text-xs">
-            <div className="bg-card px-3 py-2">
-              <p className="text-[10px] text-phosphor-dim uppercase tracking-wider">Trigger</p>
-              <p className="uppercase">{run.trigger}</p>
+          <div className="grid grid-cols-4 border-2 border-[#1a1a1a] text-xs">
+            <div className="border-r-2 border-[#1a1a1a] px-3 py-2">
+              <p className="text-[10px] text-[#6b6555] uppercase tracking-wider">Trigger</p>
+              <p className="uppercase text-[#1a1a1a]">{run.trigger}</p>
             </div>
-            <div className="bg-card px-3 py-2">
-              <p className="text-[10px] text-phosphor-dim uppercase tracking-wider">Started</p>
-              <p>{run.started_at ? new Date(run.started_at).toLocaleString() : '—'}</p>
+            <div className="border-r-2 border-[#1a1a1a] px-3 py-2">
+              <p className="text-[10px] text-[#6b6555] uppercase tracking-wider">Started</p>
+              <p className="text-[#1a1a1a]">{run.started_at ? new Date(run.started_at).toLocaleString() : '—'}</p>
             </div>
-            <div className="bg-card px-3 py-2">
-              <p className="text-[10px] text-phosphor-dim uppercase tracking-wider">Duration</p>
-              <p>{duration}</p>
+            <div className="border-r-2 border-[#1a1a1a] px-3 py-2">
+              <p className="text-[10px] text-[#6b6555] uppercase tracking-wider">Duration</p>
+              <p className="text-[#1a1a1a]">{duration}</p>
             </div>
-            <div className="bg-card px-3 py-2">
-              <p className="text-[10px] text-phosphor-dim uppercase tracking-wider">Completed</p>
-              <p>{run.completed_at ? new Date(run.completed_at).toLocaleString() : '—'}</p>
+            <div className="px-3 py-2">
+              <p className="text-[10px] text-[#6b6555] uppercase tracking-wider">Completed</p>
+              <p className="text-[#1a1a1a]">{run.completed_at ? new Date(run.completed_at).toLocaleString() : '—'}</p>
             </div>
           </div>
 
-          {/* Summary Stats */}
           {summary && typeof summary.total === 'number' && (
-            <div className="grid grid-cols-4 gap-px border border-border bg-border">
-              <div className="bg-card px-3 py-2 text-center">
-                <p className="text-lg font-bold">{Number(summary.total)}</p>
-                <p className="text-[10px] text-phosphor-dim uppercase tracking-wider">Total</p>
+            <div className="grid grid-cols-4 border-2 border-[#1a1a1a]">
+              <div className="border-r-2 border-[#1a1a1a] px-3 py-2 text-center">
+                <p className="text-lg font-bold text-[#1a1a1a]">{Number(summary.total)}</p>
+                <p className="text-[10px] text-[#6b6555] uppercase tracking-wider">Total</p>
               </div>
-              <div className="bg-card px-3 py-2 text-center">
-                <p className="text-lg font-bold text-[#33ff33]">{Number(summary.passed || 0)}</p>
-                <p className="text-[10px] text-phosphor-dim uppercase tracking-wider">Passed</p>
+              <div className="border-r-2 border-[#1a1a1a] px-3 py-2 text-center">
+                <p className="text-lg font-bold text-[#2a7a2a]">{Number(summary.passed || 0)}</p>
+                <p className="text-[10px] text-[#6b6555] uppercase tracking-wider">Passed</p>
               </div>
-              <div className="bg-card px-3 py-2 text-center">
-                <p className="text-lg font-bold text-destructive">{Number(summary.failed || 0)}</p>
-                <p className="text-[10px] text-phosphor-dim uppercase tracking-wider">Failed</p>
+              <div className="border-r-2 border-[#1a1a1a] px-3 py-2 text-center">
+                <p className="text-lg font-bold text-[#c43333]">{Number(summary.failed || 0)}</p>
+                <p className="text-[10px] text-[#6b6555] uppercase tracking-wider">Failed</p>
               </div>
-              <div className="bg-card px-3 py-2 text-center">
-                <p className="text-lg font-bold text-[#ff8800]">{Number(summary.errors || 0)}</p>
-                <p className="text-[10px] text-phosphor-dim uppercase tracking-wider">Errors</p>
+              <div className="px-3 py-2 text-center">
+                <p className="text-lg font-bold text-[#b07d10]">{Number(summary.errors || 0)}</p>
+                <p className="text-[10px] text-[#6b6555] uppercase tracking-wider">Errors</p>
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* AI Analysis */}
       {summary?.ai_analysis && (
         <div className="window-chrome">
           <div className="window-title-bar">
@@ -203,14 +200,13 @@ export default function RunDetailPage() {
             AI Analysis
           </div>
           <div className="window-body">
-            <pre className="text-xs whitespace-pre-wrap text-phosphor-dim">
+            <pre className="text-xs whitespace-pre-wrap text-[#6b6555]">
               {String(summary.ai_analysis)}
             </pre>
           </div>
         </div>
       )}
 
-      {/* Test Results Window */}
       <div className="window-chrome">
         <div className="window-title-bar">
           <span className="close-box" />
@@ -219,18 +215,18 @@ export default function RunDetailPage() {
         <div className="window-body">
           {results.length === 0 ? (
             <div className="py-6 text-center">
-              <p className="text-xs text-phosphor-dim uppercase">
+              <p className="text-xs text-[#6b6555] uppercase">
                 {run.status === 'pending' || run.status === 'planning' || run.status === 'running'
                   ? 'Tests are executing...'
                   : 'No test results available'}
               </p>
             </div>
           ) : (
-            <div className="border border-border divide-y divide-border">
+            <div className="border-2 border-[#1a1a1a] divide-y divide-[#b8b3a4]">
               {results.map((result) => (
                 <div key={result.id}>
                   <button
-                    className="flex items-center justify-between w-full px-3 py-2 text-left hover:bg-accent transition-colors"
+                    className="flex items-center justify-between w-full px-3 py-2 text-left hover:bg-[#e8e4d9] transition-colors"
                     onClick={() =>
                       setExpandedResult(
                         expandedResult === result.id ? null : result.id
@@ -239,34 +235,34 @@ export default function RunDetailPage() {
                   >
                     <div className="flex items-center gap-2">
                       <span className={
-                        result.status === 'passed' ? 'text-[#33ff33]' :
-                        result.status === 'failed' ? 'text-destructive' :
-                        'text-[#ff8800]'
+                        result.status === 'passed' ? 'text-[#2a7a2a]' :
+                        result.status === 'failed' ? 'text-[#c43333]' :
+                        'text-[#b07d10]'
                       }>
                         {result.status === 'passed' ? '■' : result.status === 'failed' ? '✗' : '▲'}
                       </span>
-                      <span className="text-xs uppercase tracking-wider">
+                      <span className="text-xs uppercase tracking-wider text-[#1a1a1a]">
                         {result.test_templates?.name || 'Unknown'}
                       </span>
                     </div>
                     <div className="flex items-center gap-3">
                       {result.duration_ms && (
-                        <span className="text-[10px] text-phosphor-dim">
+                        <span className="text-[10px] text-[#6b6555]">
                           {(result.duration_ms / 1000).toFixed(1)}s
                         </span>
                       )}
-                      <span className="text-[10px] uppercase tracking-wider border border-border px-2 py-0.5">
+                      <span className="text-[10px] uppercase tracking-wider border border-[#b8b3a4] px-2 py-0.5 text-[#6b6555]">
                         {result.status}
                       </span>
                     </div>
                   </button>
 
                   {expandedResult === result.id && (
-                    <div className="border-t border-border px-3 py-3 bg-[#0e0e0e] space-y-3">
+                    <div className="border-t border-[#b8b3a4] px-3 py-3 bg-[#e8e4d9] space-y-3">
                       {result.error_message && (
                         <div>
-                          <p className="text-[10px] text-destructive uppercase tracking-wider mb-1">Error</p>
-                          <pre className="text-xs text-destructive/80 whitespace-pre-wrap border border-destructive/30 p-2 bg-destructive/5">
+                          <p className="text-[10px] text-[#c43333] uppercase tracking-wider mb-1">Error</p>
+                          <pre className="text-xs text-[#c43333] whitespace-pre-wrap border border-[#c43333]/30 p-2 bg-[#c43333]/5">
                             {result.error_message}
                           </pre>
                         </div>
@@ -274,8 +270,8 @@ export default function RunDetailPage() {
 
                       {result.ai_analysis && (
                         <div>
-                          <p className="text-[10px] text-phosphor-dim uppercase tracking-wider mb-1">Analysis</p>
-                          <pre className="text-xs text-phosphor-dim whitespace-pre-wrap">
+                          <p className="text-[10px] text-[#6b6555] uppercase tracking-wider mb-1">Analysis</p>
+                          <pre className="text-xs text-[#6b6555] whitespace-pre-wrap">
                             {result.ai_analysis}
                           </pre>
                         </div>
@@ -283,8 +279,8 @@ export default function RunDetailPage() {
 
                       {result.console_logs && (
                         <div>
-                          <p className="text-[10px] text-phosphor-dim uppercase tracking-wider mb-1">Console</p>
-                          <pre className="text-xs text-phosphor-dim whitespace-pre-wrap border border-border p-2 max-h-48 overflow-auto">
+                          <p className="text-[10px] text-[#6b6555] uppercase tracking-wider mb-1">Console</p>
+                          <pre className="text-xs text-[#6b6555] whitespace-pre-wrap border border-[#b8b3a4] p-2 max-h-48 overflow-auto">
                             {JSON.stringify(result.console_logs, null, 2)}
                           </pre>
                         </div>
@@ -292,7 +288,7 @@ export default function RunDetailPage() {
 
                       {result.screenshots && result.screenshots.length > 0 && (
                         <div>
-                          <p className="text-[10px] text-phosphor-dim uppercase tracking-wider mb-1">Screenshots</p>
+                          <p className="text-[10px] text-[#6b6555] uppercase tracking-wider mb-1">Screenshots</p>
                           <div className="grid grid-cols-2 gap-2">
                             {result.screenshots.map((url, i) => (
                               <a
@@ -300,7 +296,7 @@ export default function RunDetailPage() {
                                 href={url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="border border-border overflow-hidden hover:border-foreground transition-colors"
+                                className="border-2 border-[#1a1a1a] overflow-hidden hover:opacity-80 transition"
                               >
                                 <img
                                   src={url}

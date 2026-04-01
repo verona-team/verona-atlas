@@ -62,13 +62,13 @@ export default function NewProjectPage() {
           New Project
         </div>
         <div className="window-body">
-          <p className="text-xs text-phosphor-dim mb-4 uppercase tracking-wider">
+          <p className="text-xs text-[#6b6555] mb-4 uppercase tracking-wider">
             Register an application for autonomous QA testing.
           </p>
 
           <form onSubmit={onSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs text-phosphor-dim uppercase tracking-wider mb-1">
+              <label className="block text-xs text-[#6b6555] uppercase tracking-wider mb-1">
                 Name *
               </label>
               <input
@@ -77,12 +77,12 @@ export default function NewProjectPage() {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="My product"
                 autoComplete="off"
-                className="w-full bg-background border border-border px-3 py-1.5 text-sm text-foreground placeholder:text-phosphor-dim/50 focus:outline-none focus:border-foreground"
+                className="w-full bg-[#fffef9] border-2 border-[#1a1a1a] px-3 py-1.5 text-sm text-[#1a1a1a] placeholder:text-[#b8b3a4] focus:outline-none focus:ring-2 focus:ring-[#1a1a1a]/20"
               />
             </div>
 
             <div>
-              <label className="block text-xs text-phosphor-dim uppercase tracking-wider mb-1">
+              <label className="block text-xs text-[#6b6555] uppercase tracking-wider mb-1">
                 App URL *
               </label>
               <input
@@ -92,12 +92,12 @@ export default function NewProjectPage() {
                 onChange={(e) => setAppUrl(e.target.value)}
                 placeholder="https://app.example.com"
                 autoComplete="off"
-                className="w-full bg-background border border-border px-3 py-1.5 text-sm text-foreground placeholder:text-phosphor-dim/50 focus:outline-none focus:border-foreground"
+                className="w-full bg-[#fffef9] border-2 border-[#1a1a1a] px-3 py-1.5 text-sm text-[#1a1a1a] placeholder:text-[#b8b3a4] focus:outline-none focus:ring-2 focus:ring-[#1a1a1a]/20"
               />
             </div>
 
             <div>
-              <label className="block text-xs text-phosphor-dim uppercase tracking-wider mb-1">
+              <label className="block text-xs text-[#6b6555] uppercase tracking-wider mb-1">
                 Auth Email (optional)
               </label>
               <input
@@ -106,12 +106,12 @@ export default function NewProjectPage() {
                 onChange={(e) => setAuthEmail(e.target.value)}
                 placeholder="tester@example.com"
                 autoComplete="off"
-                className="w-full bg-background border border-border px-3 py-1.5 text-sm text-foreground placeholder:text-phosphor-dim/50 focus:outline-none focus:border-foreground"
+                className="w-full bg-[#fffef9] border-2 border-[#1a1a1a] px-3 py-1.5 text-sm text-[#1a1a1a] placeholder:text-[#b8b3a4] focus:outline-none focus:ring-2 focus:ring-[#1a1a1a]/20"
               />
             </div>
 
             <div>
-              <label className="block text-xs text-phosphor-dim uppercase tracking-wider mb-1">
+              <label className="block text-xs text-[#6b6555] uppercase tracking-wider mb-1">
                 Auth Password (optional)
               </label>
               <input
@@ -119,22 +119,22 @@ export default function NewProjectPage() {
                 value={authPassword}
                 onChange={(e) => setAuthPassword(e.target.value)}
                 autoComplete="new-password"
-                className="w-full bg-background border border-border px-3 py-1.5 text-sm text-foreground placeholder:text-phosphor-dim/50 focus:outline-none focus:border-foreground"
+                className="w-full bg-[#fffef9] border-2 border-[#1a1a1a] px-3 py-1.5 text-sm text-[#1a1a1a] placeholder:text-[#b8b3a4] focus:outline-none focus:ring-2 focus:ring-[#1a1a1a]/20"
               />
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+            <div className="flex justify-end gap-2 pt-2 border-t-2 border-[#1a1a1a]">
               <button
                 type="button"
                 onClick={() => router.back()}
-                className="text-xs uppercase tracking-wider border border-border px-4 py-1.5 hover:bg-accent transition-colors"
+                className="text-xs uppercase tracking-wider border-2 border-[#1a1a1a] px-4 py-1.5 hover:bg-[#e8e4d9] transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={submitting}
-                className="text-xs uppercase tracking-wider border border-foreground bg-foreground text-background px-4 py-1.5 hover:bg-phosphor-bright disabled:opacity-50 transition-colors"
+                className="text-xs uppercase tracking-wider border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#fffef9] px-4 py-1.5 hover:bg-[#333] disabled:opacity-50 transition-colors"
               >
                 {submitting ? 'Creating...' : 'Create'}
               </button>
