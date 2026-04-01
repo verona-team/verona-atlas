@@ -1,7 +1,6 @@
 import Link from 'next/link'
 import { MetisLogo } from '@/components/landing/metis-logo'
 import { HalftoneBackground } from '@/components/landing/halftone-background'
-import { ExternalLink } from 'lucide-react'
 
 export default function LandingPage() {
   return (
@@ -12,35 +11,22 @@ export default function LandingPage() {
         <Link href="/" className="flex items-center gap-2">
           <MetisLogo size={20} className="text-[#1a1a1a]" />
           <span className="text-[15px] font-medium tracking-tight text-[#1a1a1a]">
-            Metis
+            Verona
           </span>
         </Link>
 
-        <nav className="flex items-center gap-6">
-          <Link
-            href="/about"
-            className="text-[13px] text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors"
-          >
-            About
-          </Link>
-          <Link
-            href="/product"
-            className="text-[13px] text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors"
-          >
-            Product
-          </Link>
+        <nav className="flex items-center gap-4">
           <Link
             href="/signup"
             className="text-[13px] text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors"
           >
-            Request Access
+            Sign Up
           </Link>
           <Link
-            href="/careers"
-            className="flex items-center gap-1 rounded-full border border-[#1a1a1a]/20 px-3 py-1 text-[13px] text-[#1a1a1a]/80 hover:border-[#1a1a1a]/40 hover:text-[#1a1a1a] transition-colors"
+            href="/login"
+            className="text-[13px] text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors"
           >
-            Careers
-            <ExternalLink className="h-3 w-3" />
+            Log In
           </Link>
         </nav>
       </header>
@@ -52,9 +38,7 @@ export default function LandingPage() {
             className="max-w-xl text-center text-[2.5rem] leading-[1.15] tracking-tight text-[#1a1a1a]"
             style={{ fontFamily: 'var(--font-serif)' }}
           >
-            Training agents to work
-            <br />
-            reliably for your customers.
+            Autonomous QA that works.
           </h1>
         </div>
       </main>
