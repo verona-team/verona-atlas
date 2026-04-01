@@ -29,7 +29,7 @@ export function TriggerRunButton({ projectId }: TriggerRunButtonProps) {
   }
 
   return (
-    <button onClick={handleTrigger} disabled={loading} className="text-sm underline disabled:opacity-30">
+    <button onClick={handleTrigger} disabled={loading} className="text-base underline disabled:opacity-30">
       {loading ? 'Running...' : 'Run Tests'}
     </button>
   )

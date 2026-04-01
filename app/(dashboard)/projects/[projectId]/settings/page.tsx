@@ -35,27 +35,27 @@ export default async function ProjectSettingsPage({ params }: PageProps) {
     .eq('project_id', projectId)
 
   return (
-    <div className="max-w-lg space-y-6">
+    <div className="max-w-lg space-y-8">
       <div>
-        <Link href={`/projects/${project.id}`} className="text-xs opacity-40 hover:opacity-70">
+        <Link href={`/projects/${project.id}`} className="text-sm opacity-40 hover:opacity-70">
           ← {project.name}
         </Link>
-        <h1 className="text-lg mt-1">Settings</h1>
+        <h1 className="text-2xl mt-2">Settings</h1>
       </div>
 
       <div>
-        <h2 className="text-sm opacity-40 mb-2">Integrations</h2>
+        <h2 className="text-base opacity-40 mb-3">Integrations</h2>
         {integrations && integrations.length > 0 ? (
-          <div className="divide-y text-sm">
+          <div className="divide-y text-base">
             {integrations.map((row) => (
-              <div key={row.type} className="flex justify-between py-2">
+              <div key={row.type} className="flex justify-between py-3">
                 <span>{row.type}</span>
                 <span className="opacity-40">{row.status}</span>
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-sm opacity-30">No integrations connected.</p>
+          <p className="text-base opacity-30">No integrations connected.</p>
         )}
       </div>
     </div>

@@ -23,10 +23,10 @@ export default async function SettingsPage() {
     .eq('org_id', org.id)
 
   return (
-    <div className="max-w-lg space-y-8">
-      <h1 className="text-lg">Settings</h1>
+    <div className="max-w-lg space-y-10">
+      <h1 className="text-2xl">Settings</h1>
 
-      <div className="space-y-2 text-sm">
+      <div className="space-y-3 text-base">
         <div className="flex justify-between py-1">
           <span className="opacity-40">Organization</span>
           <span>{org.name}</span>
@@ -42,12 +42,12 @@ export default async function SettingsPage() {
       </div>
 
       <div>
-        <h2 className="text-sm opacity-40 mb-2">Members</h2>
-        <div className="divide-y text-sm">
+        <h2 className="text-base opacity-40 mb-3">Members</h2>
+        <div className="divide-y text-base">
           {members?.map((member) => (
-            <div key={member.user_id} className="flex items-center justify-between py-2">
-              <span className="text-xs truncate max-w-xs">{member.user_id}</span>
-              <span className="text-xs opacity-40">{member.role}</span>
+            <div key={member.user_id} className="flex items-center justify-between py-3">
+              <span className="text-sm truncate max-w-xs">{member.user_id}</span>
+              <span className="text-sm opacity-40">{member.role}</span>
             </div>
           ))}
         </div>

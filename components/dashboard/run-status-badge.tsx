@@ -14,5 +14,5 @@ interface RunStatusBadgeProps {
 
 export function RunStatusBadge({ status }: RunStatusBadgeProps) {
   const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.pending
-  return <span className={`text-xs ${config.color}`}>{config.label}</span>
+  return <span className={`text-sm ${config.color}`}>{config.label}</span>
 }

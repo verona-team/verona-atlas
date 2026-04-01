@@ -14,9 +14,9 @@ export function MenuBar({ userEmail, orgName }: MenuBarProps) {
   const isProjects = pathname === '/projects' || pathname.startsWith('/projects/')
 
   return (
-    <header className="flex items-center justify-between border-b px-6 py-2 text-sm">
+    <header className="flex items-center justify-between border-b px-6 py-3 text-base">
       <div className="flex items-center gap-6">
-        <Link href="/projects" className="font-bold tracking-wide">
+        <Link href="/projects" className="text-lg font-bold tracking-wide">
           Verona
         </Link>
         <Link
@@ -26,7 +26,7 @@ export function MenuBar({ userEmail, orgName }: MenuBarProps) {
           Projects
         </Link>
       </div>
-      <div className="flex items-center gap-4 text-xs opacity-50">
+      <div className="flex items-center gap-4 text-sm opacity-50">
         <span>{orgName} / {userEmail.split('@')[0]}</span>
         <button onClick={() => signOut()} className="hover:opacity-100 underline">
           Logout

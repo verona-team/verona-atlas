@@ -69,8 +69,8 @@ export default function RunDetailPage() {
     return () => { supabase.removeChannel(channel) }
   }, [runId, fetchRunData])
 
-  if (loading) return <p className="text-sm opacity-30 py-8">Loading...</p>
-  if (!run) return <p className="text-sm opacity-30 py-8">Run not found</p>
+  if (loading) return <p className="text-base opacity-30 py-8">Loading...</p>
+  if (!run) return <p className="text-base opacity-30 py-8">Run not found</p>
 
   const summary = run.summary as { total?: number; passed?: number; failed?: number; errors?: number; ai_analysis?: string; [key: string]: unknown } | null
   const duration = run.started_at && run.completed_at
@@ -78,25 +78,25 @@ export default function RunDetailPage() {
     : run.started_at ? 'Running...' : '—'
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-2xl space-y-8">
       <div>
-        <Link href={`/projects/${projectId}/runs`} className="text-xs opacity-40 hover:opacity-70">
+        <Link href={`/projects/${projectId}/runs`} className="text-sm opacity-40 hover:opacity-70">
           ← Runs
         </Link>
-        <div className="flex items-center gap-3 mt-1">
-          <h1 className="text-lg">{projectName}</h1>
+        <div className="flex items-center gap-3 mt-2">
+          <h1 className="text-2xl">{projectName}</h1>
           <RunStatusBadge status={run.status} />
         </div>
       </div>
 
-      <div className="flex gap-8 text-sm">
+      <div className="flex gap-10 text-base">
         <div><span className="opacity-40">Trigger</span> {run.trigger}</div>
         <div><span className="opacity-40">Duration</span> {duration}</div>
         <div><span className="opacity-40">ID</span> {run.id.slice(0, 8)}</div>
       </div>
 
       {summary && typeof summary.total === 'number' && (
-        <div className="flex gap-8 text-sm">
+        <div className="flex gap-10 text-base">
           <div>{summary.total} total</div>
           <div className="text-green-700">{summary.passed || 0} passed</div>
           <div className="text-red-700">{summary.failed || 0} failed</div>
@@ -106,38 +106,38 @@ export default function RunDetailPage() {
 
       {summary?.ai_analysis && (
         <div>
-          <h2 className="text-sm opacity-40 mb-1">AI Analysis</h2>
-          <pre className="text-xs whitespace-pre-wrap opacity-60">{String(summary.ai_analysis)}</pre>
+          <h2 className="text-base opacity-40 mb-2">AI Analysis</h2>
+          <pre className="text-sm whitespace-pre-wrap opacity-60">{String(summary.ai_analysis)}</pre>
         </div>
       )}
 
       <div>
-        <h2 className="text-sm opacity-40 mb-2">Results ({results.length})</h2>
+        <h2 className="text-base opacity-40 mb-3">Results ({results.length})</h2>
         {results.length === 0 ? (
-          <p className="text-sm opacity-30">
+          <p className="text-base opacity-30">
             {['pending', 'planning', 'running'].includes(run.status) ? 'Running...' : 'No results'}
           </p>
         ) : (
-          <div className="divide-y text-sm">
+          <div className="divide-y text-base">
             {results.map((result) => (
               <div key={result.id}>
                 <button
-                  className="flex items-center justify-between w-full py-2 text-left"
+                  className="flex items-center justify-between w-full py-3 text-left"
                   onClick={() => setExpandedResult(expandedResult === result.id ? null : result.id)}
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-3">
                     <span className={result.status === 'passed' ? 'text-green-700' : result.status === 'failed' ? 'text-red-700' : 'text-amber-700'}>
                       {result.status === 'passed' ? '✓' : result.status === 'failed' ? '✗' : '!'}
                     </span>
                     <span>{result.test_templates?.name || 'Unknown'}</span>
                   </div>
-                  <span className="text-xs opacity-30">
+                  <span className="text-sm opacity-30">
                     {result.duration_ms ? `${(result.duration_ms / 1000).toFixed(1)}s` : ''}
                   </span>
                 </button>
 
                 {expandedResult === result.id && (
-                  <div className="pb-3 pl-5 space-y-2 text-xs">
+                  <div className="pb-4 pl-6 space-y-3 text-sm">
                     {result.error_message && (
                       <pre className="whitespace-pre-wrap text-red-700">{result.error_message}</pre>
                     )}
@@ -145,7 +145,7 @@ export default function RunDetailPage() {
                       <pre className="whitespace-pre-wrap opacity-50">{result.ai_analysis}</pre>
                     )}
                     {result.console_logs && (
-                      <pre className="whitespace-pre-wrap opacity-40 max-h-40 overflow-auto">
+                      <pre className="whitespace-pre-wrap opacity-40 max-h-48 overflow-auto">
                         {JSON.stringify(result.console_logs, null, 2)}
                       </pre>
                     )}
