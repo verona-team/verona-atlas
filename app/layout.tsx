@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { Geist, Geist_Mono } from 'next/font/google'
+import { Geist, Geist_Mono, DM_Serif_Display } from 'next/font/google'
 import { Toaster } from '@/components/ui/sonner'
 import './globals.css'
 
@@ -13,9 +13,15 @@ const geistMono = Geist_Mono({
   subsets: ['latin'],
 })
 
+const dmSerif = DM_Serif_Display({
+  variable: '--font-serif',
+  subsets: ['latin'],
+  weight: '400',
+})
+
 export const metadata: Metadata = {
-  title: 'Atlas — Autonomous QA Testing',
-  description: 'AI-powered browser testing that runs 24/7. Connect your app, and Atlas will find the bugs before your users do.',
+  title: 'Metis — Training agents to work reliably',
+  description: 'Training agents to work reliably for your customers.',
 }
 
 export default function RootLayout({
@@ -26,7 +32,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${dmSerif.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
         {children}
