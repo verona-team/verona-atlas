@@ -22,7 +22,13 @@ export async function GET(request: NextRequest) {
     )
   }
 
-  const projectId = state
+  let projectId = state
+  let returnTo: string | null = null
+  if (state.includes('::')) {
+    const parts = state.split('::')
+    projectId = parts[0]
+    returnTo = parts.slice(1).join('::')
+  }
 
   const supabase = await createClient()
   const {
@@ -97,7 +103,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  const redirect = new URL(`/projects/${projectId}/settings`, request.nextUrl.origin)
+  const redirectPath = returnTo || `/projects/${projectId}/settings`
+  const redirect = new URL(redirectPath, request.nextUrl.origin)
   redirect.searchParams.set('slack', 'connected')
   return NextResponse.redirect(redirect)
 }

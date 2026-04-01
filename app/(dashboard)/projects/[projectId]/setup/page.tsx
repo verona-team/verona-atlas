@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
-import { useRouter, useParams } from 'next/navigation'
+import { useEffect, useState, useCallback, useRef } from 'react'
+import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 
 type IntegrationStatus = {
@@ -14,7 +14,9 @@ type IntegrationStatus = {
 export default function ProjectSetupPage() {
   const router = useRouter()
   const params = useParams<{ projectId: string }>()
+  const searchParams = useSearchParams()
   const projectId = params.projectId
+  const toastShown = useRef(false)
 
   const [integrations, setIntegrations] = useState<IntegrationStatus[]>([])
   const [loading, setLoading] = useState(true)
@@ -35,6 +37,34 @@ export default function ProjectSetupPage() {
 
   useEffect(() => {
     loadIntegrations()
+  }, [loadIntegrations])
+
+  useEffect(() => {
+    if (toastShown.current) return
+    const ghConnected = searchParams.get('github')
+    const slackConnected = searchParams.get('slack')
+    if (ghConnected === 'connected') {
+      toast.success('GitHub connected')
+      toastShown.current = true
+    }
+    if (slackConnected === 'connected') {
+      toast.success('Slack connected')
+      toastShown.current = true
+    }
+  }, [searchParams])
+
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible') {
+        loadIntegrations()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('focus', loadIntegrations)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('focus', loadIntegrations)
+    }
   }, [loadIntegrations])
 
   const getStatus = (type: string) =>
@@ -123,7 +153,7 @@ function GitHubCard({
     >
       {!integration ? (
         <a
-          href={`/api/integrations/github/install?project_id=${projectId}`}
+          href={`/api/integrations/github/install?project_id=${projectId}&return_to=${encodeURIComponent(`/projects/${projectId}/setup`)}`}
           className="inline-block text-lg underline"
         >
           Connect GitHub →
@@ -553,7 +583,7 @@ function SlackCard({
     >
       {!integration ? (
         <a
-          href={`/api/integrations/slack/authorize?project_id=${projectId}`}
+          href={`/api/integrations/slack/authorize?project_id=${projectId}&return_to=${encodeURIComponent(`/projects/${projectId}/setup`)}`}
           className="inline-block text-lg underline"
         >
           Connect Slack →

@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useEffect, useState, useCallback, useRef } from 'react'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
 
@@ -21,8 +21,10 @@ type ProjectData = {
 
 export default function ProjectSettingsPage() {
   const params = useParams<{ projectId: string }>()
+  const searchParams = useSearchParams()
   const projectId = params.projectId
   const router = useRouter()
+  const toastShown = useRef(false)
 
   const [project, setProject] = useState<ProjectData | null>(null)
   const [integrations, setIntegrations] = useState<IntegrationData[]>([])
@@ -52,6 +54,34 @@ export default function ProjectSettingsPage() {
 
   useEffect(() => {
     loadData()
+  }, [loadData])
+
+  useEffect(() => {
+    if (toastShown.current) return
+    const ghConnected = searchParams.get('github')
+    const slackConnected = searchParams.get('slack')
+    if (ghConnected === 'connected') {
+      toast.success('GitHub connected')
+      toastShown.current = true
+    }
+    if (slackConnected === 'connected') {
+      toast.success('Slack connected')
+      toastShown.current = true
+    }
+  }, [searchParams])
+
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible') {
+        loadData()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('focus', loadData)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('focus', loadData)
+    }
   }, [loadData])
 
   const getIntegration = (type: string) =>
@@ -106,7 +136,7 @@ export default function ProjectSettingsPage() {
             title="GitHub"
             integration={getIntegration('github')}
             onDisconnect={disconnect}
-            connectUrl={`/api/integrations/github/install?project_id=${projectId}`}
+            connectUrl={`/api/integrations/github/install?project_id=${projectId}&return_to=${encodeURIComponent(`/projects/${projectId}/settings`)}`}
           >
             <GitHubDetails integration={getIntegration('github')} projectId={projectId} onRefresh={loadData} />
           </SettingsIntegrationCard>
@@ -164,7 +194,7 @@ export default function ProjectSettingsPage() {
             title="Slack"
             integration={getIntegration('slack')}
             onDisconnect={disconnect}
-            connectUrl={`/api/integrations/slack/authorize?project_id=${projectId}`}
+            connectUrl={`/api/integrations/slack/authorize?project_id=${projectId}&return_to=${encodeURIComponent(`/projects/${projectId}/settings`)}`}
           >
             <SlackDetails integration={getIntegration('slack')} projectId={projectId} onRefresh={loadData} />
           </SettingsIntegrationCard>

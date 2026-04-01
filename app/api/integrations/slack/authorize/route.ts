@@ -33,8 +33,11 @@ export async function GET(request: NextRequest) {
 
   if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
 
+  const returnTo = request.nextUrl.searchParams.get('return_to')
+  const state = returnTo ? `${projectId}::${returnTo}` : projectId
+
   try {
-    const url = buildOAuthURL(projectId)
+    const url = buildOAuthURL(state)
     return NextResponse.redirect(url)
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to build Slack OAuth URL'

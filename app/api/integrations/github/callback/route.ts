@@ -20,7 +20,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Missing state (project id)' }, { status: 400 })
   }
 
-  const projectId = state
+  let projectId = state
+  let returnTo: string | null = null
+  if (state.includes('::')) {
+    const parts = state.split('::')
+    projectId = parts[0]
+    returnTo = parts.slice(1).join('::')
+  }
 
   const { data: membership } = await supabase
     .from('org_members')
@@ -93,7 +99,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  const redirect = new URL(`/projects/${projectId}/settings`, request.nextUrl.origin)
+  const redirectPath = returnTo || `/projects/${projectId}/settings`
+  const redirect = new URL(redirectPath, request.nextUrl.origin)
   redirect.searchParams.set('github', 'connected')
   return NextResponse.redirect(redirect)
 }
