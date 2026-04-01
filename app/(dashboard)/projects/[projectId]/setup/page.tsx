@@ -72,13 +72,13 @@ export default function ProjectSetupPage() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      <h1 className="text-4xl mb-4">Connect Integrations</h1>
-      <p className="text-lg opacity-50 mb-12">
+      <h1 className="text-5xl mb-4">Connect Integrations</h1>
+      <p className="text-xl opacity-50 mb-12">
         Connect your tools so the QA agent has full context when testing your app. You can always configure these later from project settings.
       </p>
 
       {loading ? (
-        <p className="text-xl opacity-40">Loading...</p>
+        <p className="text-2xl opacity-40">Loading...</p>
       ) : (
         <div className="space-y-6">
           <GitHubCard projectId={projectId} integration={getStatus('github')} onRefresh={loadIntegrations} />
@@ -93,7 +93,7 @@ export default function ProjectSetupPage() {
       <div className="flex gap-8 pt-12 pb-8">
         <button
           onClick={() => router.push(`/projects/${projectId}`)}
-          className="text-xl underline"
+          className="text-2xl underline"
         >
           {integrations.some((i) => i.status === 'active') ? 'Done →' : 'Skip for now →'}
         </button>
@@ -119,11 +119,11 @@ function IntegrationCard({
     <div className="border rounded-lg p-6">
       <div className="flex items-start justify-between mb-4">
         <div>
-          <h3 className="text-xl font-medium">{title}</h3>
-          <p className="text-base opacity-50 mt-1">{description}</p>
-          {meta && <p className="text-sm opacity-40 mt-1">{meta}</p>}
+          <h3 className="text-2xl font-medium">{title}</h3>
+          <p className="text-lg opacity-50 mt-1">{description}</p>
+          {meta && <p className="text-base opacity-50 mt-1">{meta}</p>}
         </div>
-        <span className={`text-sm px-3 py-1 rounded-full ${connected ? 'bg-green-500/10 text-green-600' : 'opacity-40'}`}>
+        <span className={`text-base px-3 py-1 rounded-full ${connected ? 'bg-green-500/10 text-green-600' : 'opacity-40'}`}>
           {connected ? 'Connected' : 'Not connected'}
         </span>
       </div>
@@ -188,14 +188,14 @@ function GitHubCard({
     >
       {!integration ? (
         waiting ? (
-          <p className="text-base opacity-50">Waiting for GitHub authorization... Complete the installation in the opened tab.</p>
+          <p className="text-lg opacity-50">Waiting for GitHub authorization... Complete the installation in the opened tab.</p>
         ) : (
-          <button onClick={openGitHubInstall} className="text-lg underline">
+          <button onClick={openGitHubInstall} className="text-xl underline">
             Connect GitHub →
           </button>
         )
       ) : (
-        <p className="text-sm opacity-40">Manage repos in project settings.</p>
+        <p className="text-base opacity-50">Manage repos in project settings.</p>
       )}
     </IntegrationCard>
   )
@@ -254,7 +254,7 @@ function PostHogCard({
       meta={integration ? `Project: ${integration.meta?.posthog_project_id}` : undefined}
     >
       {!integration && !expanded && (
-        <button onClick={() => setExpanded(true)} className="text-lg underline">
+        <button onClick={() => setExpanded(true)} className="text-xl underline">
           Connect PostHog →
         </button>
       )}
@@ -264,25 +264,25 @@ function PostHogCard({
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             placeholder="Personal API key"
-            className="w-full border-b bg-transparent py-2 text-base outline-none placeholder:opacity-30"
+            className="w-full border-b bg-transparent py-2 text-lg outline-none placeholder:opacity-60"
           />
           <input
             value={phProjectId}
             onChange={(e) => setPhProjectId(e.target.value)}
             placeholder="PostHog Project ID"
-            className="w-full border-b bg-transparent py-2 text-base outline-none placeholder:opacity-30"
+            className="w-full border-b bg-transparent py-2 text-lg outline-none placeholder:opacity-60"
           />
           <input
             value={apiHost}
             onChange={(e) => setApiHost(e.target.value)}
             placeholder="API host (optional, e.g. https://eu.posthog.com)"
-            className="w-full border-b bg-transparent py-2 text-base outline-none placeholder:opacity-30"
+            className="w-full border-b bg-transparent py-2 text-lg outline-none placeholder:opacity-60"
           />
           <div className="flex gap-4">
-            <button onClick={connect} disabled={submitting || !apiKey || !phProjectId} className="text-base underline disabled:opacity-30">
+            <button onClick={connect} disabled={submitting || !apiKey || !phProjectId} className="text-lg underline disabled:opacity-30">
               {submitting ? 'Connecting...' : 'Save'}
             </button>
-            <button onClick={() => setExpanded(false)} className="text-base opacity-50 underline">
+            <button onClick={() => setExpanded(false)} className="text-lg opacity-50 underline">
               Cancel
             </button>
           </div>
@@ -343,7 +343,7 @@ function SentryCard({
       meta={integration ? `${integration.meta?.organization_slug}/${integration.meta?.project_slug}` : undefined}
     >
       {!integration && !expanded && (
-        <button onClick={() => setExpanded(true)} className="text-lg underline">
+        <button onClick={() => setExpanded(true)} className="text-xl underline">
           Connect Sentry →
         </button>
       )}
@@ -354,25 +354,25 @@ function SentryCard({
             onChange={(e) => setAuthToken(e.target.value)}
             placeholder="Auth token"
             type="password"
-            className="w-full border-b bg-transparent py-2 text-base outline-none placeholder:opacity-30"
+            className="w-full border-b bg-transparent py-2 text-lg outline-none placeholder:opacity-60"
           />
           <input
             value={orgSlug}
             onChange={(e) => setOrgSlug(e.target.value)}
             placeholder="Organization slug"
-            className="w-full border-b bg-transparent py-2 text-base outline-none placeholder:opacity-30"
+            className="w-full border-b bg-transparent py-2 text-lg outline-none placeholder:opacity-60"
           />
           <input
             value={projSlug}
             onChange={(e) => setProjSlug(e.target.value)}
             placeholder="Project slug"
-            className="w-full border-b bg-transparent py-2 text-base outline-none placeholder:opacity-30"
+            className="w-full border-b bg-transparent py-2 text-lg outline-none placeholder:opacity-60"
           />
           <div className="flex gap-4">
-            <button onClick={connect} disabled={submitting || !authToken || !orgSlug || !projSlug} className="text-base underline disabled:opacity-30">
+            <button onClick={connect} disabled={submitting || !authToken || !orgSlug || !projSlug} className="text-lg underline disabled:opacity-30">
               {submitting ? 'Connecting...' : 'Save'}
             </button>
-            <button onClick={() => setExpanded(false)} className="text-base opacity-50 underline">
+            <button onClick={() => setExpanded(false)} className="text-lg opacity-50 underline">
               Cancel
             </button>
           </div>
@@ -430,7 +430,7 @@ function LangSmithCard({
       meta={integration?.meta?.project_name ? `Project: ${integration.meta.project_name}` : undefined}
     >
       {!integration && !expanded && (
-        <button onClick={() => setExpanded(true)} className="text-lg underline">
+        <button onClick={() => setExpanded(true)} className="text-xl underline">
           Connect LangSmith →
         </button>
       )}
@@ -441,19 +441,19 @@ function LangSmithCard({
             onChange={(e) => setApiKey(e.target.value)}
             placeholder="LangSmith API key"
             type="password"
-            className="w-full border-b bg-transparent py-2 text-base outline-none placeholder:opacity-30"
+            className="w-full border-b bg-transparent py-2 text-lg outline-none placeholder:opacity-60"
           />
           <input
             value={projectName}
             onChange={(e) => setProjectName(e.target.value)}
             placeholder="Project name (optional)"
-            className="w-full border-b bg-transparent py-2 text-base outline-none placeholder:opacity-30"
+            className="w-full border-b bg-transparent py-2 text-lg outline-none placeholder:opacity-60"
           />
           <div className="flex gap-4">
-            <button onClick={connect} disabled={submitting || !apiKey} className="text-base underline disabled:opacity-30">
+            <button onClick={connect} disabled={submitting || !apiKey} className="text-lg underline disabled:opacity-30">
               {submitting ? 'Connecting...' : 'Save'}
             </button>
-            <button onClick={() => setExpanded(false)} className="text-base opacity-50 underline">
+            <button onClick={() => setExpanded(false)} className="text-lg opacity-50 underline">
               Cancel
             </button>
           </div>
@@ -511,7 +511,7 @@ function BraintrustCard({
       meta={integration?.meta?.project_name ? `Project: ${integration.meta.project_name}` : undefined}
     >
       {!integration && !expanded && (
-        <button onClick={() => setExpanded(true)} className="text-lg underline">
+        <button onClick={() => setExpanded(true)} className="text-xl underline">
           Connect Braintrust →
         </button>
       )}
@@ -522,19 +522,19 @@ function BraintrustCard({
             onChange={(e) => setApiKey(e.target.value)}
             placeholder="Braintrust API key"
             type="password"
-            className="w-full border-b bg-transparent py-2 text-base outline-none placeholder:opacity-30"
+            className="w-full border-b bg-transparent py-2 text-lg outline-none placeholder:opacity-60"
           />
           <input
             value={btProjectName}
             onChange={(e) => setBtProjectName(e.target.value)}
             placeholder="Project name (optional)"
-            className="w-full border-b bg-transparent py-2 text-base outline-none placeholder:opacity-30"
+            className="w-full border-b bg-transparent py-2 text-lg outline-none placeholder:opacity-60"
           />
           <div className="flex gap-4">
-            <button onClick={connect} disabled={submitting || !apiKey} className="text-base underline disabled:opacity-30">
+            <button onClick={connect} disabled={submitting || !apiKey} className="text-lg underline disabled:opacity-30">
               {submitting ? 'Connecting...' : 'Save'}
             </button>
-            <button onClick={() => setExpanded(false)} className="text-base opacity-50 underline">
+            <button onClick={() => setExpanded(false)} className="text-lg opacity-50 underline">
               Cancel
             </button>
           </div>
@@ -644,16 +644,16 @@ function SlackCard({
     >
       {!integration ? (
         waiting ? (
-          <p className="text-base opacity-50">Waiting for Slack authorization... Complete the setup in the opened tab.</p>
+          <p className="text-lg opacity-50">Waiting for Slack authorization... Complete the setup in the opened tab.</p>
         ) : (
-          <button onClick={openSlackAuth} className="text-lg underline">
+          <button onClick={openSlackAuth} className="text-xl underline">
             Connect Slack →
           </button>
         )
       ) : !channelName ? (
         <div>
           {!showChannels ? (
-            <button onClick={loadChannels} disabled={loadingChannels} className="text-base underline disabled:opacity-30">
+            <button onClick={loadChannels} disabled={loadingChannels} className="text-lg underline disabled:opacity-30">
               {loadingChannels ? 'Loading...' : 'Select a channel →'}
             </button>
           ) : (
@@ -663,7 +663,7 @@ function SlackCard({
                   key={ch.id}
                   onClick={() => selectChannel(ch.id, ch.name)}
                   disabled={saving}
-                  className={`block w-full text-left px-3 py-2 rounded hover:bg-white/5 text-base ${
+                  className={`block w-full text-left px-3 py-2 rounded hover:bg-white/5 text-lg ${
                     ch.id === currentChannelId ? 'opacity-100 font-medium' : 'opacity-60'
                   }`}
                 >
@@ -671,13 +671,13 @@ function SlackCard({
                 </button>
               ))}
               {channels.length === 0 && (
-                <p className="text-sm opacity-40 px-3 py-2">No channels found.</p>
+                <p className="text-base opacity-50 px-3 py-2">No channels found.</p>
               )}
             </div>
           )}
         </div>
       ) : (
-        <button onClick={loadChannels} disabled={loadingChannels} className="text-sm opacity-40 underline">
+        <button onClick={loadChannels} disabled={loadingChannels} className="text-base opacity-50 underline">
           Change channel
         </button>
       )}
