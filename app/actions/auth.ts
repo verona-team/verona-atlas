@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createServiceRoleClient } from '@/lib/supabase/service-role'
 
 export async function signUp(formData: FormData) {
   const supabase = await createClient()
@@ -14,7 +15,6 @@ export async function signUp(formData: FormData) {
     return { error: 'All fields are required' }
   }
 
-  // Sign up the user
   const { data: authData, error: authError } = await supabase.auth.signUp({
     email,
     password,
@@ -28,13 +28,19 @@ export async function signUp(formData: FormData) {
     return { error: 'Failed to create user' }
   }
 
-  // Create the organization
+  // Use the service role client to create the org and membership.
+  // After signUp, the user may not have an active session yet (e.g. email
+  // confirmation enabled), so the anon-key client would fail RLS checks.
+  // The service role bypasses RLS and is safe here because we already
+  // verified the user was created above.
+  const adminClient = createServiceRoleClient()
+
   const slug = orgName
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
 
-  const { data: org, error: orgError } = await supabase
+  const { data: org, error: orgError } = await adminClient
     .from('organizations')
     .insert({
       name: orgName,
@@ -48,8 +54,7 @@ export async function signUp(formData: FormData) {
     return { error: `Failed to create organization: ${orgError.message}` }
   }
 
-  // Add the user as an owner
-  const { error: memberError } = await supabase
+  const { error: memberError } = await adminClient
     .from('org_members')
     .insert({
       org_id: org.id,

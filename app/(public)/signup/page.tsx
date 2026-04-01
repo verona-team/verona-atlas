@@ -39,8 +39,7 @@ export default function SignupPage() {
         <div className="w-full max-w-md rounded-2xl bg-white/90 px-10 py-12 shadow-sm backdrop-blur-sm ring-1 ring-[#1a1a1a]/[0.04]">
           <div className="mb-10 text-center">
             <h1
-              className="text-3xl tracking-tight text-[#1a1a1a] sm:text-4xl"
-              style={{ fontFamily: 'var(--font-serif)' }}
+              className="text-3xl font-semibold tracking-tight text-[#1a1a1a] sm:text-4xl"
             >
               Create your account
             </h1>
