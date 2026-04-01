@@ -4,7 +4,7 @@ import { HalftoneBackground } from '@/components/landing/halftone-background'
 
 export default function LandingPage() {
   return (
-    <div className="relative min-h-screen overflow-hidden" style={{ backgroundColor: '#EDE5D1' }}>
+    <div className="relative min-h-screen overflow-hidden bg-white">
       <HalftoneBackground />
 
       <header className="relative z-10 flex items-center justify-between px-6 py-5 sm:px-10">
