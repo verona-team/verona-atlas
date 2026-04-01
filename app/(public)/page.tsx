@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { MetisLogo } from '@/components/landing/metis-logo'
+import { InteractiveLogo } from '@/components/landing/interactive-logo'
 
 export default function LandingPage() {
   return (
@@ -24,7 +24,7 @@ export default function LandingPage() {
 
       <main className="relative z-10 flex flex-1 flex-col items-center justify-center px-6" style={{ minHeight: 'calc(100vh - 68px)' }}>
         <div className="flex flex-col items-center gap-8 -mt-16">
-          <MetisLogo size={36} className="text-[#1a1a1a]" />
+          <InteractiveLogo size={120} color="#1a1a1a" />
           <h1
             className="max-w-2xl text-center text-5xl font-semibold leading-[1.1] tracking-tight text-[#1a1a1a] sm:text-6xl"
           >
