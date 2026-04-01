@@ -14,6 +14,73 @@ export type Database = {
   }
   public: {
     Tables: {
+      chat_messages: {
+        Row: {
+          id: string
+          session_id: string
+          role: "system" | "user" | "assistant"
+          content: string
+          metadata: Json
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          session_id: string
+          role: "system" | "user" | "assistant"
+          content: string
+          metadata?: Json
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          session_id?: string
+          role?: "system" | "user" | "assistant"
+          content?: string
+          metadata?: Json
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_messages_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "chat_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chat_sessions: {
+        Row: {
+          id: string
+          project_id: string
+          context_summary: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          project_id: string
+          context_summary?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          project_id?: string
+          context_summary?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_sessions_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: true
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       integrations: {
         Row: {
           config: Json
@@ -125,6 +192,10 @@ export type Database = {
           id: string
           name: string
           org_id: string
+          timezone: string
+          schedule_enabled: boolean
+          schedule_time: string
+          schedule_days: string[]
           updated_at: string
         }
         Insert: {
@@ -137,6 +208,10 @@ export type Database = {
           id?: string
           name: string
           org_id: string
+          timezone?: string
+          schedule_enabled?: boolean
+          schedule_time?: string
+          schedule_days?: string[]
           updated_at?: string
         }
         Update: {
@@ -149,6 +224,10 @@ export type Database = {
           id?: string
           name?: string
           org_id?: string
+          timezone?: string
+          schedule_enabled?: boolean
+          schedule_time?: string
+          schedule_days?: string[]
           updated_at?: string
         }
         Relationships: [
@@ -170,6 +249,7 @@ export type Database = {
           error_message: string | null
           id: string
           network_errors: Json | null
+          recording_url: string | null
           screenshots: string[]
           status: Database["public"]["Enums"]["result_status"]
           test_run_id: string
@@ -183,6 +263,7 @@ export type Database = {
           error_message?: string | null
           id?: string
           network_errors?: Json | null
+          recording_url?: string | null
           screenshots?: string[]
           status: Database["public"]["Enums"]["result_status"]
           test_run_id: string
@@ -196,6 +277,7 @@ export type Database = {
           error_message?: string | null
           id?: string
           network_errors?: Json | null
+          recording_url?: string | null
           screenshots?: string[]
           status?: Database["public"]["Enums"]["result_status"]
           test_run_id?: string
@@ -323,8 +405,8 @@ export type Database = {
       org_role: "owner" | "member"
       result_status: "passed" | "failed" | "error" | "skipped"
       run_status: "pending" | "planning" | "running" | "completed" | "failed"
-      run_trigger: "manual"
-      template_source: "manual" | "ai_generated"
+      run_trigger: "manual" | "scheduled" | "chat"
+      template_source: "manual" | "ai_generated" | "chat_generated"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -457,8 +539,8 @@ export const Constants = {
       org_role: ["owner", "member"],
       result_status: ["passed", "failed", "error", "skipped"],
       run_status: ["pending", "planning", "running", "completed", "failed"],
-      run_trigger: ["manual"],
-      template_source: ["manual", "ai_generated"],
+      run_trigger: ["manual", "scheduled", "chat"],
+      template_source: ["manual", "ai_generated", "chat_generated"],
     },
   },
 } as const
@@ -471,3 +553,5 @@ export type Integration = Database['public']['Tables']['integrations']['Row']
 export type TestTemplate = Database['public']['Tables']['test_templates']['Row']
 export type TestRun = Database['public']['Tables']['test_runs']['Row']
 export type TestResult = Database['public']['Tables']['test_results']['Row']
+export type ChatSession = Database['public']['Tables']['chat_sessions']['Row']
+export type ChatMessage = Database['public']['Tables']['chat_messages']['Row']
