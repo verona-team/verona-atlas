@@ -15,6 +15,25 @@ interface ProjectedPoint {
   scale: number
 }
 
+const DOT_COLORS = [
+  '#E53E3E', // red
+  '#3B82F6', // blue
+  '#1a1a1a', // black
+  '#8B5CF6', // purple
+  '#10B981', // green
+  '#F59E0B', // amber
+  '#EC4899', // pink
+  '#6366F1', // indigo
+  '#14B8A6', // teal
+  '#F97316', // orange
+  '#64748B', // slate/gray
+  '#EF4444', // red variant
+  '#2563EB', // blue variant
+  '#A855F7', // purple variant
+  '#059669', // emerald
+  '#D946EF', // fuchsia
+]
+
 function rotateX(p: Point3D, angle: number): Point3D {
   const cos = Math.cos(angle)
   const sin = Math.sin(angle)
@@ -28,7 +47,8 @@ function rotateY(p: Point3D, angle: number): Point3D {
 }
 
 function project(p: Point3D, fov: number, viewDist: number): ProjectedPoint {
-  const factor = fov / (viewDist + p.z)
+  const safeDenominator = Math.max(viewDist + p.z, 1.0)
+  const factor = fov / safeDenominator
   return { x: p.x * factor, y: p.y * factor, z: p.z, scale: factor }
 }
 
@@ -52,14 +72,19 @@ function generateCubePoints(gridSize: number): Point3D[] {
   return points
 }
 
+function hexToRgba(hex: string, alpha: number): string {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
 export function InteractiveLogo({
   size = 120,
   className = '',
-  color = '#1a1a1a',
 }: {
   size?: number
   className?: string
-  color?: string
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stateRef = useRef({
@@ -74,19 +99,23 @@ export function InteractiveLogo({
   })
 
   const points = useRef(generateCubePoints(4)).current
+  const colorIndices = useRef(
+    points.map((_, i) => i % DOT_COLORS.length)
+  ).current
+
+  const PAD = 1.5
+  const canvasSize = Math.ceil(size * PAD)
 
   const render = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas) return
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
-    const w = size
-    const h = size
+    const w = canvasSize
+    const h = canvasSize
 
     canvas.width = w * dpr
     canvas.height = h * dpr
-    canvas.style.width = `${w}px`
-    canvas.style.height = `${h}px`
 
     const ctx = canvas.getContext('2d')
     if (!ctx) return
@@ -97,7 +126,6 @@ export function InteractiveLogo({
     const s = stateRef.current
     const fov = 250
     const viewDist = 3.5
-    const cubeScale = w * 0.3
 
     const projected: (ProjectedPoint & { origIdx: number })[] = points.map((p, i) => {
       let rotated = rotateX(p, s.rotX)
@@ -109,22 +137,22 @@ export function InteractiveLogo({
     projected.sort((a, b) => b.z - a.z)
 
     for (const p of projected) {
-      const sx = w / 2 + p.x * cubeScale
-      const sy = h / 2 + p.y * cubeScale
+      const sx = w / 2 + p.x
+      const sy = h / 2 + p.y
 
       const depthNorm = (p.z + 1.8) / 3.6
-      const baseRadius = 3.2
+      const baseRadius = 8
       const radius = baseRadius * (0.6 + 0.5 * depthNorm) * (size / 120)
-      const alpha = 0.3 + 0.7 * depthNorm
+      const alpha = 0.55 + 0.45 * depthNorm
+
+      const dotColor = DOT_COLORS[colorIndices[p.origIdx]]
 
       ctx.beginPath()
       ctx.arc(sx, sy, radius, 0, Math.PI * 2)
-      ctx.fillStyle = color.startsWith('#')
-        ? hexToRgba(color, alpha)
-        : color
+      ctx.fillStyle = hexToRgba(dotColor, alpha)
       ctx.fill()
     }
-  }, [size, color, points])
+  }, [size, canvasSize, points, colorIndices])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -183,19 +211,26 @@ export function InteractiveLogo({
     }
   }, [render])
 
-  return (
-    <canvas
-      ref={canvasRef}
-      className={`cursor-grab active:cursor-grabbing ${className}`}
-      style={{ width: size, height: size, touchAction: 'none' }}
-      aria-label="Interactive 3D logo"
-    />
-  )
-}
+  const offset = (canvasSize - size) / 2
 
-function hexToRgba(hex: string, alpha: number): string {
-  const r = parseInt(hex.slice(1, 3), 16)
-  const g = parseInt(hex.slice(3, 5), 16)
-  const b = parseInt(hex.slice(5, 7), 16)
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+  return (
+    <div
+      className={className}
+      style={{ width: size, height: size, position: 'relative', overflow: 'visible' }}
+    >
+      <canvas
+        ref={canvasRef}
+        className="cursor-grab active:cursor-grabbing"
+        style={{
+          position: 'absolute',
+          top: -offset,
+          left: -offset,
+          width: canvasSize,
+          height: canvasSize,
+          touchAction: 'none',
+        }}
+        aria-label="Interactive 3D logo"
+      />
+    </div>
+  )
 }
