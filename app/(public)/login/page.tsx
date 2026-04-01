@@ -3,11 +3,8 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { signIn } from '@/app/actions/auth'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { Shield } from 'lucide-react'
+import { MetisLogo } from '@/components/landing/metis-logo'
+import { HalftoneBackground } from '@/components/landing/halftone-background'
 import { toast } from 'sonner'
 
 export default function LoginPage() {
@@ -23,54 +20,83 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex flex-1 items-center justify-center bg-background p-4">
-    <Card className="w-full max-w-md">
-      <CardHeader className="text-center">
-        <div className="flex items-center justify-center gap-2 mb-2">
-          <Shield className="h-6 w-6 text-primary" />
-          <span className="text-xl font-bold">Atlas</span>
-        </div>
-        <CardTitle className="text-2xl">Welcome back</CardTitle>
-        <CardDescription>Sign in to your account to continue</CardDescription>
-      </CardHeader>
-      <form action={handleSubmit}>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              name="email"
-              type="email"
-              placeholder="you@company.com"
-              required
-              autoComplete="email"
-            />
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-white">
+      <HalftoneBackground />
+
+      <header className="relative z-10 flex items-center justify-between px-6 py-5 sm:px-10">
+        <Link href="/" className="flex items-center gap-2">
+          <MetisLogo size={20} className="text-[#1a1a1a]" />
+        </Link>
+        <Link
+          href="/signup"
+          className="text-[13px] font-medium text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors"
+        >
+          Create an account
+        </Link>
+      </header>
+
+      <main className="relative z-10 flex flex-1 items-center justify-center px-4">
+        <div className="w-full max-w-md rounded-2xl bg-white/90 px-10 py-12 shadow-sm backdrop-blur-sm ring-1 ring-[#1a1a1a]/[0.04]">
+          <div className="mb-10 text-center">
+            <h1
+              className="text-3xl tracking-tight text-[#1a1a1a] sm:text-4xl"
+              style={{ fontFamily: 'var(--font-serif)' }}
+            >
+              Welcome back
+            </h1>
+            <p className="mt-2 text-sm text-[#1a1a1a]/50">
+              Sign in to your account to continue
+            </p>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              name="password"
-              type="password"
-              placeholder="••••••••"
-              required
-              autoComplete="current-password"
-            />
-          </div>
-        </CardContent>
-        <CardFooter className="flex flex-col gap-4">
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? 'Signing in...' : 'Sign In'}
-          </Button>
-          <p className="text-sm text-muted-foreground">
+
+          <form action={handleSubmit} className="space-y-5">
+            <div className="space-y-1.5">
+              <label htmlFor="email" className="block text-[13px] font-medium text-[#1a1a1a]/70">
+                Email
+              </label>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                placeholder="you@company.com"
+                required
+                autoComplete="email"
+                className="h-10 w-full rounded-lg border border-[#1a1a1a]/10 bg-white px-3 text-sm text-[#1a1a1a] outline-none transition-colors placeholder:text-[#1a1a1a]/30 focus:border-[#1a1a1a]/30 focus:ring-2 focus:ring-[#1a1a1a]/5"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="password" className="block text-[13px] font-medium text-[#1a1a1a]/70">
+                Password
+              </label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                placeholder="••••••••"
+                required
+                autoComplete="current-password"
+                className="h-10 w-full rounded-lg border border-[#1a1a1a]/10 bg-white px-3 text-sm text-[#1a1a1a] outline-none transition-colors placeholder:text-[#1a1a1a]/30 focus:border-[#1a1a1a]/30 focus:ring-2 focus:ring-[#1a1a1a]/5"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="mt-2 h-10 w-full rounded-lg bg-[#1a1a1a] text-sm font-medium text-white transition-colors hover:bg-[#333] disabled:opacity-50"
+            >
+              {loading ? 'Signing in...' : 'Sign In'}
+            </button>
+          </form>
+
+          <p className="mt-8 text-center text-[13px] text-[#1a1a1a]/40">
             Don&apos;t have an account?{' '}
-            <Link href="/signup" className="text-primary hover:underline">
+            <Link href="/signup" className="text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors">
               Sign up
             </Link>
           </p>
-        </CardFooter>
-      </form>
-    </Card>
+        </div>
+      </main>
+
     </div>
   )
 }
