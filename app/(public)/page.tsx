@@ -4,7 +4,7 @@ import { HalftoneBackground } from '@/components/landing/halftone-background'
 
 export default function LandingPage() {
   return (
-    <div className="relative min-h-screen overflow-hidden bg-white">
+    <div className="relative min-h-screen overflow-hidden bg-white" style={{ fontFamily: 'var(--font-inter)' }}>
       <HalftoneBackground />
 
       <header className="relative z-10 flex items-center justify-between px-6 py-5 sm:px-10">
@@ -35,8 +35,8 @@ export default function LandingPage() {
         <div className="flex flex-col items-center gap-8 -mt-16">
           <MetisLogo size={36} className="text-[#1a1a1a]" />
           <h1
-            className="max-w-xl text-center text-[2.5rem] leading-[1.15] tracking-tight text-[#1a1a1a]"
-            style={{ fontFamily: 'var(--font-serif)' }}
+            className="max-w-xl text-center text-[2.5rem] font-bold leading-[1.15] tracking-tight text-[#1a1a1a]"
+            style={{ fontFamily: 'var(--font-inter)' }}
           >
             Autonomous QA that works.
           </h1>
