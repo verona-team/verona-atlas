@@ -137,6 +137,8 @@ export default function ProjectSettingsPage() {
             integration={getIntegration('github')}
             onDisconnect={disconnect}
             connectUrl={`/api/integrations/github/install?project_id=${projectId}&return_to=${encodeURIComponent(`/projects/${projectId}/settings`)}`}
+            openInNewTab
+            onRefresh={loadData}
           >
             <GitHubDetails integration={getIntegration('github')} projectId={projectId} onRefresh={loadData} />
           </SettingsIntegrationCard>
@@ -195,6 +197,8 @@ export default function ProjectSettingsPage() {
             integration={getIntegration('slack')}
             onDisconnect={disconnect}
             connectUrl={`/api/integrations/slack/authorize?project_id=${projectId}&return_to=${encodeURIComponent(`/projects/${projectId}/settings`)}`}
+            openInNewTab
+            onRefresh={loadData}
           >
             <SlackDetails integration={getIntegration('slack')} projectId={projectId} onRefresh={loadData} />
           </SettingsIntegrationCard>
@@ -212,6 +216,8 @@ function SettingsIntegrationCard({
   integration,
   onDisconnect,
   connectUrl,
+  openInNewTab,
+  onRefresh,
   children,
 }: {
   type: string
@@ -219,17 +225,57 @@ function SettingsIntegrationCard({
   integration?: IntegrationData
   onDisconnect: (id: string, name: string) => void
   connectUrl: string
+  openInNewTab?: boolean
+  onRefresh?: () => Promise<void> | void
   children?: React.ReactNode
 }) {
   const connected = !!integration
+  const [waiting, setWaiting] = useState(false)
+
+  function handleConnect() {
+    if (openInNewTab) {
+      setWaiting(true)
+      window.open(connectUrl, '_blank')
+    }
+  }
+
+  useEffect(() => {
+    if (!waiting || !onRefresh) return
+    const interval = setInterval(async () => {
+      if (type === 'github') {
+        try {
+          const projectId = connectUrl.match(/project_id=([^&]+)/)?.[1]
+          if (projectId) {
+            const res = await fetch(`/api/integrations/github/status?project_id=${projectId}`)
+            if (res.ok) {
+              const data = await res.json()
+              if (data.connected) {
+                await onRefresh()
+                return
+              }
+            }
+          }
+        } catch {}
+      }
+      await onRefresh()
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [waiting, onRefresh, type, connectUrl])
+
+  useEffect(() => {
+    if (waiting && connected) {
+      setWaiting(false)
+      toast.success(`${title} connected`)
+    }
+  }, [waiting, connected, title])
 
   return (
     <div className="border rounded-lg p-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h3 className="text-lg font-medium">{title}</h3>
-          <span className={`text-xs px-2 py-0.5 rounded-full ${connected ? 'bg-green-500/10 text-green-600' : 'opacity-40 border'}`}>
-            {connected ? 'Active' : 'Not connected'}
+          <span className={`text-xs px-2 py-0.5 rounded-full ${connected ? 'bg-green-500/10 text-green-600' : waiting ? 'bg-yellow-500/10 text-yellow-600' : 'opacity-40 border'}`}>
+            {connected ? 'Active' : waiting ? 'Waiting...' : 'Not connected'}
           </span>
         </div>
         <div className="flex items-center gap-4">
@@ -239,6 +285,12 @@ function SettingsIntegrationCard({
               className="text-sm opacity-40 hover:opacity-70 underline"
             >
               Disconnect
+            </button>
+          ) : waiting ? (
+            <span className="text-sm opacity-40">Complete setup in the opened tab</span>
+          ) : openInNewTab ? (
+            <button onClick={handleConnect} className="text-sm underline opacity-60 hover:opacity-100">
+              Connect →
             </button>
           ) : (
             <a href={connectUrl} className="text-sm underline opacity-60 hover:opacity-100">

@@ -141,8 +141,43 @@ function GitHubCard({
   integration?: IntegrationStatus
   onRefresh: () => void
 }) {
+  const [waiting, setWaiting] = useState(false)
   const repos = (integration?.meta?.repos as Array<{ full_name: string }>) || []
   const repoNames = repos.map((r) => r.full_name).join(', ')
+
+  function openGitHubInstall() {
+    setWaiting(true)
+    const returnTo = encodeURIComponent(`/projects/${projectId}/setup`)
+    window.open(
+      `/api/integrations/github/install?project_id=${projectId}&return_to=${returnTo}`,
+      '_blank',
+    )
+  }
+
+  useEffect(() => {
+    if (!waiting) return
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/integrations/github/status?project_id=${projectId}`)
+        if (res.ok) {
+          const data = await res.json()
+          if (data.connected) {
+            await onRefresh()
+          }
+        }
+      } catch {
+        // ignore polling errors
+      }
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [waiting, projectId, onRefresh])
+
+  useEffect(() => {
+    if (waiting && integration) {
+      setWaiting(false)
+      toast.success('GitHub connected')
+    }
+  }, [waiting, integration])
 
   return (
     <IntegrationCard
@@ -152,12 +187,13 @@ function GitHubCard({
       meta={repoNames ? `Repos: ${repoNames}` : undefined}
     >
       {!integration ? (
-        <a
-          href={`/api/integrations/github/install?project_id=${projectId}&return_to=${encodeURIComponent(`/projects/${projectId}/setup`)}`}
-          className="inline-block text-lg underline"
-        >
-          Connect GitHub →
-        </a>
+        waiting ? (
+          <p className="text-base opacity-50">Waiting for GitHub authorization... Complete the installation in the opened tab.</p>
+        ) : (
+          <button onClick={openGitHubInstall} className="text-lg underline">
+            Connect GitHub →
+          </button>
+        )
       ) : (
         <p className="text-sm opacity-40">Manage repos in project settings.</p>
       )}
@@ -517,6 +553,7 @@ function SlackCard({
   integration?: IntegrationStatus
   onRefresh: () => void
 }) {
+  const [waiting, setWaiting] = useState(false)
   const [showChannels, setShowChannels] = useState(false)
   const [channels, setChannels] = useState<Array<{ id: string; name: string }>>([])
   const [currentChannelId, setCurrentChannelId] = useState<string | null>(null)
@@ -524,6 +561,30 @@ function SlackCard({
   const [saving, setSaving] = useState(false)
 
   const channelName = integration?.meta?.channel_name as string | undefined
+
+  function openSlackAuth() {
+    setWaiting(true)
+    const returnTo = encodeURIComponent(`/projects/${projectId}/setup`)
+    window.open(
+      `/api/integrations/slack/authorize?project_id=${projectId}&return_to=${returnTo}`,
+      '_blank',
+    )
+  }
+
+  useEffect(() => {
+    if (!waiting) return
+    const interval = setInterval(async () => {
+      await onRefresh()
+    }, 2000)
+    return () => clearInterval(interval)
+  }, [waiting, onRefresh])
+
+  useEffect(() => {
+    if (waiting && integration) {
+      setWaiting(false)
+      toast.success('Slack connected')
+    }
+  }, [waiting, integration])
 
   async function loadChannels() {
     setLoadingChannels(true)
@@ -582,12 +643,13 @@ function SlackCard({
       }
     >
       {!integration ? (
-        <a
-          href={`/api/integrations/slack/authorize?project_id=${projectId}&return_to=${encodeURIComponent(`/projects/${projectId}/setup`)}`}
-          className="inline-block text-lg underline"
-        >
-          Connect Slack →
-        </a>
+        waiting ? (
+          <p className="text-base opacity-50">Waiting for Slack authorization... Complete the setup in the opened tab.</p>
+        ) : (
+          <button onClick={openSlackAuth} className="text-lg underline">
+            Connect Slack →
+          </button>
+        )
       ) : !channelName ? (
         <div>
           {!showChannels ? (
