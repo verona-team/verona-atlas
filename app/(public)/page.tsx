@@ -26,8 +26,7 @@ export default function LandingPage() {
         <div className="flex flex-col items-center gap-8 -mt-16">
           <MetisLogo size={36} className="text-[#1a1a1a]" />
           <h1
-            className="max-w-2xl text-center text-5xl leading-[1.1] tracking-tight text-[#1a1a1a] sm:text-6xl"
-            style={{ fontFamily: 'var(--font-serif)' }}
+            className="max-w-2xl text-center text-5xl font-semibold leading-[1.1] tracking-tight text-[#1a1a1a] sm:text-6xl"
           >
             Autonomous QA that works.
           </h1>
