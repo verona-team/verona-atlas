@@ -23,31 +23,31 @@ export default async function SettingsPage() {
     .eq('org_id', org.id)
 
   return (
-    <div className="max-w-lg space-y-10">
-      <h1 className="text-2xl">Settings</h1>
+    <div className="max-w-4xl mx-auto space-y-14">
+      <h1 className="text-4xl">Settings</h1>
 
-      <div className="space-y-3 text-base">
-        <div className="flex justify-between py-1">
-          <span className="opacity-40">Organization</span>
+      <div className="space-y-4 text-xl">
+        <div className="flex justify-between py-2">
+          <span className="opacity-50">Organization</span>
           <span>{org.name}</span>
         </div>
-        <div className="flex justify-between py-1">
-          <span className="opacity-40">Slug</span>
+        <div className="flex justify-between py-2">
+          <span className="opacity-50">Slug</span>
           <span>{org.slug}</span>
         </div>
-        <div className="flex justify-between py-1">
-          <span className="opacity-40">Plan</span>
+        <div className="flex justify-between py-2">
+          <span className="opacity-50">Plan</span>
           <span>{org.plan}</span>
         </div>
       </div>
 
       <div>
-        <h2 className="text-base opacity-40 mb-3">Members</h2>
-        <div className="divide-y text-base">
+        <h2 className="text-xl opacity-50 mb-4">Members</h2>
+        <div className="divide-y text-xl">
           {members?.map((member) => (
-            <div key={member.user_id} className="flex items-center justify-between py-3">
-              <span className="text-sm truncate max-w-xs">{member.user_id}</span>
-              <span className="text-sm opacity-40">{member.role}</span>
+            <div key={member.user_id} className="flex items-center justify-between py-4">
+              <span className="text-lg truncate max-w-md">{member.user_id}</span>
+              <span className="text-lg opacity-50">{member.role}</span>
             </div>
           ))}
         </div>

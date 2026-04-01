@@ -1,7 +1,7 @@
 'use client'
 
 const statusConfig = {
-  pending: { label: 'pending', color: 'opacity-40' },
+  pending: { label: 'pending', color: 'opacity-50' },
   planning: { label: 'planning', color: 'text-blue-700' },
   running: { label: 'running', color: 'text-amber-700' },
   completed: { label: 'done', color: 'text-green-700' },
@@ -14,5 +14,5 @@ interface RunStatusBadgeProps {
 
 export function RunStatusBadge({ status }: RunStatusBadgeProps) {
   const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.pending
-  return <span className={`text-sm ${config.color}`}>{config.label}</span>
+  return <span className={`text-lg ${config.color}`}>{config.label}</span>
 }

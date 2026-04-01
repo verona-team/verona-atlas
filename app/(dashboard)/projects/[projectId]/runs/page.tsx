@@ -39,21 +39,21 @@ export default async function RunHistoryPage({ params }: PageProps) {
     .limit(50)
 
   return (
-    <div className="max-w-2xl space-y-8">
+    <div className="max-w-4xl mx-auto space-y-10">
       <div>
-        <Link href={`/projects/${projectId}`} className="text-sm opacity-40 hover:opacity-70">
+        <Link href={`/projects/${projectId}`} className="text-lg opacity-50 hover:opacity-80">
           ← {project.name}
         </Link>
-        <div className="flex items-center justify-between mt-2">
-          <h1 className="text-2xl">Runs</h1>
+        <div className="flex items-center justify-between mt-3">
+          <h1 className="text-4xl">Runs</h1>
           <TriggerRunButton projectId={projectId} />
         </div>
       </div>
 
       {(!runs || runs.length === 0) ? (
-        <p className="text-base opacity-30 py-4">No runs yet.</p>
+        <p className="text-xl opacity-50 py-8">No runs yet.</p>
       ) : (
-        <div className="divide-y text-base">
+        <div className="divide-y text-xl">
           {runs.map((run) => {
             const summary = run.summary as Record<string, number> | null
             const duration =
@@ -65,21 +65,21 @@ export default async function RunHistoryPage({ params }: PageProps) {
               <Link
                 key={run.id}
                 href={`/projects/${projectId}/runs/${run.id}`}
-                className="flex items-center justify-between py-3"
+                className="flex items-center justify-between py-4"
               >
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-6">
                   <RunStatusBadge status={run.status} />
-                  <span className="text-sm opacity-40">
+                  <span className="text-lg opacity-50">
                     {new Date(run.created_at).toLocaleString()}
                   </span>
-                  <span className="text-sm opacity-30">{duration}</span>
+                  <span className="text-lg opacity-40">{duration}</span>
                 </div>
                 {summary && summary.total > 0 ? (
-                  <span className="text-sm opacity-50">
+                  <span className="text-lg opacity-60">
                     {summary.passed}/{summary.total}
                   </span>
                 ) : (
-                  <span className="text-sm opacity-20">—</span>
+                  <span className="text-lg opacity-30">—</span>
                 )}
               </Link>
             )

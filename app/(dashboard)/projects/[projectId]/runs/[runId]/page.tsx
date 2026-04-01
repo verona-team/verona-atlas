@@ -69,8 +69,8 @@ export default function RunDetailPage() {
     return () => { supabase.removeChannel(channel) }
   }, [runId, fetchRunData])
 
-  if (loading) return <p className="text-base opacity-30 py-8">Loading...</p>
-  if (!run) return <p className="text-base opacity-30 py-8">Run not found</p>
+  if (loading) return <p className="text-xl opacity-50 py-12 max-w-4xl mx-auto">Loading...</p>
+  if (!run) return <p className="text-xl opacity-50 py-12 max-w-4xl mx-auto">Run not found</p>
 
   const summary = run.summary as { total?: number; passed?: number; failed?: number; errors?: number; ai_analysis?: string; [key: string]: unknown } | null
   const duration = run.started_at && run.completed_at
@@ -78,25 +78,25 @@ export default function RunDetailPage() {
     : run.started_at ? 'Running...' : '—'
 
   return (
-    <div className="max-w-2xl space-y-8">
+    <div className="max-w-4xl mx-auto space-y-10">
       <div>
-        <Link href={`/projects/${projectId}/runs`} className="text-sm opacity-40 hover:opacity-70">
+        <Link href={`/projects/${projectId}/runs`} className="text-lg opacity-50 hover:opacity-80">
           ← Runs
         </Link>
-        <div className="flex items-center gap-3 mt-2">
-          <h1 className="text-2xl">{projectName}</h1>
+        <div className="flex items-center gap-4 mt-3">
+          <h1 className="text-4xl">{projectName}</h1>
           <RunStatusBadge status={run.status} />
         </div>
       </div>
 
-      <div className="flex gap-10 text-base">
-        <div><span className="opacity-40">Trigger</span> {run.trigger}</div>
-        <div><span className="opacity-40">Duration</span> {duration}</div>
-        <div><span className="opacity-40">ID</span> {run.id.slice(0, 8)}</div>
+      <div className="flex gap-12 text-xl">
+        <div><span className="opacity-50">Trigger</span> {run.trigger}</div>
+        <div><span className="opacity-50">Duration</span> {duration}</div>
+        <div><span className="opacity-50">ID</span> {run.id.slice(0, 8)}</div>
       </div>
 
       {summary && typeof summary.total === 'number' && (
-        <div className="flex gap-10 text-base">
+        <div className="flex gap-12 text-xl">
           <div>{summary.total} total</div>
           <div className="text-green-700">{summary.passed || 0} passed</div>
           <div className="text-red-700">{summary.failed || 0} failed</div>
@@ -106,54 +106,54 @@ export default function RunDetailPage() {
 
       {summary?.ai_analysis && (
         <div>
-          <h2 className="text-base opacity-40 mb-2">AI Analysis</h2>
-          <pre className="text-sm whitespace-pre-wrap opacity-60">{String(summary.ai_analysis)}</pre>
+          <h2 className="text-xl opacity-50 mb-3">AI Analysis</h2>
+          <pre className="text-lg whitespace-pre-wrap opacity-70">{String(summary.ai_analysis)}</pre>
         </div>
       )}
 
       <div>
-        <h2 className="text-base opacity-40 mb-3">Results ({results.length})</h2>
+        <h2 className="text-xl opacity-50 mb-4">Results ({results.length})</h2>
         {results.length === 0 ? (
-          <p className="text-base opacity-30">
+          <p className="text-xl opacity-50">
             {['pending', 'planning', 'running'].includes(run.status) ? 'Running...' : 'No results'}
           </p>
         ) : (
-          <div className="divide-y text-base">
+          <div className="divide-y text-xl">
             {results.map((result) => (
               <div key={result.id}>
                 <button
-                  className="flex items-center justify-between w-full py-3 text-left"
+                  className="flex items-center justify-between w-full py-4 text-left"
                   onClick={() => setExpandedResult(expandedResult === result.id ? null : result.id)}
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-4">
                     <span className={result.status === 'passed' ? 'text-green-700' : result.status === 'failed' ? 'text-red-700' : 'text-amber-700'}>
                       {result.status === 'passed' ? '✓' : result.status === 'failed' ? '✗' : '!'}
                     </span>
                     <span>{result.test_templates?.name || 'Unknown'}</span>
                   </div>
-                  <span className="text-sm opacity-30">
+                  <span className="text-lg opacity-40">
                     {result.duration_ms ? `${(result.duration_ms / 1000).toFixed(1)}s` : ''}
                   </span>
                 </button>
 
                 {expandedResult === result.id && (
-                  <div className="pb-4 pl-6 space-y-3 text-sm">
+                  <div className="pb-6 pl-8 space-y-4 text-lg">
                     {result.error_message && (
                       <pre className="whitespace-pre-wrap text-red-700">{result.error_message}</pre>
                     )}
                     {result.ai_analysis && (
-                      <pre className="whitespace-pre-wrap opacity-50">{result.ai_analysis}</pre>
+                      <pre className="whitespace-pre-wrap opacity-60">{result.ai_analysis}</pre>
                     )}
                     {result.console_logs && (
-                      <pre className="whitespace-pre-wrap opacity-40 max-h-48 overflow-auto">
+                      <pre className="whitespace-pre-wrap opacity-50 max-h-60 overflow-auto">
                         {JSON.stringify(result.console_logs, null, 2)}
                       </pre>
                     )}
                     {result.screenshots && result.screenshots.length > 0 && (
-                      <div className="flex gap-2">
+                      <div className="flex gap-3">
                         {result.screenshots.map((url, i) => (
                           <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="border">
-                            <img src={url} alt={`Screenshot ${i + 1}`} className="w-48 h-auto" />
+                            <img src={url} alt={`Screenshot ${i + 1}`} className="w-60 h-auto" />
                           </a>
                         ))}
                       </div>

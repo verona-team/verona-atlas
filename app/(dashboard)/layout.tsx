@@ -33,7 +33,7 @@ export default async function DashboardLayout({
   return (
     <div className="terminal-ui flex h-screen flex-col overflow-hidden">
       <MenuBar userEmail={user.email ?? ''} orgName={org.name} />
-      <main className="flex-1 overflow-y-auto px-6 py-6">
+      <main className="flex-1 overflow-y-auto px-8 py-10 md:px-16 lg:px-24">
         {children}
       </main>
     </div>
