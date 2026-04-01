@@ -1,57 +1,63 @@
 import Link from 'next/link'
-import { Button } from '@/components/ui/button'
-import { Shield, Zap, Eye } from 'lucide-react'
+import { MetisLogo } from '@/components/landing/metis-logo'
+import { HalftoneBackground } from '@/components/landing/halftone-background'
+import { ExternalLink } from 'lucide-react'
 
 export default function LandingPage() {
   return (
-    <div className="flex flex-col items-center gap-12 px-4 py-16 text-center max-w-4xl mx-auto">
-      {/* Hero */}
-      <div className="flex flex-col items-center gap-6">
-        <div className="flex items-center gap-3">
-          <Shield className="h-10 w-10 text-primary" />
-          <h1 className="text-5xl font-bold tracking-tight">Atlas</h1>
-        </div>
-        <p className="text-xl text-muted-foreground max-w-2xl">
-          Autonomous QA testing powered by AI. Connect your app, and Atlas finds
-          bugs before your users do.
-        </p>
-        <div className="flex gap-4 mt-4">
-          <Link href="/signup">
-            <Button size="lg">Get Started</Button>
-          </Link>
-          <Link href="/login">
-            <Button variant="outline" size="lg">Sign In</Button>
-          </Link>
-        </div>
-      </div>
+    <div className="relative min-h-screen overflow-hidden" style={{ backgroundColor: '#EDE5D1' }}>
+      <HalftoneBackground />
 
-      {/* Features */}
-      <div className="grid gap-8 md:grid-cols-3 w-full mt-8">
-        <div className="flex flex-col items-center gap-3 p-6 rounded-lg border bg-card">
-          <Eye className="h-8 w-8 text-primary" />
-          <h3 className="font-semibold text-lg">AI Test Planning</h3>
-          <p className="text-sm text-muted-foreground">
-            Analyzes PostHog sessions and GitHub commits to identify the most
-            critical flows to test.
-          </p>
+      <header className="relative z-10 flex items-center justify-between px-6 py-5 sm:px-10">
+        <Link href="/" className="flex items-center gap-2">
+          <MetisLogo size={20} className="text-[#1a1a1a]" />
+          <span className="text-[15px] font-medium tracking-tight text-[#1a1a1a]">
+            Metis
+          </span>
+        </Link>
+
+        <nav className="flex items-center gap-6">
+          <Link
+            href="/about"
+            className="text-[13px] text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors"
+          >
+            About
+          </Link>
+          <Link
+            href="/product"
+            className="text-[13px] text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors"
+          >
+            Product
+          </Link>
+          <Link
+            href="/signup"
+            className="text-[13px] text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors"
+          >
+            Request Access
+          </Link>
+          <Link
+            href="/careers"
+            className="flex items-center gap-1 rounded-full border border-[#1a1a1a]/20 px-3 py-1 text-[13px] text-[#1a1a1a]/80 hover:border-[#1a1a1a]/40 hover:text-[#1a1a1a] transition-colors"
+          >
+            Careers
+            <ExternalLink className="h-3 w-3" />
+          </Link>
+        </nav>
+      </header>
+
+      <main className="relative z-10 flex flex-1 flex-col items-center justify-center px-6" style={{ minHeight: 'calc(100vh - 68px)' }}>
+        <div className="flex flex-col items-center gap-8 -mt-16">
+          <MetisLogo size={36} className="text-[#1a1a1a]" />
+          <h1
+            className="max-w-xl text-center text-[2.5rem] leading-[1.15] tracking-tight text-[#1a1a1a]"
+            style={{ fontFamily: 'var(--font-serif)' }}
+          >
+            Training agents to work
+            <br />
+            reliably for your customers.
+          </h1>
         </div>
-        <div className="flex flex-col items-center gap-3 p-6 rounded-lg border bg-card">
-          <Zap className="h-8 w-8 text-primary" />
-          <h3 className="font-semibold text-lg">Autonomous Browser Testing</h3>
-          <p className="text-sm text-muted-foreground">
-            Spins up isolated cloud browsers, authenticates into your app, and
-            runs AI-driven test flows.
-          </p>
-        </div>
-        <div className="flex flex-col items-center gap-3 p-6 rounded-lg border bg-card">
-          <Shield className="h-8 w-8 text-primary" />
-          <h3 className="font-semibold text-lg">Detailed Reports</h3>
-          <p className="text-sm text-muted-foreground">
-            Get bug reports, recommended fixes, and feature suggestions delivered
-            to Slack.
-          </p>
-        </div>
-      </div>
+      </main>
     </div>
   )
 }
