@@ -170,6 +170,8 @@ export default function ProjectSettingsPage() {
           </SettingsIntegrationCard>
         </div>
       </div>
+
+      <DeleteProjectSection projectId={projectId} projectName={project?.name || ''} />
     </div>
   )
 }
@@ -349,6 +351,87 @@ function SlackDetails({
               #{ch.name}
             </button>
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DeleteProjectSection({
+  projectId,
+  projectName,
+}: {
+  projectId: string
+  projectName: string
+}) {
+  const router = useRouter()
+  const [confirmText, setConfirmText] = useState('')
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  async function handleDelete() {
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, { method: 'DELETE' })
+      if (res.ok || res.status === 204) {
+        toast.success('Project deleted')
+        router.push('/projects')
+        router.refresh()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        toast.error(data.error || 'Failed to delete project')
+      }
+    } catch {
+      toast.error('Failed to delete project')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const nameMatches = confirmText === projectName
+
+  return (
+    <div className="border border-red-500/20 rounded-lg p-6 mt-4">
+      <h2 className="text-2xl text-red-500/80 mb-2">Danger Zone</h2>
+      <p className="text-base opacity-50 mb-6">
+        Deleting a project permanently removes all test templates, run history, results, and connected integrations. This cannot be undone.
+      </p>
+
+      {!showConfirm ? (
+        <button
+          onClick={() => setShowConfirm(true)}
+          className="text-base text-red-500/80 underline hover:text-red-500"
+        >
+          Delete this project
+        </button>
+      ) : (
+        <div className="space-y-4">
+          <p className="text-base">
+            Type <span className="font-mono font-medium">{projectName}</span> to confirm:
+          </p>
+          <input
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder={projectName}
+            autoComplete="off"
+            autoFocus
+            className="w-full max-w-sm border-b bg-transparent py-2 text-base outline-none placeholder:opacity-30"
+          />
+          <div className="flex gap-4">
+            <button
+              onClick={handleDelete}
+              disabled={!nameMatches || deleting}
+              className="text-base text-red-500 underline disabled:opacity-30 disabled:no-underline"
+            >
+              {deleting ? 'Deleting...' : 'Permanently delete project'}
+            </button>
+            <button
+              onClick={() => { setShowConfirm(false); setConfirmText('') }}
+              className="text-base opacity-50 underline"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
     </div>
