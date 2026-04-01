@@ -3,7 +3,7 @@ import { InteractiveLogo } from '@/components/landing/interactive-logo'
 
 export default function LandingPage() {
   return (
-    <div className="relative min-h-screen overflow-hidden bg-white">
+    <div className="relative min-h-screen bg-white">
 
       <header className="relative z-10 flex items-center justify-end px-6 py-5 sm:px-10">
         <nav className="flex items-center gap-5">

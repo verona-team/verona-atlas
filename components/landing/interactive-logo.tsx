@@ -103,7 +103,7 @@ export function InteractiveLogo({
     points.map((_, i) => i % DOT_COLORS.length)
   ).current
 
-  const PAD = 1.5
+  const PAD = 2.2
   const canvasSize = Math.ceil(size * PAD)
 
   const render = useCallback(() => {
@@ -125,7 +125,7 @@ export function InteractiveLogo({
 
     const s = stateRef.current
     const fov = 250
-    const viewDist = 3.5
+    const viewDist = 4.5
 
     const projected: (ProjectedPoint & { origIdx: number })[] = points.map((p, i) => {
       let rotated = rotateX(p, s.rotX)
