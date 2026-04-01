@@ -1,9 +1,6 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { ArrowLeft } from 'lucide-react'
 
 type PageProps = { params: Promise<{ projectId: string }> }
 
@@ -40,40 +37,39 @@ export default async function ProjectSettingsPage({ params }: PageProps) {
     .eq('project_id', projectId)
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-2">
-        <Link href={`/projects/${project.id}`}>
-          <Button variant="ghost" size="sm" className="w-fit -ml-2">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to project
-          </Button>
+    <div className="max-w-2xl mx-auto">
+      <div className="mb-2">
+        <Link
+          href={`/projects/${project.id}`}
+          className="text-[10px] text-phosphor-dim hover:text-foreground uppercase tracking-wider transition-colors"
+        >
+          ← Back to {project.name}
         </Link>
-        <h1 className="text-3xl font-bold tracking-tight">Project settings</h1>
-        <p className="text-muted-foreground">{project.name}</p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Integrations</CardTitle>
-          <CardDescription>
-            Connect GitHub, PostHog, and Slack from the API routes; status is shown here.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ul className="space-y-2 text-sm">
+      <div className="window-chrome">
+        <div className="window-title-bar">
+          <span className="close-box" />
+          Configuration — {project.name}
+        </div>
+        <div className="window-body space-y-4">
+          <div>
+            <p className="text-xs text-phosphor-dim uppercase tracking-wider mb-2">Integrations</p>
             {integrations && integrations.length > 0 ? (
-              integrations.map((row) => (
-                <li key={row.type} className="flex justify-between rounded-md border px-3 py-2">
-                  <span className="font-medium capitalize">{row.type}</span>
-                  <span className="text-muted-foreground">{row.status}</span>
-                </li>
-              ))
+              <div className="border border-border divide-y divide-border text-sm">
+                {integrations.map((row) => (
+                  <div key={row.type} className="flex justify-between px-3 py-2">
+                    <span className="uppercase text-xs tracking-wider">{row.type}</span>
+                    <span className="text-phosphor-dim text-xs uppercase tracking-wider">{row.status}</span>
+                  </div>
+                ))}
+              </div>
             ) : (
-              <li className="text-muted-foreground">No integrations connected yet.</li>
+              <p className="text-xs text-phosphor-dim">No integrations connected.</p>
             )}
-          </ul>
-        </CardContent>
-      </Card>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

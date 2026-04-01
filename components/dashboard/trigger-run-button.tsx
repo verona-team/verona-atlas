@@ -2,8 +2,6 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Button } from '@/components/ui/button'
-import { Play, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface TriggerRunButtonProps {
@@ -41,13 +39,12 @@ export function TriggerRunButton({ projectId }: TriggerRunButtonProps) {
   }
 
   return (
-    <Button onClick={handleTrigger} disabled={loading}>
-      {loading ? (
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-      ) : (
-        <Play className="mr-2 h-4 w-4" />
-      )}
-      Run Tests
-    </Button>
+    <button
+      onClick={handleTrigger}
+      disabled={loading}
+      className="text-xs uppercase tracking-wider border border-foreground bg-foreground text-background px-3 py-1.5 hover:bg-phosphor-bright disabled:opacity-50 transition-colors"
+    >
+      {loading ? '...' : '▶ Run Tests'}
+    </button>
   )
 }

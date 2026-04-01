@@ -3,10 +3,6 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 
 export default function NewProjectPage() {
   const router = useRouter()
@@ -59,82 +55,93 @@ export default function NewProjectPage() {
   }
 
   return (
-    <div className="mx-auto max-w-lg space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">New project</h1>
-        <p className="text-muted-foreground">
-          Add an app URL and optional test credentials for QA runs.
-        </p>
-      </div>
+    <div className="max-w-lg mx-auto">
+      <div className="window-chrome">
+        <div className="window-title-bar">
+          <span className="close-box" />
+          New Project
+        </div>
+        <div className="window-body">
+          <p className="text-xs text-phosphor-dim mb-4 uppercase tracking-wider">
+            Register an application for autonomous QA testing.
+          </p>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Project details</CardTitle>
-          <CardDescription>
-            We encrypt stored passwords. AgentMail may provision a recovery inbox when possible.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
           <form onSubmit={onSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Name</Label>
-              <Input
-                id="name"
-                name="name"
+            <div>
+              <label className="block text-xs text-phosphor-dim uppercase tracking-wider mb-1">
+                Name *
+              </label>
+              <input
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="My product"
                 autoComplete="off"
+                className="w-full bg-background border border-border px-3 py-1.5 text-sm text-foreground placeholder:text-phosphor-dim/50 focus:outline-none focus:border-foreground"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="app_url">App URL</Label>
-              <Input
-                id="app_url"
-                name="app_url"
+
+            <div>
+              <label className="block text-xs text-phosphor-dim uppercase tracking-wider mb-1">
+                App URL *
+              </label>
+              <input
                 type="url"
                 required
                 value={appUrl}
                 onChange={(e) => setAppUrl(e.target.value)}
                 placeholder="https://app.example.com"
                 autoComplete="off"
+                className="w-full bg-background border border-border px-3 py-1.5 text-sm text-foreground placeholder:text-phosphor-dim/50 focus:outline-none focus:border-foreground"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="auth_email">Auth email (optional)</Label>
-              <Input
-                id="auth_email"
-                name="auth_email"
+
+            <div>
+              <label className="block text-xs text-phosphor-dim uppercase tracking-wider mb-1">
+                Auth Email (optional)
+              </label>
+              <input
                 type="email"
                 value={authEmail}
                 onChange={(e) => setAuthEmail(e.target.value)}
                 placeholder="tester@example.com"
                 autoComplete="off"
+                className="w-full bg-background border border-border px-3 py-1.5 text-sm text-foreground placeholder:text-phosphor-dim/50 focus:outline-none focus:border-foreground"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="auth_password">Auth password (optional)</Label>
-              <Input
-                id="auth_password"
-                name="auth_password"
+
+            <div>
+              <label className="block text-xs text-phosphor-dim uppercase tracking-wider mb-1">
+                Auth Password (optional)
+              </label>
+              <input
                 type="password"
                 value={authPassword}
                 onChange={(e) => setAuthPassword(e.target.value)}
                 autoComplete="new-password"
+                className="w-full bg-background border border-border px-3 py-1.5 text-sm text-foreground placeholder:text-phosphor-dim/50 focus:outline-none focus:border-foreground"
               />
             </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="outline" onClick={() => router.back()}>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+              <button
+                type="button"
+                onClick={() => router.back()}
+                className="text-xs uppercase tracking-wider border border-border px-4 py-1.5 hover:bg-accent transition-colors"
+              >
                 Cancel
-              </Button>
-              <Button type="submit" disabled={submitting}>
-                {submitting ? 'Creating…' : 'Create project'}
-              </Button>
+              </button>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="text-xs uppercase tracking-wider border border-foreground bg-foreground text-background px-4 py-1.5 hover:bg-phosphor-bright disabled:opacity-50 transition-colors"
+              >
+                {submitting ? 'Creating...' : 'Create'}
+              </button>
             </div>
           </form>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   )
 }

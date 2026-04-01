@@ -1,17 +1,6 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { Card, CardContent } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { ArrowLeft, Clock } from 'lucide-react'
 import { RunStatusBadge } from '@/components/dashboard/run-status-badge'
 import { TriggerRunButton } from '@/components/dashboard/trigger-run-button'
 
@@ -50,45 +39,47 @@ export default async function RunHistoryPage({ params }: PageProps) {
     .limit(50)
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link href={`/projects/${projectId}`}>
-            <Button variant="ghost" size="sm">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Run History</h1>
-            <p className="text-sm text-muted-foreground">{project.name}</p>
-          </div>
-        </div>
-        <TriggerRunButton projectId={projectId} />
+    <div className="max-w-3xl mx-auto">
+      <div className="mb-2">
+        <Link
+          href={`/projects/${projectId}`}
+          className="text-[10px] text-phosphor-dim hover:text-foreground uppercase tracking-wider transition-colors"
+        >
+          ← Back to {project.name}
+        </Link>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
+      <div className="window-chrome">
+        <div className="window-title-bar">
+          <span className="close-box" />
+          Run History — {project.name}
+        </div>
+        <div className="window-body space-y-4">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-phosphor-dim uppercase tracking-wider">
+              {runs?.length ?? 0} runs
+            </span>
+            <TriggerRunButton projectId={projectId} />
+          </div>
+
           {(!runs || runs.length === 0) ? (
-            <div className="flex flex-col items-center py-12 text-center">
-              <Clock className="h-10 w-10 text-muted-foreground mb-3" />
-              <h3 className="text-lg font-semibold mb-1">No runs yet</h3>
-              <p className="text-sm text-muted-foreground">
-                Trigger your first test run to see results here.
+            <div className="border border-dashed border-border py-8 text-center">
+              <p className="text-xs text-phosphor-dim uppercase">
+                No runs found. Trigger a test run to begin.
               </p>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Trigger</TableHead>
-                  <TableHead>Started</TableHead>
-                  <TableHead>Duration</TableHead>
-                  <TableHead className="text-right">Results</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            <div className="border border-border">
+              {/* Header */}
+              <div className="grid grid-cols-5 gap-px bg-border text-[10px] uppercase tracking-wider text-phosphor-dim">
+                <div className="bg-card px-3 py-1.5">Status</div>
+                <div className="bg-card px-3 py-1.5">Trigger</div>
+                <div className="bg-card px-3 py-1.5">Started</div>
+                <div className="bg-card px-3 py-1.5">Duration</div>
+                <div className="bg-card px-3 py-1.5 text-right">Results</div>
+              </div>
+              {/* Rows */}
+              <div className="divide-y divide-border">
                 {runs.map((run) => {
                   const summary = run.summary as Record<string, number> | null
                   const duration =
@@ -101,52 +92,42 @@ export default async function RunHistoryPage({ params }: PageProps) {
                       : '—'
 
                   return (
-                    <TableRow key={run.id} className="cursor-pointer">
-                      <TableCell>
-                        <Link href={`/projects/${projectId}/runs/${run.id}`}>
-                          <RunStatusBadge status={run.status} />
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Link href={`/projects/${projectId}/runs/${run.id}`} className="capitalize text-sm">
-                          {run.trigger}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Link href={`/projects/${projectId}/runs/${run.id}`} className="text-sm text-muted-foreground">
-                          {new Date(run.created_at).toLocaleString()}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Link href={`/projects/${projectId}/runs/${run.id}`} className="text-sm">
-                          {duration}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Link href={`/projects/${projectId}/runs/${run.id}`}>
-                          {summary && summary.total > 0 ? (
-                            <span className="text-sm">
-                              <span className="text-green-600">{summary.passed}</span>
-                              {' / '}
-                              <span className="text-red-600">
-                                {(summary.failed || 0) + (summary.errors || 0)}
-                              </span>
-                              {' / '}
-                              {summary.total}
+                    <Link
+                      key={run.id}
+                      href={`/projects/${projectId}/runs/${run.id}`}
+                      className="grid grid-cols-5 text-xs hover:bg-accent transition-colors"
+                    >
+                      <div className="px-3 py-2">
+                        <RunStatusBadge status={run.status} />
+                      </div>
+                      <div className="px-3 py-2 uppercase">{run.trigger}</div>
+                      <div className="px-3 py-2 text-phosphor-dim">
+                        {new Date(run.created_at).toLocaleString()}
+                      </div>
+                      <div className="px-3 py-2">{duration}</div>
+                      <div className="px-3 py-2 text-right">
+                        {summary && summary.total > 0 ? (
+                          <span>
+                            <span className="text-[#33ff33]">{summary.passed}</span>
+                            {' / '}
+                            <span className="text-destructive">
+                              {(summary.failed || 0) + (summary.errors || 0)}
                             </span>
-                          ) : (
-                            <span className="text-sm text-muted-foreground">—</span>
-                          )}
-                        </Link>
-                      </TableCell>
-                    </TableRow>
+                            {' / '}
+                            {summary.total}
+                          </span>
+                        ) : (
+                          <span className="text-phosphor-dim">—</span>
+                        )}
+                      </div>
+                    </Link>
                   )
                 })}
-              </TableBody>
-            </Table>
+              </div>
+            </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   )
 }

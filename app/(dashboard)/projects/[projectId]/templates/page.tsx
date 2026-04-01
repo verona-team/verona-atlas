@@ -2,14 +2,6 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Separator } from '@/components/ui/separator'
-import { Switch } from '@/components/ui/switch'
 import {
   Dialog,
   DialogContent,
@@ -25,17 +17,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Plus,
-  Sparkles,
-  Pencil,
-  Trash2,
-  ArrowUp,
-  ArrowDown,
-  X,
-  Loader2,
-  Check,
-} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
+import { Loader2 } from 'lucide-react'
 
 type StepType = 'navigate' | 'action' | 'assertion' | 'extract' | 'wait'
 
@@ -266,129 +250,131 @@ export default function TemplatesPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      <div className="max-w-3xl mx-auto text-center py-12">
+        <p className="text-xs text-phosphor-dim uppercase tracking-wider animate-pulse">
+          Loading templates...
+        </p>
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Test Templates</h1>
-          <p className="text-muted-foreground">
-            Define test flows to run against your application.
-          </p>
+    <div className="max-w-3xl mx-auto">
+      <div className="window-chrome">
+        <div className="window-title-bar">
+          <span className="close-box" />
+          Test Templates
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={handleGenerate} disabled={generating}>
-            {generating ? (
-              <Loader2 className="mr-2 size-4 animate-spin" />
-            ) : (
-              <Sparkles className="mr-2 size-4" />
-            )}
-            Generate with AI
-          </Button>
-          <Button onClick={openCreateDialog}>
-            <Plus className="mr-2 size-4" />
-            Create Template
-          </Button>
+        <div className="window-body space-y-4">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-phosphor-dim uppercase tracking-wider">
+              {templates.length} template{templates.length !== 1 ? 's' : ''}
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={handleGenerate}
+                disabled={generating}
+                className="text-xs uppercase tracking-wider border border-border px-3 py-1 hover:bg-accent transition-colors disabled:opacity-50"
+              >
+                {generating ? '...' : '✦ AI Generate'}
+              </button>
+              <button
+                onClick={openCreateDialog}
+                className="text-xs uppercase tracking-wider border border-border px-3 py-1 hover:bg-primary hover:text-primary-foreground transition-colors"
+              >
+                + Create
+              </button>
+            </div>
+          </div>
+
+          {templates.length === 0 ? (
+            <div className="border border-dashed border-border py-8 text-center">
+              <p className="text-xs text-phosphor-dim uppercase mb-3">
+                No templates. Create one or generate with AI.
+              </p>
+              <div className="flex justify-center gap-2">
+                <button
+                  onClick={handleGenerate}
+                  disabled={generating}
+                  className="text-xs uppercase tracking-wider border border-border px-3 py-1 hover:bg-accent transition-colors disabled:opacity-50"
+                >
+                  ✦ AI Generate
+                </button>
+                <button
+                  onClick={openCreateDialog}
+                  className="text-xs uppercase tracking-wider border border-border px-3 py-1 hover:bg-primary hover:text-primary-foreground transition-colors"
+                >
+                  + Create
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {templates.map((template) => (
+                <div key={template.id} className="border border-border">
+                  <div className="flex items-start justify-between px-3 py-2 border-b border-border">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold uppercase tracking-wider">
+                          {template.name}
+                        </span>
+                        <span className="text-[10px] uppercase tracking-wider border border-border px-1.5 py-0">
+                          {template.source === 'ai_generated' ? 'AI' : 'Manual'}
+                        </span>
+                      </div>
+                      {template.description && (
+                        <p className="text-xs text-phosphor-dim mt-0.5">{template.description}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] text-phosphor-dim uppercase">Active</span>
+                        <Switch
+                          checked={template.is_active}
+                          onCheckedChange={() => handleToggleActive(template)}
+                        />
+                      </div>
+                      <button
+                        onClick={() => openEditDialog(template)}
+                        className="text-[10px] uppercase tracking-wider text-phosphor-dim hover:text-foreground transition-colors"
+                      >
+                        [edit]
+                      </button>
+                      <button
+                        onClick={() => handleDelete(template.id)}
+                        className="text-[10px] uppercase tracking-wider text-phosphor-dim hover:text-destructive transition-colors"
+                      >
+                        [del]
+                      </button>
+                    </div>
+                  </div>
+                  <div className="px-3 py-2 space-y-1">
+                    {(Array.isArray(template.steps) ? (template.steps as TemplateStep[]) : []).map(
+                      (step, idx) => (
+                        <div key={idx} className="flex items-start gap-2 text-xs">
+                          <span className="text-[10px] uppercase tracking-wider border border-border px-1.5 py-0 text-phosphor-dim shrink-0">
+                            {step.type}
+                          </span>
+                          <span className="text-phosphor-dim">{step.instruction}</span>
+                        </div>
+                      ),
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {templates.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <p className="text-muted-foreground mb-4">
-              No templates yet. Create one manually or generate with AI.
-            </p>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={handleGenerate} disabled={generating}>
-                <Sparkles className="mr-2 size-4" />
-                Generate with AI
-              </Button>
-              <Button onClick={openCreateDialog}>
-                <Plus className="mr-2 size-4" />
-                Create Template
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid gap-4">
-          {templates.map((template) => (
-            <Card key={template.id}>
-              <CardHeader>
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 space-y-1">
-                    <div className="flex items-center gap-2">
-                      <CardTitle>{template.name}</CardTitle>
-                      <Badge
-                        variant={template.source === 'ai_generated' ? 'secondary' : 'outline'}
-                      >
-                        {template.source === 'ai_generated' ? 'AI Generated' : 'Manual'}
-                      </Badge>
-                    </div>
-                    {template.description && (
-                      <CardDescription>{template.description}</CardDescription>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2">
-                      <Label htmlFor={`active-${template.id}`} className="text-xs text-muted-foreground">
-                        Active
-                      </Label>
-                      <Switch
-                        id={`active-${template.id}`}
-                        checked={template.is_active}
-                        onCheckedChange={() => handleToggleActive(template)}
-                      />
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => openEditDialog(template)}
-                    >
-                      <Pencil className="size-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => handleDelete(template.id)}
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-1">
-                  {(Array.isArray(template.steps) ? (template.steps as TemplateStep[]) : []).map(
-                    (step, idx) => (
-                      <div key={idx} className="flex items-start gap-2 text-sm">
-                        <Badge variant="outline" className="mt-0.5 shrink-0 font-mono text-xs">
-                          {step.type}
-                        </Badge>
-                        <span className="text-muted-foreground">{step.instruction}</span>
-                      </div>
-                    ),
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
       {/* Create / Edit Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto bg-card border-border">
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle className="uppercase tracking-wider text-sm">
               {editingTemplate ? 'Edit Template' : 'Create Template'}
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-xs text-phosphor-dim">
               {editingTemplate
                 ? 'Update the template details and steps.'
                 : 'Define a test template with ordered steps.'}
@@ -396,64 +382,57 @@ export default function TemplatesPage() {
           </DialogHeader>
 
           <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="template-name">Name</Label>
-              <Input
-                id="template-name"
+            <div>
+              <label className="block text-xs text-phosphor-dim uppercase tracking-wider mb-1">Name</label>
+              <input
                 value={formName}
                 onChange={(e) => setFormName(e.target.value)}
                 placeholder="e.g. Login Flow Smoke Test"
+                className="w-full bg-background border border-border px-3 py-1.5 text-sm text-foreground placeholder:text-phosphor-dim/50 focus:outline-none focus:border-foreground"
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="template-description">Description</Label>
-              <Textarea
-                id="template-description"
+            <div>
+              <label className="block text-xs text-phosphor-dim uppercase tracking-wider mb-1">Description</label>
+              <textarea
                 value={formDescription}
                 onChange={(e) => setFormDescription(e.target.value)}
                 placeholder="What does this test verify?"
+                rows={2}
+                className="w-full bg-background border border-border px-3 py-1.5 text-sm text-foreground placeholder:text-phosphor-dim/50 focus:outline-none focus:border-foreground resize-none"
               />
             </div>
 
-            <Separator />
-
-            <div className="space-y-3">
-              <Label>Steps</Label>
+            <div className="border-t border-border pt-3 space-y-3">
+              <span className="text-xs text-phosphor-dim uppercase tracking-wider">Steps</span>
               {formSteps.map((step, index) => (
-                <div
-                  key={index}
-                  className="space-y-2 rounded-lg border p-3"
-                >
+                <div key={index} className="border border-border p-3 space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-muted-foreground">
+                    <span className="text-[10px] text-phosphor-dim uppercase tracking-wider">
                       Step {index + 1}
                     </span>
                     <div className="flex gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
+                      <button
                         disabled={index === 0}
                         onClick={() => moveStep(index, 'up')}
+                        className="text-[10px] text-phosphor-dim hover:text-foreground disabled:opacity-30 px-1"
                       >
-                        <ArrowUp className="size-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
+                        ↑
+                      </button>
+                      <button
                         disabled={index === formSteps.length - 1}
                         onClick={() => moveStep(index, 'down')}
+                        className="text-[10px] text-phosphor-dim hover:text-foreground disabled:opacity-30 px-1"
                       >
-                        <ArrowDown className="size-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
+                        ↓
+                      </button>
+                      <button
                         disabled={formSteps.length <= 1}
                         onClick={() => removeStep(index)}
+                        className="text-[10px] text-phosphor-dim hover:text-destructive disabled:opacity-30 px-1"
                       >
-                        <X className="size-3" />
-                      </Button>
+                        ✗
+                      </button>
                     </div>
                   </div>
                   <div className="grid gap-2 sm:grid-cols-[140px_1fr]">
@@ -461,43 +440,48 @@ export default function TemplatesPage() {
                       value={step.type}
                       onValueChange={(val) => updateStep(index, { type: val as StepType })}
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger className="w-full text-xs">
                         <SelectValue placeholder="Type" />
                       </SelectTrigger>
                       <SelectContent>
                         {STEP_TYPES.map((t) => (
-                          <SelectItem key={t} value={t}>
+                          <SelectItem key={t} value={t} className="text-xs uppercase">
                             {t}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                    <Input
+                    <input
                       value={step.instruction}
                       onChange={(e) => updateStep(index, { instruction: e.target.value })}
                       placeholder="Instruction for the AI agent"
+                      className="w-full bg-background border border-border px-3 py-1.5 text-xs text-foreground placeholder:text-phosphor-dim/50 focus:outline-none focus:border-foreground"
                     />
                   </div>
                   {step.type === 'navigate' && (
-                    <Input
+                    <input
                       value={step.url ?? ''}
                       onChange={(e) => updateStep(index, { url: e.target.value })}
                       placeholder="URL to navigate to"
+                      className="w-full bg-background border border-border px-3 py-1.5 text-xs text-foreground placeholder:text-phosphor-dim/50 focus:outline-none focus:border-foreground"
                     />
                   )}
                   {step.type === 'assertion' && (
-                    <Input
+                    <input
                       value={step.expected ?? ''}
                       onChange={(e) => updateStep(index, { expected: e.target.value })}
                       placeholder="Expected result"
+                      className="w-full bg-background border border-border px-3 py-1.5 text-xs text-foreground placeholder:text-phosphor-dim/50 focus:outline-none focus:border-foreground"
                     />
                   )}
                 </div>
               ))}
-              <Button variant="outline" onClick={addStep} className="w-full">
-                <Plus className="mr-2 size-4" />
-                Add Step
-              </Button>
+              <button
+                onClick={addStep}
+                className="w-full text-xs uppercase tracking-wider border border-dashed border-border py-1.5 hover:bg-accent transition-colors"
+              >
+                + Add Step
+              </button>
             </div>
           </div>
 
@@ -505,12 +489,14 @@ export default function TemplatesPage() {
             <Button
               variant="outline"
               onClick={() => setEditDialogOpen(false)}
+              className="text-xs uppercase tracking-wider"
             >
               Cancel
             </Button>
             <Button
               onClick={handleSave}
               disabled={saving || !formName.trim() || formSteps.length === 0}
+              className="text-xs uppercase tracking-wider"
             >
               {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
               {editingTemplate ? 'Update' : 'Create'}
@@ -521,51 +507,44 @@ export default function TemplatesPage() {
 
       {/* AI Review Dialog */}
       <Dialog open={reviewDialogOpen} onOpenChange={setReviewDialogOpen}>
-        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto bg-card border-border">
           <DialogHeader>
-            <DialogTitle>Review AI-Generated Templates</DialogTitle>
-            <DialogDescription>
-              Select the templates you want to save. You can review the steps for
-              each one before accepting.
+            <DialogTitle className="uppercase tracking-wider text-sm">Review AI Templates</DialogTitle>
+            <DialogDescription className="text-xs text-phosphor-dim">
+              Select templates to save. Click to toggle.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
+          <div className="space-y-3">
             {generatedTemplates.map((gt, idx) => (
               <div
                 key={idx}
-                className={`cursor-pointer rounded-lg border p-4 transition-colors ${
+                className={`cursor-pointer border p-3 transition-colors ${
                   acceptedIndices.has(idx)
-                    ? 'border-primary bg-primary/5'
-                    : 'hover:border-muted-foreground/30'
+                    ? 'border-foreground bg-foreground/5'
+                    : 'border-border hover:border-phosphor-dim'
                 }`}
                 onClick={() => toggleAccepted(idx)}
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 space-y-1">
+                  <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <h4 className="font-medium">{gt.name}</h4>
-                      <Badge variant="secondary">AI Generated</Badge>
+                      <span className="text-sm font-bold uppercase tracking-wider">{gt.name}</span>
+                      <span className="text-[10px] uppercase tracking-wider border border-border px-1.5 py-0">AI</span>
                     </div>
-                    <p className="text-sm text-muted-foreground">{gt.description}</p>
+                    <p className="text-xs text-phosphor-dim mt-0.5">{gt.description}</p>
                   </div>
-                  <div
-                    className={`flex size-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
-                      acceptedIndices.has(idx)
-                        ? 'border-primary bg-primary text-primary-foreground'
-                        : 'border-muted-foreground/30'
-                    }`}
-                  >
-                    {acceptedIndices.has(idx) && <Check className="size-3" />}
-                  </div>
+                  <span className={`text-sm ${acceptedIndices.has(idx) ? 'text-foreground' : 'text-phosphor-dim'}`}>
+                    {acceptedIndices.has(idx) ? '■' : '□'}
+                  </span>
                 </div>
-                <div className="mt-3 space-y-1">
+                <div className="mt-2 space-y-1">
                   {gt.steps.map((step, sIdx) => (
-                    <div key={sIdx} className="flex items-start gap-2 text-sm">
-                      <Badge variant="outline" className="mt-0.5 shrink-0 font-mono text-xs">
+                    <div key={sIdx} className="flex items-start gap-2 text-xs">
+                      <span className="text-[10px] uppercase tracking-wider border border-border px-1.5 py-0 text-phosphor-dim shrink-0">
                         {step.type}
-                      </Badge>
-                      <span className="text-muted-foreground">{step.instruction}</span>
+                      </span>
+                      <span className="text-phosphor-dim">{step.instruction}</span>
                     </div>
                   ))}
                 </div>
@@ -577,12 +556,14 @@ export default function TemplatesPage() {
             <Button
               variant="outline"
               onClick={() => setReviewDialogOpen(false)}
+              className="text-xs uppercase tracking-wider"
             >
-              Dismiss All
+              Dismiss
             </Button>
             <Button
               onClick={handleSaveGenerated}
               disabled={savingGenerated || acceptedIndices.size === 0}
+              className="text-xs uppercase tracking-wider"
             >
               {savingGenerated && <Loader2 className="mr-2 size-4 animate-spin" />}
               Save {acceptedIndices.size} Template{acceptedIndices.size !== 1 ? 's' : ''}
