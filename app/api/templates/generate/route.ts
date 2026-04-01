@@ -60,9 +60,15 @@ export async function POST(request: NextRequest) {
     try {
       const config = githubIntegration.config as Record<string, Json>
       const installationId = config.installation_id as number
-      const repo = (config.repo as string) || ''
-      if (installationId && repo) {
-        commits = await fetchRecentCommits(installationId, repo)
+      const repos = (config.repos as Array<Record<string, Json>>) || []
+      if (installationId && repos.length > 0) {
+        for (const repo of repos.slice(0, 3)) {
+          const repoName = repo.full_name as string
+          if (repoName) {
+            const repoCommits = await fetchRecentCommits(installationId, repoName)
+            commits.push(...repoCommits)
+          }
+        }
       }
     } catch (e) {
       console.warn('Failed to fetch GitHub commits:', e)
