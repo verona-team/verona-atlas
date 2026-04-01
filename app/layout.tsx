@@ -20,8 +20,8 @@ const dmSerif = DM_Serif_Display({
 })
 
 export const metadata: Metadata = {
-  title: 'Metis — Training agents to work reliably',
-  description: 'Training agents to work reliably for your customers.',
+  title: 'Verona — Autonomous QA that works',
+  description: 'Autonomous QA that works.',
 }
 
 export default function RootLayout({
