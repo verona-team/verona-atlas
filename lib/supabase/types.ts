@@ -6,316 +6,306 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
-export interface Database {
+export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
+  __InternalSupabase: {
+    PostgrestVersion: "14.4"
+  }
   public: {
     Tables: {
-      organizations: {
+      integrations: {
         Row: {
-          id: string
-          name: string
-          slug: string
-          plan: string
-          created_by: string
+          config: Json
           created_at: string
+          id: string
+          project_id: string
+          status: Database["public"]["Enums"]["integration_status"]
+          type: Database["public"]["Enums"]["integration_type"]
           updated_at: string
         }
         Insert: {
-          id?: string
-          name: string
-          slug: string
-          plan?: string
-          created_by: string
+          config?: Json
           created_at?: string
+          id?: string
+          project_id: string
+          status?: Database["public"]["Enums"]["integration_status"]
+          type: Database["public"]["Enums"]["integration_type"]
           updated_at?: string
         }
         Update: {
-          id?: string
-          name?: string
-          slug?: string
-          plan?: string
-          created_by?: string
+          config?: Json
           created_at?: string
+          id?: string
+          project_id?: string
+          status?: Database["public"]["Enums"]["integration_status"]
+          type?: Database["public"]["Enums"]["integration_type"]
           updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: 'organizations_created_by_fkey'
-            columns: ['created_by']
+            foreignKeyName: "integrations_project_id_fkey"
+            columns: ["project_id"]
             isOneToOne: false
-            referencedRelation: 'users'
-            referencedColumns: ['id']
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
           },
         ]
       }
       org_members: {
         Row: {
+          created_at: string
           id: string
           org_id: string
+          role: Database["public"]["Enums"]["org_role"]
           user_id: string
-          role: 'owner' | 'member'
-          created_at: string
         }
         Insert: {
+          created_at?: string
           id?: string
           org_id: string
+          role?: Database["public"]["Enums"]["org_role"]
           user_id: string
-          role?: 'owner' | 'member'
-          created_at?: string
         }
         Update: {
+          created_at?: string
           id?: string
           org_id?: string
+          role?: Database["public"]["Enums"]["org_role"]
           user_id?: string
-          role?: 'owner' | 'member'
-          created_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: 'org_members_org_id_fkey'
-            columns: ['org_id']
+            foreignKeyName: "org_members_org_id_fkey"
+            columns: ["org_id"]
             isOneToOne: false
-            referencedRelation: 'organizations'
-            referencedColumns: ['id']
-          },
-          {
-            foreignKeyName: 'org_members_user_id_fkey'
-            columns: ['user_id']
-            isOneToOne: false
-            referencedRelation: 'users'
-            referencedColumns: ['id']
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
           },
         ]
+      }
+      organizations: {
+        Row: {
+          created_at: string
+          created_by: string
+          id: string
+          name: string
+          plan: string
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          id?: string
+          name: string
+          plan?: string
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          id?: string
+          name?: string
+          plan?: string
+          slug?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       projects: {
         Row: {
-          id: string
-          org_id: string
-          name: string
+          agentmail_inbox_address: string | null
+          agentmail_inbox_id: string | null
           app_url: string
           auth_email: string | null
           auth_password_encrypted: string | null
-          agentmail_inbox_id: string | null
-          agentmail_inbox_address: string | null
           created_at: string
+          id: string
+          name: string
+          org_id: string
           updated_at: string
         }
         Insert: {
-          id?: string
-          org_id: string
-          name: string
+          agentmail_inbox_address?: string | null
+          agentmail_inbox_id?: string | null
           app_url: string
           auth_email?: string | null
           auth_password_encrypted?: string | null
-          agentmail_inbox_id?: string | null
-          agentmail_inbox_address?: string | null
           created_at?: string
+          id?: string
+          name: string
+          org_id: string
           updated_at?: string
         }
         Update: {
-          id?: string
-          org_id?: string
-          name?: string
+          agentmail_inbox_address?: string | null
+          agentmail_inbox_id?: string | null
           app_url?: string
           auth_email?: string | null
           auth_password_encrypted?: string | null
-          agentmail_inbox_id?: string | null
-          agentmail_inbox_address?: string | null
           created_at?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: 'projects_org_id_fkey'
-            columns: ['org_id']
-            isOneToOne: false
-            referencedRelation: 'organizations'
-            referencedColumns: ['id']
-          },
-        ]
-      }
-      integrations: {
-        Row: {
-          id: string
-          project_id: string
-          type: 'github' | 'posthog' | 'slack'
-          config: Json
-          status: 'active' | 'disconnected'
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
           id?: string
-          project_id: string
-          type: 'github' | 'posthog' | 'slack'
-          config?: Json
-          status?: 'active' | 'disconnected'
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          project_id?: string
-          type?: 'github' | 'posthog' | 'slack'
-          config?: Json
-          status?: 'active' | 'disconnected'
-          created_at?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: 'integrations_project_id_fkey'
-            columns: ['project_id']
-            isOneToOne: false
-            referencedRelation: 'projects'
-            referencedColumns: ['id']
-          },
-        ]
-      }
-      test_templates: {
-        Row: {
-          id: string
-          project_id: string
-          name: string
-          description: string | null
-          steps: Json
-          source: 'manual' | 'ai_generated'
-          is_active: boolean
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          project_id: string
-          name: string
-          description?: string | null
-          steps?: Json
-          source?: 'manual' | 'ai_generated'
-          is_active?: boolean
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          project_id?: string
           name?: string
-          description?: string | null
-          steps?: Json
-          source?: 'manual' | 'ai_generated'
-          is_active?: boolean
-          created_at?: string
+          org_id?: string
           updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: 'test_templates_project_id_fkey'
-            columns: ['project_id']
+            foreignKeyName: "projects_org_id_fkey"
+            columns: ["org_id"]
             isOneToOne: false
-            referencedRelation: 'projects'
-            referencedColumns: ['id']
-          },
-        ]
-      }
-      test_runs: {
-        Row: {
-          id: string
-          project_id: string
-          trigger: 'manual'
-          trigger_ref: string | null
-          status: 'pending' | 'planning' | 'running' | 'completed' | 'failed'
-          modal_call_id: string | null
-          started_at: string | null
-          completed_at: string | null
-          summary: Json | null
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          project_id: string
-          trigger?: 'manual'
-          trigger_ref?: string | null
-          status?: 'pending' | 'planning' | 'running' | 'completed' | 'failed'
-          modal_call_id?: string | null
-          started_at?: string | null
-          completed_at?: string | null
-          summary?: Json | null
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          project_id?: string
-          trigger?: 'manual'
-          trigger_ref?: string | null
-          status?: 'pending' | 'planning' | 'running' | 'completed' | 'failed'
-          modal_call_id?: string | null
-          started_at?: string | null
-          completed_at?: string | null
-          summary?: Json | null
-          created_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: 'test_runs_project_id_fkey'
-            columns: ['project_id']
-            isOneToOne: false
-            referencedRelation: 'projects'
-            referencedColumns: ['id']
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
           },
         ]
       }
       test_results: {
         Row: {
-          id: string
-          test_run_id: string
-          test_template_id: string | null
-          status: 'passed' | 'failed' | 'error' | 'skipped'
+          ai_analysis: string | null
+          console_logs: Json | null
+          created_at: string
           duration_ms: number | null
           error_message: string | null
-          screenshots: string[]
-          console_logs: Json | null
+          id: string
           network_errors: Json | null
-          ai_analysis: string | null
-          created_at: string
+          screenshots: string[]
+          status: Database["public"]["Enums"]["result_status"]
+          test_run_id: string
+          test_template_id: string | null
         }
         Insert: {
+          ai_analysis?: string | null
+          console_logs?: Json | null
+          created_at?: string
+          duration_ms?: number | null
+          error_message?: string | null
           id?: string
+          network_errors?: Json | null
+          screenshots?: string[]
+          status: Database["public"]["Enums"]["result_status"]
           test_run_id: string
           test_template_id?: string | null
-          status: 'passed' | 'failed' | 'error' | 'skipped'
-          duration_ms?: number | null
-          error_message?: string | null
-          screenshots?: string[]
-          console_logs?: Json | null
-          network_errors?: Json | null
-          ai_analysis?: string | null
-          created_at?: string
         }
         Update: {
-          id?: string
-          test_run_id?: string
-          test_template_id?: string | null
-          status?: 'passed' | 'failed' | 'error' | 'skipped'
+          ai_analysis?: string | null
+          console_logs?: Json | null
+          created_at?: string
           duration_ms?: number | null
           error_message?: string | null
-          screenshots?: string[]
-          console_logs?: Json | null
+          id?: string
           network_errors?: Json | null
-          ai_analysis?: string | null
-          created_at?: string
+          screenshots?: string[]
+          status?: Database["public"]["Enums"]["result_status"]
+          test_run_id?: string
+          test_template_id?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: 'test_results_test_run_id_fkey'
-            columns: ['test_run_id']
+            foreignKeyName: "test_results_test_run_id_fkey"
+            columns: ["test_run_id"]
             isOneToOne: false
-            referencedRelation: 'test_runs'
-            referencedColumns: ['id']
+            referencedRelation: "test_runs"
+            referencedColumns: ["id"]
           },
           {
-            foreignKeyName: 'test_results_test_template_id_fkey'
-            columns: ['test_template_id']
+            foreignKeyName: "test_results_test_template_id_fkey"
+            columns: ["test_template_id"]
             isOneToOne: false
-            referencedRelation: 'test_templates'
-            referencedColumns: ['id']
+            referencedRelation: "test_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      test_runs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          id: string
+          modal_call_id: string | null
+          project_id: string
+          started_at: string | null
+          status: Database["public"]["Enums"]["run_status"]
+          summary: Json | null
+          trigger: Database["public"]["Enums"]["run_trigger"]
+          trigger_ref: string | null
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          modal_call_id?: string | null
+          project_id: string
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["run_status"]
+          summary?: Json | null
+          trigger: Database["public"]["Enums"]["run_trigger"]
+          trigger_ref?: string | null
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          modal_call_id?: string | null
+          project_id?: string
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["run_status"]
+          summary?: Json | null
+          trigger?: Database["public"]["Enums"]["run_trigger"]
+          trigger_ref?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "test_runs_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      test_templates: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          name: string
+          project_id: string
+          source: Database["public"]["Enums"]["template_source"]
+          steps: Json
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          project_id: string
+          source?: Database["public"]["Enums"]["template_source"]
+          steps?: Json
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          project_id?: string
+          source?: Database["public"]["Enums"]["template_source"]
+          steps?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "test_templates_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -324,29 +314,154 @@ export interface Database {
       [_ in never]: never
     }
     Functions: {
-      get_user_org_ids: {
-        Args: Record<string, never>
-        Returns: string[]
-      }
-      is_org_owner: {
-        Args: { target_org_id: string }
-        Returns: boolean
-      }
+      get_user_org_ids: { Args: never; Returns: string[] }
+      is_org_owner: { Args: { target_org_id: string }; Returns: boolean }
     }
     Enums: {
-      org_role: 'owner' | 'member'
-      integration_type: 'github' | 'posthog' | 'slack'
-      integration_status: 'active' | 'disconnected'
-      template_source: 'manual' | 'ai_generated'
-      run_trigger: 'manual'
-      run_status: 'pending' | 'planning' | 'running' | 'completed' | 'failed'
-      result_status: 'passed' | 'failed' | 'error' | 'skipped'
+      integration_status: "active" | "disconnected"
+      integration_type: "github" | "posthog" | "slack"
+      org_role: "owner" | "member"
+      result_status: "passed" | "failed" | "error" | "skipped"
+      run_status: "pending" | "planning" | "running" | "completed" | "failed"
+      run_trigger: "manual"
+      template_source: "manual" | "ai_generated"
     }
     CompositeTypes: {
       [_ in never]: never
     }
   }
 }
+
+type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
+
+type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
+
+export type Tables<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+        DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
+    : never = never,
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+      DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
+      Row: infer R
+    }
+    ? R
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] &
+        DefaultSchema["Views"])
+    ? (DefaultSchema["Tables"] &
+        DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
+        Row: infer R
+      }
+      ? R
+      : never
+    : never
+
+export type TablesInsert<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof DefaultSchema["Tables"]
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    : never = never,
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+      Insert: infer I
+    }
+    ? I
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
+    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+        Insert: infer I
+      }
+      ? I
+      : never
+    : never
+
+export type TablesUpdate<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof DefaultSchema["Tables"]
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    : never = never,
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+      Update: infer U
+    }
+    ? U
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
+    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+        Update: infer U
+      }
+      ? U
+      : never
+    : never
+
+export type Enums<
+  DefaultSchemaEnumNameOrOptions extends
+    | keyof DefaultSchema["Enums"]
+    | { schema: keyof DatabaseWithoutInternals },
+  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
+    : never = never,
+> = DefaultSchemaEnumNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
+  : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
+    ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
+    : never
+
+export type CompositeTypes<
+  PublicCompositeTypeNameOrOptions extends
+    | keyof DefaultSchema["CompositeTypes"]
+    | { schema: keyof DatabaseWithoutInternals },
+  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
+    : never = never,
+> = PublicCompositeTypeNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
+  : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
+    ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
+    : never
+
+export const Constants = {
+  public: {
+    Enums: {
+      integration_status: ["active", "disconnected"],
+      integration_type: ["github", "posthog", "slack"],
+      org_role: ["owner", "member"],
+      result_status: ["passed", "failed", "error", "skipped"],
+      run_status: ["pending", "planning", "running", "completed", "failed"],
+      run_trigger: ["manual"],
+      template_source: ["manual", "ai_generated"],
+    },
+  },
+} as const
 
 // Convenience type aliases
 export type Organization = Database['public']['Tables']['organizations']['Row']
