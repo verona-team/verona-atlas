@@ -1,11 +1,9 @@
 import Link from 'next/link'
 import { MetisLogo } from '@/components/landing/metis-logo'
-import { HalftoneBackground } from '@/components/landing/halftone-background'
 
 export default function LandingPage() {
   return (
     <div className="relative min-h-screen overflow-hidden bg-white">
-      <HalftoneBackground />
 
       <header className="relative z-10 flex items-center justify-end px-6 py-5 sm:px-10">
         <nav className="flex items-center gap-5">
