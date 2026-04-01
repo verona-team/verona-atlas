@@ -1,41 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { encrypt } from '@/lib/encryption'
+import { validateLangSmithConnection } from '@/lib/langsmith'
 import { z } from 'zod'
 import type { Json } from '@/lib/supabase/types'
 
-const PostHogConnectSchema = z.object({
+const LangSmithConnectSchema = z.object({
   projectId: z.string().uuid(),
-  posthogApiKey: z.string().min(1),
-  posthogProjectId: z.string().min(1),
-  apiHost: z.string().url().optional(),
+  apiKey: z.string().min(1),
+  projectName: z.string().optional(),
+  apiUrl: z.string().url().optional(),
 })
-
-async function validatePosthogCredentials(
-  apiKey: string,
-  projectId: string,
-  apiHost?: string,
-): Promise<{ ok: true } | { ok: false; message: string }> {
-  const host = (
-    apiHost || process.env.POSTHOG_API_HOST || 'https://us.posthog.com'
-  ).replace(/\/$/, '')
-
-  const res = await fetch(`${host}/api/projects/${encodeURIComponent(projectId)}/`, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-  })
-
-  if (!res.ok) {
-    const text = await res.text()
-    return {
-      ok: false,
-      message: `PostHog API error (${res.status}): ${text.slice(0, 240)}`,
-    }
-  }
-
-  return { ok: true }
-}
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
@@ -45,11 +20,11 @@ export async function POST(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json()
-  const parsed = PostHogConnectSchema.safeParse(body)
+  const parsed = LangSmithConnectSchema.safeParse(body)
   if (!parsed.success)
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
 
-  const { projectId, posthogApiKey, posthogProjectId, apiHost: customApiHost } = parsed.data
+  const { projectId, apiKey, projectName, apiUrl } = parsed.data
 
   const { data: membership } = await supabase
     .from('org_members')
@@ -68,28 +43,28 @@ export async function POST(request: NextRequest) {
     .eq('org_id', membership.org_id)
     .single()
 
-  if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+  if (!project)
+    return NextResponse.json({ error: 'Project not found' }, { status: 404 })
 
-  const validation = await validatePosthogCredentials(posthogApiKey, posthogProjectId, customApiHost)
-  if (!validation.ok) {
-    return NextResponse.json({ error: validation.message }, { status: 400 })
+  const isValid = await validateLangSmithConnection({ apiKey, apiUrl })
+  if (!isValid) {
+    return NextResponse.json(
+      { error: 'Could not connect to LangSmith. Check your API key.' },
+      { status: 400 },
+    )
   }
 
-  const apiKeyEncrypted = encrypt(posthogApiKey)
-  const resolvedHost = (
-    customApiHost || process.env.POSTHOG_API_HOST || 'https://us.posthog.com'
-  ).replace(/\/$/, '')
   const config: Json = {
-    posthog_project_id: posthogProjectId,
-    api_key_encrypted: apiKeyEncrypted,
-    api_host: resolvedHost,
+    api_key_encrypted: encrypt(apiKey),
+    project_name: projectName || null,
+    api_url: apiUrl || 'https://api.smith.langchain.com',
   }
 
   const { data: existing } = await supabase
     .from('integrations')
     .select('id')
     .eq('project_id', projectId)
-    .eq('type', 'posthog')
+    .eq('type', 'langsmith')
     .maybeSingle()
 
   if (existing) {
@@ -103,7 +78,7 @@ export async function POST(request: NextRequest) {
   } else {
     const { error } = await supabase.from('integrations').insert({
       project_id: projectId,
-      type: 'posthog',
+      type: 'langsmith',
       config,
       status: 'active',
     })

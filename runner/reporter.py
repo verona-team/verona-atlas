@@ -1,5 +1,6 @@
 """
-Test run reporter — aggregates results and sends Slack notifications.
+Test run reporter — aggregates results and sends Slack notifications
+enriched with observability data from Sentry, LangSmith, Braintrust, and PostHog.
 """
 import os
 import json
@@ -19,34 +20,81 @@ async def send_report(
     summary: dict,
 ):
     """Generate AI analysis and send Slack report."""
-    
-    # Generate AI analysis
-    ai_summary = await generate_ai_summary(project, results, summary)
-    
-    # Update test run with AI summary
+
+    observability_data = _aggregate_observability(results)
+
+    ai_summary = await generate_ai_summary(project, results, summary, observability_data)
+
     if ai_summary:
         current_summary = {**summary, "ai_analysis": ai_summary}
+        if observability_data:
+            current_summary["observability"] = _summarize_observability_counts(observability_data)
         supabase.table("test_runs").update({"summary": current_summary}).eq("id", test_run_id).execute()
-    
-    # Send Slack report if connected
+
     slack_integration = integrations.get("slack")
     if slack_integration:
         config = slack_integration.get("config", {})
         bot_token_encrypted = config.get("bot_token_encrypted")
         channel_id = config.get("channel_id")
-        
+
         if bot_token_encrypted and channel_id:
             bot_token = decrypt(bot_token_encrypted)
             await send_slack_report(
-                bot_token, channel_id, project, test_run_id, results, summary, ai_summary
+                bot_token, channel_id, project, test_run_id,
+                results, summary, ai_summary, observability_data,
             )
 
 
-async def generate_ai_summary(project: dict, results: list[dict], summary: dict) -> str:
+def _aggregate_observability(results: list[dict]) -> dict[str, list[dict]]:
+    """Collect observability errors from all test result console_logs."""
+    aggregated: dict[str, list[dict]] = {}
+    seen_ids: dict[str, set[str]] = {}
+
+    for result in results:
+        console_logs = result.get("console_logs") or {}
+        obs = console_logs.get("observability") or {}
+        for key, items in obs.items():
+            if key not in aggregated:
+                aggregated[key] = []
+                seen_ids[key] = set()
+            for item in items:
+                item_id = str(item.get("id", item.get("event_id", item.get("title", ""))))
+                if item_id and item_id not in seen_ids[key]:
+                    seen_ids[key].add(item_id)
+                    aggregated[key].append(item)
+
+    return aggregated
+
+
+def _summarize_observability_counts(data: dict[str, list[dict]]) -> dict[str, int]:
+    """Return counts per observability source for storing in summary."""
+    return {key: len(items) for key, items in data.items() if items}
+
+
+async def generate_ai_summary(
+    project: dict,
+    results: list[dict],
+    summary: dict,
+    observability_data: dict[str, list[dict]] | None = None,
+) -> str:
     """Use Claude to generate an executive summary of the test run."""
     try:
         client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-        
+
+        obs_section = ""
+        if observability_data:
+            obs_parts = []
+            if observability_data.get("sentry_events"):
+                obs_parts.append(f"Sentry Errors ({len(observability_data['sentry_events'])}):\n{json.dumps(observability_data['sentry_events'][:5], indent=2, default=str)}")
+            if observability_data.get("posthog_errors"):
+                obs_parts.append(f"PostHog Exceptions ({len(observability_data['posthog_errors'])}):\n{json.dumps(observability_data['posthog_errors'][:5], indent=2, default=str)}")
+            if observability_data.get("langsmith_errors"):
+                obs_parts.append(f"LangSmith Failed LLM Runs ({len(observability_data['langsmith_errors'])}):\n{json.dumps(observability_data['langsmith_errors'][:5], indent=2, default=str)}")
+            if observability_data.get("braintrust_errors"):
+                obs_parts.append(f"Braintrust Evaluation Failures ({len(observability_data['braintrust_errors'])}):\n{json.dumps(observability_data['braintrust_errors'][:5], indent=2, default=str)}")
+            if obs_parts:
+                obs_section = "\n\nObservability Errors Detected During Test Run:\n" + "\n\n".join(obs_parts)
+
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=1024,
@@ -61,17 +109,18 @@ Test Results Summary:
 - Errors: {summary.get('errors', 0)}
 
 Individual Results:
-{json.dumps(results, indent=2, default=str)}
+{json.dumps(results, indent=2, default=str)}{obs_section}
 
 Provide a concise summary including:
 1. Executive summary (1-2 sentences)
 2. Any bugs found with reproduction steps
-3. Recommended fixes (if failures detected)
-4. Severity assessment for each issue
+3. Observability errors detected (Sentry, PostHog, LangSmith, Braintrust) and their severity
+4. Recommended fixes (if failures detected)
+5. Severity assessment for each issue
 Keep it under 500 words."""
             }],
         )
-        
+
         content = message.content[0]
         return content.text if content.type == "text" else ""
     except Exception as e:
@@ -87,16 +136,18 @@ async def send_slack_report(
     results: list[dict],
     summary: dict,
     ai_summary: str,
+    observability_data: dict[str, list[dict]] | None = None,
 ):
-    """Format and send Slack Block Kit message."""
+    """Format and send Slack Block Kit message with observability enrichment."""
     app_url = os.environ.get("NEXT_PUBLIC_APP_URL", "https://atlas.app")
     dashboard_url = f"{app_url}/projects/{project['id']}/runs/{test_run_id}"
-    
+
     failed_count = summary.get("failed", 0) + summary.get("errors", 0)
-    status_emoji = "✅" if failed_count == 0 else "⚠️"
-    status_text = "All Passed" if failed_count == 0 else "Failures Detected"
-    
-    blocks = [
+    has_obs_errors = bool(observability_data and any(observability_data.values()))
+    status_emoji = "✅" if failed_count == 0 and not has_obs_errors else "⚠️"
+    status_text = "All Passed" if failed_count == 0 and not has_obs_errors else "Failures Detected"
+
+    blocks: list[dict] = [
         {
             "type": "header",
             "text": {"type": "plain_text", "text": f"{status_emoji} Atlas Test Run — {project['name']}"},
@@ -115,8 +166,7 @@ async def send_slack_report(
             ],
         },
     ]
-    
-    # Add failed test details
+
     failed_tests = [r for r in results if r.get("status") in ("failed", "error")]
     if failed_tests:
         blocks.append({"type": "divider"})
@@ -126,22 +176,57 @@ async def send_slack_report(
             error = (t.get("error_message") or "Unknown error")[:100]
             failed_text += f"• {name}: {error}\n"
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": failed_text}})
-    
-    # AI Summary
+
+    if observability_data:
+        sentry_events = observability_data.get("sentry_events", [])
+        if sentry_events:
+            blocks.append({"type": "divider"})
+            sentry_text = f"*🔴 Sentry Errors ({len(sentry_events)}):*\n"
+            for err in sentry_events[:5]:
+                title = err.get("title", "Unknown error")[:80]
+                level = err.get("level", "error")
+                sentry_text += f"• *{title}* ({level})\n"
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": sentry_text}})
+
+        posthog_errors = observability_data.get("posthog_errors", [])
+        if posthog_errors:
+            blocks.append({"type": "divider"})
+            ph_text = f"*🟠 PostHog Exceptions ({len(posthog_errors)}):*\n"
+            for err in posthog_errors[:5]:
+                props = err.get("properties", err)
+                exc_type = props.get("exception_type", "Unknown")
+                exc_msg = str(props.get("exception_message", ""))[:80]
+                url = props.get("url", "")
+                ph_text += f"• *{exc_type}*: {exc_msg}"
+                if url:
+                    ph_text += f" — {url}"
+                ph_text += "\n"
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": ph_text}})
+
+        llm_errors = (
+            observability_data.get("langsmith_errors", [])
+            + observability_data.get("braintrust_errors", [])
+        )
+        if llm_errors:
+            blocks.append({"type": "divider"})
+            llm_text = f"*🤖 LLM Trace Failures ({len(llm_errors)}):*\n"
+            for err in llm_errors[:5]:
+                name = err.get("name", "Unknown")[:40]
+                error_msg = str(err.get("error", "Failed"))[:80]
+                llm_text += f"• *{name}*: {error_msg}\n"
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": llm_text}})
+
     if ai_summary:
         blocks.append({"type": "divider"})
-        # Truncate for Slack's 3000 char block limit
         truncated = ai_summary[:2900]
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*AI Analysis:*\n{truncated}"}})
-    
-    # Dashboard link
+
     blocks.append({"type": "divider"})
     blocks.append({
         "type": "section",
         "text": {"type": "mrkdwn", "text": f"<{dashboard_url}|View full report in Atlas →>"},
     })
-    
-    # Send message
+
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://slack.com/api/chat.postMessage",

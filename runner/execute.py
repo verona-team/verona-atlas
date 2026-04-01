@@ -14,6 +14,7 @@ from runner.test_executor import execute_template
 from runner.auth import authenticate
 from runner.reporter import send_report
 from runner.encryption import decrypt
+from runner.observability import collect_observability_data, diff_observability_snapshots
 
 
 async def run_test_pipeline(test_run_id: str, project_id: str):
@@ -61,7 +62,7 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
         for template in planned_templates:
             start_time = datetime.now(timezone.utc)
             try:
-                result = await execute_single_template(supabase, project, template, test_run_id)
+                result = await execute_single_template(supabase, project, template, test_run_id, integrations)
                 results.append(result)
             except Exception as e:
                 # Record failed result
@@ -112,27 +113,30 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
         raise
 
 
-async def execute_single_template(supabase, project, template, test_run_id: str) -> dict:
+async def execute_single_template(supabase, project, template, test_run_id: str, integrations: dict | None = None) -> dict:
     """Execute a single test template in an isolated browser session."""
     from stagehand import Stagehand
     
     start_time = datetime.now(timezone.utc)
     screenshots = []
-    console_logs = {}
+    integrations = integrations or {}
+
+    pre_snapshot: dict = {}
+    try:
+        pre_snapshot = await collect_observability_data(integrations, window_minutes=1)
+    except Exception as e:
+        print(f"Warning: pre-test observability snapshot failed: {e}")
     
     stagehand = Stagehand(env="BROWSERBASE")
     try:
         await stagehand.init()
         
-        # Authenticate into the app
         if project.get("auth_email") and project.get("auth_password_encrypted"):
             password = decrypt(project["auth_password_encrypted"])
             await authenticate(stagehand, project, password)
         
-        # Execute template steps
         step_results = await execute_template(stagehand, template, project)
         
-        # Determine overall status
         all_passed = all(s.get("passed", False) for s in step_results)
         status = "passed" if all_passed else "failed"
         error_message = None
@@ -141,6 +145,19 @@ async def execute_single_template(supabase, project, template, test_run_id: str)
             error_message = "; ".join(s.get("error", "Unknown error") for s in failed_steps)
         
         duration_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
+
+        observability_errors: dict = {}
+        try:
+            await asyncio.sleep(3)
+            post_snapshot = await collect_observability_data(integrations, window_minutes=2)
+            observability_errors = diff_observability_snapshots(pre_snapshot, post_snapshot)
+        except Exception as e:
+            print(f"Warning: post-test observability snapshot failed: {e}")
+
+        if observability_errors and status == "passed":
+            status = "failed"
+            error_sources = [k for k, v in observability_errors.items() if v]
+            error_message = f"Observability errors detected in: {', '.join(error_sources)}"
         
         result = {
             "test_run_id": test_run_id,
@@ -149,7 +166,10 @@ async def execute_single_template(supabase, project, template, test_run_id: str)
             "duration_ms": duration_ms,
             "error_message": error_message,
             "screenshots": screenshots,
-            "console_logs": {"steps": step_results},
+            "console_logs": {
+                "steps": step_results,
+                "observability": observability_errors,
+            },
         }
         
         supabase.table("test_results").insert(result).execute()

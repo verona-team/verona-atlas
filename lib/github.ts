@@ -1,6 +1,7 @@
 import { App } from "@octokit/app"
 import { Octokit } from "@octokit/rest"
 import type { Endpoints } from "@octokit/types"
+import { createHmac, timingSafeEqual } from "crypto"
 
 type InstallationOctokit = InstanceType<typeof Octokit>
 
@@ -12,6 +13,35 @@ function getApp(): App<{ Octokit: typeof Octokit }> {
     ),
     Octokit,
   })
+}
+
+let _cachedAppSlug: string | null = null
+
+/**
+ * Resolve the GitHub App's slug dynamically via the authenticated GET /app
+ * endpoint. Falls back to GITHUB_APP_SLUG env var if the API call fails.
+ * The result is cached for the lifetime of the process.
+ */
+export async function getAppSlug(): Promise<string> {
+  if (_cachedAppSlug) return _cachedAppSlug
+
+  if (process.env.GITHUB_APP_SLUG) {
+    _cachedAppSlug = process.env.GITHUB_APP_SLUG
+    return _cachedAppSlug
+  }
+
+  try {
+    const app = getApp()
+    const { data } = await app.octokit.request("GET /app")
+    if (data?.slug) {
+      _cachedAppSlug = data.slug
+      return _cachedAppSlug
+    }
+  } catch (e) {
+    console.warn("Failed to fetch GitHub App slug from API:", e)
+  }
+
+  return "atlas-qa"
 }
 
 export async function getInstallationToken(installationId: number): Promise<string> {
@@ -27,6 +57,40 @@ export async function getInstallationOctokit(
 ): Promise<InstallationOctokit> {
   const app = getApp()
   return app.getInstallationOctokit(installationId)
+}
+
+export interface GitHubRepo {
+  fullName: string
+  private: boolean
+  defaultBranch: string
+}
+
+export async function listInstallationRepos(
+  installationId: number,
+): Promise<GitHubRepo[]> {
+  const octokit = await getInstallationOctokit(installationId)
+  const repos: GitHubRepo[] = []
+  let page = 1
+
+  while (true) {
+    const { data } = await octokit.request("GET /installation/repositories", {
+      per_page: 100,
+      page,
+    })
+
+    for (const repo of data.repositories) {
+      repos.push({
+        fullName: repo.full_name,
+        private: repo.private,
+        defaultBranch: repo.default_branch ?? "main",
+      })
+    }
+
+    if (repos.length >= data.total_count) break
+    page++
+  }
+
+  return repos
 }
 
 type RepoCommit = Endpoints["GET /repos/{owner}/{repo}/commits"]["response"]["data"][number]
@@ -73,7 +137,25 @@ export async function fetchCommitDiff(
   return data as unknown as string
 }
 
-/** Get the GitHub App installation URL for the user to install */
-export function getInstallUrl(): string {
-  return `https://github.com/apps/${process.env.GITHUB_APP_SLUG || "atlas-qa"}/installations/new`
+export async function getInstallUrl(): Promise<string> {
+  const slug = await getAppSlug()
+  return `https://github.com/apps/${slug}/installations/new`
+}
+
+export function verifyWebhookSignature(
+  payload: string | Buffer,
+  signature: string,
+): boolean {
+  const secret = process.env.GITHUB_WEBHOOK_SECRET
+  if (!secret) return false
+
+  const expected = "sha256=" + createHmac("sha256", secret)
+    .update(payload)
+    .digest("hex")
+
+  const sigBuf = Buffer.from(signature)
+  const expectedBuf = Buffer.from(expected)
+
+  if (sigBuf.length !== expectedBuf.length) return false
+  return timingSafeEqual(sigBuf, expectedBuf)
 }

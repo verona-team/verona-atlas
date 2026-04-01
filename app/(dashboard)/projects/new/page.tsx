@@ -10,13 +10,8 @@ export default function NewProjectPage() {
 
   const [name, setName] = useState('')
   const [appUrl, setAppUrl] = useState('')
-  const [githubRepo, setGithubRepo] = useState('')
-
   const [authEmail, setAuthEmail] = useState('')
   const [authPassword, setAuthPassword] = useState('')
-  const [posthogKey, setPosthogKey] = useState('')
-  const [sentryDsn, setSentryDsn] = useState('')
-  const [langsmithKey, setLangsmithKey] = useState('')
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -25,13 +20,9 @@ export default function NewProjectPage() {
       const body: Record<string, string> = {
         name,
         app_url: appUrl,
-        github_repo: githubRepo,
       }
       if (authEmail.trim()) body.auth_email = authEmail.trim()
       if (authPassword) body.auth_password = authPassword
-      if (posthogKey.trim()) body.posthog_key = posthogKey.trim()
-      if (sentryDsn.trim()) body.sentry_dsn = sentryDsn.trim()
-      if (langsmithKey.trim()) body.langsmith_key = langsmithKey.trim()
 
       const res = await fetch('/api/projects', {
         method: 'POST',
@@ -45,7 +36,7 @@ export default function NewProjectPage() {
         return
       }
       if (data?.id) {
-        router.push(`/projects/${data.id}`)
+        router.push(`/projects/${data.id}/setup`)
         router.refresh()
         return
       }
@@ -88,29 +79,15 @@ export default function NewProjectPage() {
           />
         </div>
 
-        <div>
-          <label className="block text-lg opacity-60 mb-2">GitHub repository</label>
-          <p className="text-base opacity-50 mb-3">So our agent can read code, file issues, and track changes.</p>
-          <input
-            required
-            value={githubRepo}
-            onChange={(e) => setGithubRepo(e.target.value)}
-            placeholder="owner/repo"
-            autoComplete="off"
-            className="w-full border-b bg-transparent py-3 text-xl outline-none placeholder:opacity-30"
-          />
-        </div>
-
-        <div className="pt-6">
-          <h2 className="text-2xl mb-3">Optional Integrations</h2>
+        <div className="pt-4">
+          <h2 className="text-2xl mb-3">Test Account Credentials</h2>
           <p className="text-base opacity-50 mb-8">
-            Connect these so the QA agent can monitor more signals. You can always configure them later from project settings.
+            Optional: provide credentials so the QA agent can test authenticated flows.
           </p>
 
           <div className="space-y-8">
             <div>
               <label className="block text-lg opacity-60 mb-2">Auth email</label>
-              <p className="text-base opacity-50 mb-3">Test account credentials for authenticated flows.</p>
               <input
                 type="email"
                 value={authEmail}
@@ -131,42 +108,6 @@ export default function NewProjectPage() {
                 className="w-full border-b bg-transparent py-3 text-xl outline-none placeholder:opacity-30"
               />
             </div>
-
-            <div>
-              <label className="block text-lg opacity-60 mb-2">PostHog</label>
-              <p className="text-base opacity-50 mb-3">Monitor analytics events and track regressions.</p>
-              <input
-                value={posthogKey}
-                onChange={(e) => setPosthogKey(e.target.value)}
-                placeholder="Project API key"
-                autoComplete="off"
-                className="w-full border-b bg-transparent py-3 text-xl outline-none placeholder:opacity-30"
-              />
-            </div>
-
-            <div>
-              <label className="block text-lg opacity-60 mb-2">Sentry</label>
-              <p className="text-base opacity-50 mb-3">Detect errors and exceptions during test runs.</p>
-              <input
-                value={sentryDsn}
-                onChange={(e) => setSentryDsn(e.target.value)}
-                placeholder="DSN or project slug"
-                autoComplete="off"
-                className="w-full border-b bg-transparent py-3 text-xl outline-none placeholder:opacity-30"
-              />
-            </div>
-
-            <div>
-              <label className="block text-lg opacity-60 mb-2">LangSmith / Braintrust</label>
-              <p className="text-base opacity-50 mb-3">Trace AI calls and evaluate LLM outputs.</p>
-              <input
-                value={langsmithKey}
-                onChange={(e) => setLangsmithKey(e.target.value)}
-                placeholder="API key"
-                autoComplete="off"
-                className="w-full border-b bg-transparent py-3 text-xl outline-none placeholder:opacity-30"
-              />
-            </div>
           </div>
         </div>
 
@@ -175,7 +116,7 @@ export default function NewProjectPage() {
             Cancel
           </button>
           <button type="submit" disabled={submitting} className="text-xl underline disabled:opacity-30">
-            {submitting ? 'Creating...' : 'Create project'}
+            {submitting ? 'Creating...' : 'Create project →'}
           </button>
         </div>
       </form>

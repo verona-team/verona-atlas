@@ -319,7 +319,7 @@ export type Database = {
     }
     Enums: {
       integration_status: "active" | "disconnected"
-      integration_type: "github" | "posthog" | "slack"
+      integration_type: "github" | "posthog" | "slack" | "sentry" | "langsmith" | "braintrust"
       org_role: "owner" | "member"
       result_status: "passed" | "failed" | "error" | "skipped"
       run_status: "pending" | "planning" | "running" | "completed" | "failed"
@@ -453,7 +453,7 @@ export const Constants = {
   public: {
     Enums: {
       integration_status: ["active", "disconnected"],
-      integration_type: ["github", "posthog", "slack"],
+      integration_type: ["github", "posthog", "slack", "sentry", "langsmith", "braintrust"],
       org_role: ["owner", "member"],
       result_status: ["passed", "failed", "error", "skipped"],
       run_status: ["pending", "planning", "running", "completed", "failed"],

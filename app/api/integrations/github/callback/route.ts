@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { listInstallationRepos } from '@/lib/github'
 import type { Json } from '@/lib/supabase/types'
 
 export async function GET(request: NextRequest) {
@@ -19,7 +20,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Missing state (project id)' }, { status: 400 })
   }
 
-  const projectId = state
+  let projectId = state
+  let returnTo: string | null = null
+  if (state.includes('::')) {
+    const parts = state.split('::')
+    projectId = parts[0]
+    returnTo = parts.slice(1).join('::')
+  }
 
   const { data: membership } = await supabase
     .from('org_members')
@@ -44,9 +51,25 @@ export async function GET(request: NextRequest) {
   }
 
   const installationIdNum = installationId ? Number(installationId) : null
+
+  let repos: Json = []
+  if (installationIdNum) {
+    try {
+      const repoList = await listInstallationRepos(installationIdNum)
+      repos = repoList.map((r) => ({
+        full_name: r.fullName,
+        private: r.private,
+        default_branch: r.defaultBranch,
+      }))
+    } catch (e) {
+      console.warn('Failed to list installation repos:', e)
+    }
+  }
+
   const config: Json = {
     installation_id: installationIdNum ?? installationId,
     setup_action: setupAction,
+    repos,
   }
 
   const { data: existing } = await supabase
@@ -76,7 +99,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  const redirect = new URL(`/projects/${projectId}/settings`, request.nextUrl.origin)
+  const redirectPath = returnTo || `/projects/${projectId}/settings`
+  const redirect = new URL(redirectPath, request.nextUrl.origin)
   redirect.searchParams.set('github', 'connected')
   return NextResponse.redirect(redirect)
 }
