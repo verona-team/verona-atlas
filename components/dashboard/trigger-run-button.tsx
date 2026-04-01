@@ -2,8 +2,6 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Button } from '@/components/ui/button'
-import { Play, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface TriggerRunButtonProps {
@@ -22,32 +20,17 @@ export function TriggerRunButton({ projectId }: TriggerRunButtonProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_id: projectId }),
       })
-
       const data = await response.json()
-
-      if (!response.ok) {
-        toast.error(data.error || 'Failed to trigger test run')
-        return
-      }
-
-      toast.success('Test run triggered successfully!')
+      if (!response.ok) { toast.error(data.error || 'Failed to trigger test run'); return }
+      toast.success('Test run triggered')
       router.push(`/projects/${projectId}/runs/${data.id}`)
       router.refresh()
-    } catch {
-      toast.error('Failed to trigger test run')
-    } finally {
-      setLoading(false)
-    }
+    } catch { toast.error('Failed to trigger test run') } finally { setLoading(false) }
   }
 
   return (
-    <Button onClick={handleTrigger} disabled={loading}>
-      {loading ? (
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-      ) : (
-        <Play className="mr-2 h-4 w-4" />
-      )}
-      Run Tests
-    </Button>
+    <button onClick={handleTrigger} disabled={loading} className="text-xl underline disabled:opacity-30">
+      {loading ? 'Running...' : 'Run Tests'}
+    </button>
   )
 }

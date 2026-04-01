@@ -1,7 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { Sidebar } from '@/components/dashboard/sidebar'
-import { Topbar } from '@/components/dashboard/topbar'
+import { MenuBar } from '@/components/dashboard/menu-bar'
 
 export default async function DashboardLayout({
   children,
@@ -18,7 +17,6 @@ export default async function DashboardLayout({
     redirect('/login')
   }
 
-  // Fetch the user's organization
   const { data: membership } = await supabase
     .from('org_members')
     .select('organizations(id, name, slug)')
@@ -33,14 +31,11 @@ export default async function DashboardLayout({
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <Sidebar />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar userEmail={user.email ?? ''} orgName={org.name} />
-        <main className="flex-1 overflow-y-auto p-6">
-          {children}
-        </main>
-      </div>
+    <div className="terminal-ui flex h-screen flex-col overflow-hidden">
+      <MenuBar userEmail={user.email ?? ''} orgName={org.name} />
+      <main className="flex-1 overflow-y-auto px-8 py-10 md:px-16 lg:px-24">
+        {children}
+      </main>
     </div>
   )
 }

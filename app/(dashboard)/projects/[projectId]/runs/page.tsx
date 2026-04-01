@@ -1,17 +1,6 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { Card, CardContent } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { ArrowLeft, Clock } from 'lucide-react'
 import { RunStatusBadge } from '@/components/dashboard/run-status-badge'
 import { TriggerRunButton } from '@/components/dashboard/trigger-run-button'
 
@@ -50,103 +39,53 @@ export default async function RunHistoryPage({ params }: PageProps) {
     .limit(50)
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link href={`/projects/${projectId}`}>
-            <Button variant="ghost" size="sm">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Run History</h1>
-            <p className="text-sm text-muted-foreground">{project.name}</p>
-          </div>
+    <div className="max-w-4xl mx-auto space-y-10">
+      <div>
+        <Link href={`/projects/${projectId}`} className="text-lg opacity-50 hover:opacity-80">
+          ← {project.name}
+        </Link>
+        <div className="flex items-center justify-between mt-3">
+          <h1 className="text-4xl">Runs</h1>
+          <TriggerRunButton projectId={projectId} />
         </div>
-        <TriggerRunButton projectId={projectId} />
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          {(!runs || runs.length === 0) ? (
-            <div className="flex flex-col items-center py-12 text-center">
-              <Clock className="h-10 w-10 text-muted-foreground mb-3" />
-              <h3 className="text-lg font-semibold mb-1">No runs yet</h3>
-              <p className="text-sm text-muted-foreground">
-                Trigger your first test run to see results here.
-              </p>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Trigger</TableHead>
-                  <TableHead>Started</TableHead>
-                  <TableHead>Duration</TableHead>
-                  <TableHead className="text-right">Results</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {runs.map((run) => {
-                  const summary = run.summary as Record<string, number> | null
-                  const duration =
-                    run.started_at && run.completed_at
-                      ? `${Math.round(
-                          (new Date(run.completed_at).getTime() -
-                            new Date(run.started_at).getTime()) /
-                            1000
-                        )}s`
-                      : '—'
+      {(!runs || runs.length === 0) ? (
+        <p className="text-xl opacity-50 py-8">No runs yet.</p>
+      ) : (
+        <div className="divide-y text-xl">
+          {runs.map((run) => {
+            const summary = run.summary as Record<string, number> | null
+            const duration =
+              run.started_at && run.completed_at
+                ? `${Math.round((new Date(run.completed_at).getTime() - new Date(run.started_at).getTime()) / 1000)}s`
+                : '—'
 
-                  return (
-                    <TableRow key={run.id} className="cursor-pointer">
-                      <TableCell>
-                        <Link href={`/projects/${projectId}/runs/${run.id}`}>
-                          <RunStatusBadge status={run.status} />
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Link href={`/projects/${projectId}/runs/${run.id}`} className="capitalize text-sm">
-                          {run.trigger}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Link href={`/projects/${projectId}/runs/${run.id}`} className="text-sm text-muted-foreground">
-                          {new Date(run.created_at).toLocaleString()}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Link href={`/projects/${projectId}/runs/${run.id}`} className="text-sm">
-                          {duration}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Link href={`/projects/${projectId}/runs/${run.id}`}>
-                          {summary && summary.total > 0 ? (
-                            <span className="text-sm">
-                              <span className="text-green-600">{summary.passed}</span>
-                              {' / '}
-                              <span className="text-red-600">
-                                {(summary.failed || 0) + (summary.errors || 0)}
-                              </span>
-                              {' / '}
-                              {summary.total}
-                            </span>
-                          ) : (
-                            <span className="text-sm text-muted-foreground">—</span>
-                          )}
-                        </Link>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+            return (
+              <Link
+                key={run.id}
+                href={`/projects/${projectId}/runs/${run.id}`}
+                className="flex items-center justify-between py-4"
+              >
+                <div className="flex items-center gap-6">
+                  <RunStatusBadge status={run.status} />
+                  <span className="text-lg opacity-50">
+                    {new Date(run.created_at).toLocaleString()}
+                  </span>
+                  <span className="text-lg opacity-40">{duration}</span>
+                </div>
+                {summary && summary.total > 0 ? (
+                  <span className="text-lg opacity-60">
+                    {summary.passed}/{summary.total}
+                  </span>
+                ) : (
+                  <span className="text-lg opacity-30">—</span>
+                )}
+              </Link>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 
 export default function SignupPage() {
   const [loading, setLoading] = useState(false)
+  const [confirmEmail, setConfirmEmail] = useState<string | null>(null)
 
   async function handleSubmit(formData: FormData) {
     setLoading(true)
@@ -16,7 +17,54 @@ export default function SignupPage() {
     if (result?.error) {
       toast.error(result.error)
       setLoading(false)
+    } else if (result?.success) {
+      setConfirmEmail(result.email ?? formData.get('email') as string)
     }
+  }
+
+  if (confirmEmail) {
+    return (
+      <div className="relative flex min-h-screen flex-col overflow-hidden bg-white">
+        <HalftoneBackground />
+
+        <header className="relative z-10 flex items-center justify-between px-6 py-5 sm:px-10">
+          <Link href="/" className="flex items-center gap-2">
+            <MetisLogo size={20} className="text-[#1a1a1a]" />
+          </Link>
+        </header>
+
+        <main className="relative z-10 flex flex-1 items-center justify-center px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white/90 px-10 py-12 shadow-sm backdrop-blur-sm ring-1 ring-[#1a1a1a]/[0.04] text-center">
+            <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-full bg-[#1a1a1a]/5">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#1a1a1a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="4" width="20" height="16" rx="2" />
+                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+              </svg>
+            </div>
+            <h1 className="text-2xl font-semibold tracking-tight text-[#1a1a1a] sm:text-3xl">
+              Check your email
+            </h1>
+            <p className="mt-3 text-sm text-[#1a1a1a]/50 leading-relaxed">
+              We sent a confirmation link to
+            </p>
+            <p className="mt-1 text-sm font-medium text-[#1a1a1a]">
+              {confirmEmail}
+            </p>
+            <p className="mt-4 text-sm text-[#1a1a1a]/50 leading-relaxed">
+              Click the link in the email to verify your account. If you don&apos;t see it, check your spam folder.
+            </p>
+            <div className="mt-8 pt-6 border-t border-[#1a1a1a]/5">
+              <Link
+                href="/login"
+                className="text-[13px] text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors"
+              >
+                Back to sign in
+              </Link>
+            </div>
+          </div>
+        </main>
+      </div>
+    )
   }
 
   return (

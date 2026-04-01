@@ -2,75 +2,24 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Separator } from '@/components/ui/separator'
-import { Switch } from '@/components/ui/switch'
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import {
-  Plus,
-  Sparkles,
-  Pencil,
-  Trash2,
-  ArrowUp,
-  ArrowDown,
-  X,
-  Loader2,
-  Check,
-} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
+import { Loader2 } from 'lucide-react'
 
 type StepType = 'navigate' | 'action' | 'assertion' | 'extract' | 'wait'
 
-interface TemplateStep {
-  order: number
-  instruction: string
-  type: StepType
-  url?: string
-  expected?: string
-  timeout?: number
-}
-
-interface Template {
-  id: string
-  project_id: string
-  name: string
-  description: string | null
-  steps: TemplateStep[]
-  source: 'manual' | 'ai_generated'
-  is_active: boolean
-  created_at: string
-  updated_at: string
-}
-
-interface GeneratedTemplate {
-  name: string
-  description: string
-  steps: TemplateStep[]
-}
+interface TemplateStep { order: number; instruction: string; type: StepType; url?: string; expected?: string; timeout?: number }
+interface Template { id: string; project_id: string; name: string; description: string | null; steps: TemplateStep[]; source: 'manual' | 'ai_generated'; is_active: boolean; created_at: string; updated_at: string }
+interface GeneratedTemplate { name: string; description: string; steps: TemplateStep[] }
 
 const STEP_TYPES: StepType[] = ['navigate', 'action', 'assertion', 'extract', 'wait']
-
-function emptyStep(order: number): TemplateStep {
-  return { order, instruction: '', type: 'action' }
-}
+function emptyStep(order: number): TemplateStep { return { order, instruction: '', type: 'action' } }
 
 export default function TemplatesPage() {
   const params = useParams<{ projectId: string }>()
@@ -78,14 +27,12 @@ export default function TemplatesPage() {
 
   const [templates, setTemplates] = useState<Template[]>([])
   const [loading, setLoading] = useState(true)
-
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null)
   const [formName, setFormName] = useState('')
   const [formDescription, setFormDescription] = useState('')
   const [formSteps, setFormSteps] = useState<TemplateStep[]>([emptyStep(1)])
   const [saving, setSaving] = useState(false)
-
   const [generating, setGenerating] = useState(false)
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false)
   const [generatedTemplates, setGeneratedTemplates] = useState<GeneratedTemplate[]>([])
@@ -93,499 +40,170 @@ export default function TemplatesPage() {
   const [savingGenerated, setSavingGenerated] = useState(false)
 
   const fetchTemplates = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/templates?projectId=${projectId}`)
-      if (res.ok) {
-        const data = await res.json()
-        setTemplates(data)
-      }
-    } finally {
-      setLoading(false)
-    }
+    try { const res = await fetch(`/api/templates?projectId=${projectId}`); if (res.ok) setTemplates(await res.json()) } finally { setLoading(false) }
   }, [projectId])
 
-  useEffect(() => {
-    fetchTemplates()
-  }, [fetchTemplates])
+  useEffect(() => { fetchTemplates() }, [fetchTemplates])
 
-  function openCreateDialog() {
-    setEditingTemplate(null)
-    setFormName('')
-    setFormDescription('')
-    setFormSteps([emptyStep(1)])
-    setEditDialogOpen(true)
-  }
-
-  function openEditDialog(template: Template) {
-    setEditingTemplate(template)
-    setFormName(template.name)
-    setFormDescription(template.description ?? '')
-    const steps = Array.isArray(template.steps) ? (template.steps as TemplateStep[]) : []
-    setFormSteps(steps.length > 0 ? steps : [emptyStep(1)])
-    setEditDialogOpen(true)
-  }
+  function openCreateDialog() { setEditingTemplate(null); setFormName(''); setFormDescription(''); setFormSteps([emptyStep(1)]); setEditDialogOpen(true) }
+  function openEditDialog(t: Template) { setEditingTemplate(t); setFormName(t.name); setFormDescription(t.description ?? ''); const s = Array.isArray(t.steps) ? t.steps as TemplateStep[] : []; setFormSteps(s.length > 0 ? s : [emptyStep(1)]); setEditDialogOpen(true) }
 
   async function handleSave() {
     setSaving(true)
     try {
-      const stepsWithOrder = formSteps.map((s, i) => ({ ...s, order: i + 1 }))
-      if (editingTemplate) {
-        const res = await fetch(`/api/templates/${editingTemplate.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: formName,
-            description: formDescription || null,
-            steps: stepsWithOrder,
-          }),
-        })
-        if (res.ok) {
-          setEditDialogOpen(false)
-          fetchTemplates()
-        }
-      } else {
-        const res = await fetch('/api/templates', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            project_id: projectId,
-            name: formName,
-            description: formDescription || undefined,
-            steps: stepsWithOrder,
-            source: 'manual',
-          }),
-        })
-        if (res.ok) {
-          setEditDialogOpen(false)
-          fetchTemplates()
-        }
-      }
-    } finally {
-      setSaving(false)
-    }
+      const steps = formSteps.map((s, i) => ({ ...s, order: i + 1 }))
+      const url = editingTemplate ? `/api/templates/${editingTemplate.id}` : '/api/templates'
+      const method = editingTemplate ? 'PATCH' : 'POST'
+      const body = editingTemplate ? { name: formName, description: formDescription || null, steps } : { project_id: projectId, name: formName, description: formDescription || undefined, steps, source: 'manual' }
+      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      if (res.ok) { setEditDialogOpen(false); fetchTemplates() }
+    } finally { setSaving(false) }
   }
 
-  async function handleDelete(templateId: string) {
-    const res = await fetch(`/api/templates/${templateId}`, { method: 'DELETE' })
-    if (res.ok || res.status === 204) {
-      fetchTemplates()
-    }
-  }
+  async function handleDelete(id: string) { const res = await fetch(`/api/templates/${id}`, { method: 'DELETE' }); if (res.ok || res.status === 204) fetchTemplates() }
+  async function handleToggleActive(t: Template) { const res = await fetch(`/api/templates/${t.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_active: !t.is_active }) }); if (res.ok) fetchTemplates() }
 
-  async function handleToggleActive(template: Template) {
-    const res = await fetch(`/api/templates/${template.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ is_active: !template.is_active }),
-    })
-    if (res.ok) {
-      fetchTemplates()
-    }
-  }
-
-  function updateStep(index: number, updates: Partial<TemplateStep>) {
-    setFormSteps((prev) =>
-      prev.map((s, i) => (i === index ? { ...s, ...updates } : s)),
-    )
-  }
-
-  function addStep() {
-    setFormSteps((prev) => [...prev, emptyStep(prev.length + 1)])
-  }
-
-  function removeStep(index: number) {
-    setFormSteps((prev) => prev.filter((_, i) => i !== index))
-  }
-
-  function moveStep(index: number, direction: 'up' | 'down') {
-    setFormSteps((prev) => {
-      const next = [...prev]
-      const swapIdx = direction === 'up' ? index - 1 : index + 1
-      if (swapIdx < 0 || swapIdx >= next.length) return prev
-      ;[next[index], next[swapIdx]] = [next[swapIdx], next[index]]
-      return next
-    })
-  }
+  function updateStep(i: number, u: Partial<TemplateStep>) { setFormSteps(p => p.map((s, j) => j === i ? { ...s, ...u } : s)) }
+  function addStep() { setFormSteps(p => [...p, emptyStep(p.length + 1)]) }
+  function removeStep(i: number) { setFormSteps(p => p.filter((_, j) => j !== i)) }
+  function moveStep(i: number, dir: 'up' | 'down') { setFormSteps(p => { const n = [...p]; const s = dir === 'up' ? i - 1 : i + 1; if (s < 0 || s >= n.length) return p; [n[i], n[s]] = [n[s], n[i]]; return n }) }
 
   async function handleGenerate() {
     setGenerating(true)
-    try {
-      const res = await fetch('/api/templates/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId }),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        setGeneratedTemplates(data)
-        setAcceptedIndices(new Set())
-        setReviewDialogOpen(true)
-      }
-    } finally {
-      setGenerating(false)
-    }
+    try { const res = await fetch('/api/templates/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId }) }); if (res.ok) { setGeneratedTemplates(await res.json()); setAcceptedIndices(new Set()); setReviewDialogOpen(true) } } finally { setGenerating(false) }
   }
 
-  function toggleAccepted(index: number) {
-    setAcceptedIndices((prev) => {
-      const next = new Set(prev)
-      if (next.has(index)) {
-        next.delete(index)
-      } else {
-        next.add(index)
-      }
-      return next
-    })
-  }
+  function toggleAccepted(i: number) { setAcceptedIndices(p => { const n = new Set(p); n.has(i) ? n.delete(i) : n.add(i); return n }) }
 
   async function handleSaveGenerated() {
     setSavingGenerated(true)
-    try {
-      const toSave = generatedTemplates.filter((_, i) => acceptedIndices.has(i))
-      await Promise.all(
-        toSave.map((t) =>
-          fetch('/api/templates', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              project_id: projectId,
-              name: t.name,
-              description: t.description,
-              steps: t.steps,
-              source: 'ai_generated',
-            }),
-          }),
-        ),
-      )
-      setReviewDialogOpen(false)
-      fetchTemplates()
-    } finally {
-      setSavingGenerated(false)
-    }
+    try { await Promise.all(generatedTemplates.filter((_, i) => acceptedIndices.has(i)).map(t => fetch('/api/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: projectId, name: t.name, description: t.description, steps: t.steps, source: 'ai_generated' }) }))); setReviewDialogOpen(false); fetchTemplates() } finally { setSavingGenerated(false) }
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
-      </div>
-    )
-  }
+  if (loading) return <p className="text-xl opacity-50 py-12 max-w-4xl mx-auto">Loading...</p>
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Test Templates</h1>
-          <p className="text-muted-foreground">
-            Define test flows to run against your application.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={handleGenerate} disabled={generating}>
-            {generating ? (
-              <Loader2 className="mr-2 size-4 animate-spin" />
-            ) : (
-              <Sparkles className="mr-2 size-4" />
-            )}
-            Generate with AI
-          </Button>
-          <Button onClick={openCreateDialog}>
-            <Plus className="mr-2 size-4" />
-            Create Template
-          </Button>
+    <div className="max-w-4xl mx-auto space-y-10">
+      <div className="flex items-center justify-between">
+        <h1 className="text-4xl">Templates</h1>
+        <div className="flex gap-6 text-xl">
+          <button onClick={handleGenerate} disabled={generating} className="underline opacity-50 hover:opacity-100 disabled:opacity-20">
+            {generating ? '...' : 'AI Generate'}
+          </button>
+          <button onClick={openCreateDialog} className="underline">+ Create</button>
         </div>
       </div>
 
       {templates.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <p className="text-muted-foreground mb-4">
-              No templates yet. Create one manually or generate with AI.
-            </p>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={handleGenerate} disabled={generating}>
-                <Sparkles className="mr-2 size-4" />
-                Generate with AI
-              </Button>
-              <Button onClick={openCreateDialog}>
-                <Plus className="mr-2 size-4" />
-                Create Template
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        <p className="text-xl opacity-50 py-8">No templates yet.</p>
       ) : (
-        <div className="grid gap-4">
-          {templates.map((template) => (
-            <Card key={template.id}>
-              <CardHeader>
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 space-y-1">
-                    <div className="flex items-center gap-2">
-                      <CardTitle>{template.name}</CardTitle>
-                      <Badge
-                        variant={template.source === 'ai_generated' ? 'secondary' : 'outline'}
-                      >
-                        {template.source === 'ai_generated' ? 'AI Generated' : 'Manual'}
-                      </Badge>
-                    </div>
-                    {template.description && (
-                      <CardDescription>{template.description}</CardDescription>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2">
-                      <Label htmlFor={`active-${template.id}`} className="text-xs text-muted-foreground">
-                        Active
-                      </Label>
-                      <Switch
-                        id={`active-${template.id}`}
-                        checked={template.is_active}
-                        onCheckedChange={() => handleToggleActive(template)}
-                      />
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => openEditDialog(template)}
-                    >
-                      <Pencil className="size-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => handleDelete(template.id)}
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </div>
+        <div className="divide-y">
+          {templates.map((t) => (
+            <div key={t.id} className="py-6">
+              <div className="flex items-start justify-between">
+                <div>
+                  <span className="text-xl">{t.name}</span>
+                  {t.source === 'ai_generated' && <span className="text-lg opacity-40 ml-3">AI</span>}
+                  {t.description && <p className="text-lg opacity-50 mt-1">{t.description}</p>}
                 </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-1">
-                  {(Array.isArray(template.steps) ? (template.steps as TemplateStep[]) : []).map(
-                    (step, idx) => (
-                      <div key={idx} className="flex items-start gap-2 text-sm">
-                        <Badge variant="outline" className="mt-0.5 shrink-0 font-mono text-xs">
-                          {step.type}
-                        </Badge>
-                        <span className="text-muted-foreground">{step.instruction}</span>
-                      </div>
-                    ),
-                  )}
+                <div className="flex items-center gap-4 text-lg">
+                  <div className="flex items-center gap-2">
+                    <span className="opacity-40">Active</span>
+                    <Switch checked={t.is_active} onCheckedChange={() => handleToggleActive(t)} />
+                  </div>
+                  <button onClick={() => openEditDialog(t)} className="opacity-50 hover:opacity-100">edit</button>
+                  <button onClick={() => handleDelete(t.id)} className="opacity-50 hover:opacity-100 hover:text-red-700">del</button>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+              <div className="mt-3 space-y-1">
+                {(Array.isArray(t.steps) ? t.steps as TemplateStep[] : []).map((step, idx) => (
+                  <div key={idx} className="text-lg flex gap-3">
+                    <span className="opacity-40">{step.type}</span>
+                    <span className="opacity-60">{step.instruction}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       )}
 
-      {/* Create / Edit Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
-              {editingTemplate ? 'Edit Template' : 'Create Template'}
-            </DialogTitle>
-            <DialogDescription>
-              {editingTemplate
-                ? 'Update the template details and steps.'
-                : 'Define a test template with ordered steps.'}
-            </DialogDescription>
+            <DialogTitle className="text-2xl">{editingTemplate ? 'Edit Template' : 'Create Template'}</DialogTitle>
+            <DialogDescription className="text-base opacity-60">{editingTemplate ? 'Update details and steps.' : 'Define steps for this test.'}</DialogDescription>
           </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="template-name">Name</Label>
-              <Input
-                id="template-name"
-                value={formName}
-                onChange={(e) => setFormName(e.target.value)}
-                placeholder="e.g. Login Flow Smoke Test"
-              />
+          <div className="space-y-6 text-xl">
+            <div>
+              <label className="block text-lg opacity-60 mb-2">Name</label>
+              <input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Login Flow Test" className="w-full border-b bg-transparent py-3 outline-none placeholder:opacity-30" />
             </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="template-description">Description</Label>
-              <Textarea
-                id="template-description"
-                value={formDescription}
-                onChange={(e) => setFormDescription(e.target.value)}
-                placeholder="What does this test verify?"
-              />
+            <div>
+              <label className="block text-lg opacity-60 mb-2">Description</label>
+              <textarea value={formDescription} onChange={e => setFormDescription(e.target.value)} placeholder="What does this test verify?" rows={2} className="w-full border-b bg-transparent py-3 outline-none resize-none placeholder:opacity-30" />
             </div>
-
-            <Separator />
-
-            <div className="space-y-3">
-              <Label>Steps</Label>
-              {formSteps.map((step, index) => (
-                <div
-                  key={index}
-                  className="space-y-2 rounded-lg border p-3"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      Step {index + 1}
-                    </span>
-                    <div className="flex gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        disabled={index === 0}
-                        onClick={() => moveStep(index, 'up')}
-                      >
-                        <ArrowUp className="size-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        disabled={index === formSteps.length - 1}
-                        onClick={() => moveStep(index, 'down')}
-                      >
-                        <ArrowDown className="size-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        disabled={formSteps.length <= 1}
-                        onClick={() => removeStep(index)}
-                      >
-                        <X className="size-3" />
-                      </Button>
+            <div className="space-y-4 pt-2">
+              <span className="text-lg opacity-60">Steps</span>
+              {formSteps.map((step, i) => (
+                <div key={i} className="border p-4 space-y-3">
+                  <div className="flex items-center justify-between text-lg">
+                    <span className="opacity-50">Step {i + 1}</span>
+                    <div className="flex gap-3 opacity-50">
+                      <button disabled={i === 0} onClick={() => moveStep(i, 'up')} className="disabled:opacity-20">↑</button>
+                      <button disabled={i === formSteps.length - 1} onClick={() => moveStep(i, 'down')} className="disabled:opacity-20">↓</button>
+                      <button disabled={formSteps.length <= 1} onClick={() => removeStep(i)} className="disabled:opacity-20 hover:text-red-700">×</button>
                     </div>
                   </div>
-                  <div className="grid gap-2 sm:grid-cols-[140px_1fr]">
-                    <Select
-                      value={step.type}
-                      onValueChange={(val) => updateStep(index, { type: val as StepType })}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {STEP_TYPES.map((t) => (
-                          <SelectItem key={t} value={t}>
-                            {t}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
+                  <div className="grid gap-3 sm:grid-cols-[160px_1fr]">
+                    <Select value={step.type} onValueChange={v => updateStep(i, { type: v as StepType })}>
+                      <SelectTrigger className="text-base"><SelectValue /></SelectTrigger>
+                      <SelectContent>{STEP_TYPES.map(t => <SelectItem key={t} value={t} className="text-base">{t}</SelectItem>)}</SelectContent>
                     </Select>
-                    <Input
-                      value={step.instruction}
-                      onChange={(e) => updateStep(index, { instruction: e.target.value })}
-                      placeholder="Instruction for the AI agent"
-                    />
+                    <input value={step.instruction} onChange={e => updateStep(i, { instruction: e.target.value })} placeholder="Instruction" className="w-full border-b bg-transparent py-2 text-base outline-none placeholder:opacity-30" />
                   </div>
-                  {step.type === 'navigate' && (
-                    <Input
-                      value={step.url ?? ''}
-                      onChange={(e) => updateStep(index, { url: e.target.value })}
-                      placeholder="URL to navigate to"
-                    />
-                  )}
-                  {step.type === 'assertion' && (
-                    <Input
-                      value={step.expected ?? ''}
-                      onChange={(e) => updateStep(index, { expected: e.target.value })}
-                      placeholder="Expected result"
-                    />
-                  )}
+                  {step.type === 'navigate' && <input value={step.url ?? ''} onChange={e => updateStep(i, { url: e.target.value })} placeholder="URL" className="w-full border-b bg-transparent py-2 text-base outline-none placeholder:opacity-30" />}
+                  {step.type === 'assertion' && <input value={step.expected ?? ''} onChange={e => updateStep(i, { expected: e.target.value })} placeholder="Expected" className="w-full border-b bg-transparent py-2 text-base outline-none placeholder:opacity-30" />}
                 </div>
               ))}
-              <Button variant="outline" onClick={addStep} className="w-full">
-                <Plus className="mr-2 size-4" />
-                Add Step
-              </Button>
+              <button onClick={addStep} className="text-lg underline opacity-50 hover:opacity-100">+ Add step</button>
             </div>
           </div>
-
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setEditDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSave}
-              disabled={saving || !formName.trim() || formSteps.length === 0}
-            >
-              {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
-              {editingTemplate ? 'Update' : 'Create'}
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving || !formName.trim() || formSteps.length === 0}>
+              {saving && <Loader2 className="mr-1 size-4 animate-spin" />}{editingTemplate ? 'Update' : 'Create'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* AI Review Dialog */}
       <Dialog open={reviewDialogOpen} onOpenChange={setReviewDialogOpen}>
-        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Review AI-Generated Templates</DialogTitle>
-            <DialogDescription>
-              Select the templates you want to save. You can review the steps for
-              each one before accepting.
-            </DialogDescription>
+            <DialogTitle className="text-2xl">Review AI Templates</DialogTitle>
+            <DialogDescription className="text-base opacity-60">Click to select, then save.</DialogDescription>
           </DialogHeader>
-
-          <div className="space-y-4">
+          <div className="divide-y text-xl">
             {generatedTemplates.map((gt, idx) => (
-              <div
-                key={idx}
-                className={`cursor-pointer rounded-lg border p-4 transition-colors ${
-                  acceptedIndices.has(idx)
-                    ? 'border-primary bg-primary/5'
-                    : 'hover:border-muted-foreground/30'
-                }`}
-                onClick={() => toggleAccepted(idx)}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 space-y-1">
-                    <div className="flex items-center gap-2">
-                      <h4 className="font-medium">{gt.name}</h4>
-                      <Badge variant="secondary">AI Generated</Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground">{gt.description}</p>
-                  </div>
-                  <div
-                    className={`flex size-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
-                      acceptedIndices.has(idx)
-                        ? 'border-primary bg-primary text-primary-foreground'
-                        : 'border-muted-foreground/30'
-                    }`}
-                  >
-                    {acceptedIndices.has(idx) && <Check className="size-3" />}
-                  </div>
+              <div key={idx} className={`py-5 cursor-pointer ${acceptedIndices.has(idx) ? 'opacity-100' : 'opacity-50'}`} onClick={() => toggleAccepted(idx)}>
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">{acceptedIndices.has(idx) ? '☑' : '☐'}</span>
+                  <span>{gt.name}</span>
                 </div>
-                <div className="mt-3 space-y-1">
-                  {gt.steps.map((step, sIdx) => (
-                    <div key={sIdx} className="flex items-start gap-2 text-sm">
-                      <Badge variant="outline" className="mt-0.5 shrink-0 font-mono text-xs">
-                        {step.type}
-                      </Badge>
-                      <span className="text-muted-foreground">{step.instruction}</span>
-                    </div>
+                <p className="text-lg opacity-50 mt-1">{gt.description}</p>
+                <div className="mt-2 space-y-1">
+                  {gt.steps.map((s, si) => (
+                    <div key={si} className="text-lg flex gap-3"><span className="opacity-40">{s.type}</span><span className="opacity-60">{s.instruction}</span></div>
                   ))}
                 </div>
               </div>
             ))}
           </div>
-
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setReviewDialogOpen(false)}
-            >
-              Dismiss All
-            </Button>
-            <Button
-              onClick={handleSaveGenerated}
-              disabled={savingGenerated || acceptedIndices.size === 0}
-            >
-              {savingGenerated && <Loader2 className="mr-2 size-4 animate-spin" />}
-              Save {acceptedIndices.size} Template{acceptedIndices.size !== 1 ? 's' : ''}
+            <Button variant="outline" onClick={() => setReviewDialogOpen(false)}>Dismiss</Button>
+            <Button onClick={handleSaveGenerated} disabled={savingGenerated || acceptedIndices.size === 0}>
+              {savingGenerated && <Loader2 className="mr-1 size-4 animate-spin" />}Save {acceptedIndices.size}
             </Button>
           </DialogFooter>
         </DialogContent>

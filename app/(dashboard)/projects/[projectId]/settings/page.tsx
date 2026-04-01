@@ -1,9 +1,6 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { ArrowLeft } from 'lucide-react'
 
 type PageProps = { params: Promise<{ projectId: string }> }
 
@@ -11,9 +8,7 @@ export default async function ProjectSettingsPage({ params }: PageProps) {
   const { projectId } = await params
   const supabase = await createClient()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
   const { data: membership } = await supabase
@@ -40,40 +35,29 @@ export default async function ProjectSettingsPage({ params }: PageProps) {
     .eq('project_id', projectId)
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-2">
-        <Link href={`/projects/${project.id}`}>
-          <Button variant="ghost" size="sm" className="w-fit -ml-2">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to project
-          </Button>
+    <div className="max-w-4xl mx-auto space-y-10">
+      <div>
+        <Link href={`/projects/${project.id}`} className="text-lg opacity-50 hover:opacity-80">
+          ← {project.name}
         </Link>
-        <h1 className="text-3xl font-bold tracking-tight">Project settings</h1>
-        <p className="text-muted-foreground">{project.name}</p>
+        <h1 className="text-4xl mt-3">Settings</h1>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Integrations</CardTitle>
-          <CardDescription>
-            Connect GitHub, PostHog, and Slack from the API routes; status is shown here.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ul className="space-y-2 text-sm">
-            {integrations && integrations.length > 0 ? (
-              integrations.map((row) => (
-                <li key={row.type} className="flex justify-between rounded-md border px-3 py-2">
-                  <span className="font-medium capitalize">{row.type}</span>
-                  <span className="text-muted-foreground">{row.status}</span>
-                </li>
-              ))
-            ) : (
-              <li className="text-muted-foreground">No integrations connected yet.</li>
-            )}
-          </ul>
-        </CardContent>
-      </Card>
+      <div>
+        <h2 className="text-xl opacity-50 mb-4">Integrations</h2>
+        {integrations && integrations.length > 0 ? (
+          <div className="divide-y text-xl">
+            {integrations.map((row) => (
+              <div key={row.type} className="flex justify-between py-4">
+                <span>{row.type}</span>
+                <span className="opacity-50">{row.status}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xl opacity-50">No integrations connected.</p>
+        )}
+      </div>
     </div>
   )
 }

@@ -1,7 +1,4 @@
 import { createClient } from '@/lib/supabase/server'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Users } from 'lucide-react'
 
 export default async function SettingsPage() {
   const supabase = await createClient()
@@ -9,7 +6,6 @@ export default async function SettingsPage() {
   const { data: user } = await supabase.auth.getUser()
   if (!user.user) return null
 
-  // Get user's org and members
   const { data: membership } = await supabase
     .from('org_members')
     .select('org_id, role, organizations(id, name, slug, plan)')
@@ -18,74 +14,44 @@ export default async function SettingsPage() {
     .single()
 
   const org = (membership?.organizations as unknown as {
-    id: string
-    name: string
-    slug: string
-    plan: string
+    id: string; name: string; slug: string; plan: string
   }) ?? { id: '', name: 'Unknown', slug: '', plan: 'free' }
 
-  // Get all members of this org
   const { data: members } = await supabase
     .from('org_members')
     .select('user_id, role')
     .eq('org_id', org.id)
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground">
-          Manage your organization settings.
-        </p>
+    <div className="max-w-4xl mx-auto space-y-14">
+      <h1 className="text-4xl">Settings</h1>
+
+      <div className="space-y-4 text-xl">
+        <div className="flex justify-between py-2">
+          <span className="opacity-50">Organization</span>
+          <span>{org.name}</span>
+        </div>
+        <div className="flex justify-between py-2">
+          <span className="opacity-50">Slug</span>
+          <span>{org.slug}</span>
+        </div>
+        <div className="flex justify-between py-2">
+          <span className="opacity-50">Plan</span>
+          <span>{org.plan}</span>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Organization</CardTitle>
-          <CardDescription>Your organization details</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-2">
-            <label className="text-sm font-medium text-muted-foreground">Name</label>
-            <p className="text-sm">{org.name}</p>
-          </div>
-          <div className="grid gap-2">
-            <label className="text-sm font-medium text-muted-foreground">Slug</label>
-            <p className="text-sm font-mono">{org.slug}</p>
-          </div>
-          <div className="grid gap-2">
-            <label className="text-sm font-medium text-muted-foreground">Plan</label>
-            <Badge variant="secondary" className="w-fit capitalize">{org.plan}</Badge>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Users className="h-5 w-5" />
-            <CardTitle>Members</CardTitle>
-          </div>
-          <CardDescription>
-            People who have access to this organization
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {members?.map((member) => (
-              <div
-                key={member.user_id}
-                className="flex items-center justify-between rounded-md border p-3"
-              >
-                <span className="text-sm font-mono">{member.user_id}</span>
-                <Badge variant={member.role === 'owner' ? 'default' : 'secondary'}>
-                  {member.role}
-                </Badge>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      <div>
+        <h2 className="text-xl opacity-50 mb-4">Members</h2>
+        <div className="divide-y text-xl">
+          {members?.map((member) => (
+            <div key={member.user_id} className="flex items-center justify-between py-4">
+              <span className="text-lg truncate max-w-md">{member.user_id}</span>
+              <span className="text-lg opacity-50">{member.role}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
