@@ -8,23 +8,23 @@ export default function LandingPage() {
       <HalftoneBackground />
 
       <header className="relative z-10 flex items-center justify-between px-6 py-5 sm:px-10">
-        <Link href="/" className="flex items-center gap-2">
-          <MetisLogo size={20} className="text-[#1a1a1a]" />
-          <span className="text-[15px] font-medium tracking-tight text-[#1a1a1a]">
+        <Link href="/" className="flex items-center gap-2.5">
+          <MetisLogo size={26} className="text-[#1a1a1a]" />
+          <span className="text-lg font-medium tracking-tight text-[#1a1a1a]">
             Verona
           </span>
         </Link>
 
-        <nav className="flex items-center gap-4">
+        <nav className="flex items-center gap-5">
           <Link
             href="/signup"
-            className="text-[13px] text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors"
+            className="text-[15px] text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors"
           >
             Sign Up
           </Link>
           <Link
             href="/login"
-            className="text-[13px] text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors"
+            className="text-[15px] text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors"
           >
             Log In
           </Link>
