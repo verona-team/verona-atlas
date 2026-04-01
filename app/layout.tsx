@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { Geist, Geist_Mono, Inter } from 'next/font/google'
+import { Geist, Geist_Mono, DM_Serif_Display } from 'next/font/google'
 import { Toaster } from '@/components/ui/sonner'
 import './globals.css'
 
@@ -13,9 +13,10 @@ const geistMono = Geist_Mono({
   subsets: ['latin'],
 })
 
-const inter = Inter({
-  variable: '--font-inter',
+const dmSerif = DM_Serif_Display({
+  variable: '--font-serif',
   subsets: ['latin'],
+  weight: '400',
 })
 
 export const metadata: Metadata = {
@@ -31,7 +32,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${inter.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${dmSerif.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
         {children}
