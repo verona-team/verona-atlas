@@ -15,6 +15,35 @@ function getApp(): App<{ Octokit: typeof Octokit }> {
   })
 }
 
+let _cachedAppSlug: string | null = null
+
+/**
+ * Resolve the GitHub App's slug dynamically via the authenticated GET /app
+ * endpoint. Falls back to GITHUB_APP_SLUG env var if the API call fails.
+ * The result is cached for the lifetime of the process.
+ */
+export async function getAppSlug(): Promise<string> {
+  if (_cachedAppSlug) return _cachedAppSlug
+
+  if (process.env.GITHUB_APP_SLUG) {
+    _cachedAppSlug = process.env.GITHUB_APP_SLUG
+    return _cachedAppSlug
+  }
+
+  try {
+    const app = getApp()
+    const { data } = await app.octokit.request("GET /app")
+    if (data?.slug) {
+      _cachedAppSlug = data.slug
+      return _cachedAppSlug
+    }
+  } catch (e) {
+    console.warn("Failed to fetch GitHub App slug from API:", e)
+  }
+
+  return "atlas-qa"
+}
+
 export async function getInstallationToken(installationId: number): Promise<string> {
   const app = getApp()
   const { data } = await app.octokit.rest.apps.createInstallationAccessToken({
@@ -108,8 +137,9 @@ export async function fetchCommitDiff(
   return data as unknown as string
 }
 
-export function getInstallUrl(): string {
-  return `https://github.com/apps/${process.env.GITHUB_APP_SLUG || "atlas-qa"}/installations/new`
+export async function getInstallUrl(): Promise<string> {
+  const slug = await getAppSlug()
+  return `https://github.com/apps/${slug}/installations/new`
 }
 
 export function verifyWebhookSignature(
