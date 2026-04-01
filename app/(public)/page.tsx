@@ -11,13 +11,13 @@ export default function LandingPage() {
         <nav className="flex items-center gap-5">
           <Link
             href="/signup"
-            className="text-[13px] text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors"
+            className="text-[15px] font-medium text-[#1a1a1a] hover:text-[#1a1a1a]/70 transition-colors"
           >
             Sign Up
           </Link>
           <Link
             href="/login"
-            className="text-[13px] text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors"
+            className="rounded-full border border-[#1a1a1a]/30 px-4 py-1.5 text-[15px] font-medium text-[#1a1a1a] hover:border-[#1a1a1a]/50 transition-colors"
           >
             Log In
           </Link>
@@ -28,12 +28,10 @@ export default function LandingPage() {
         <div className="flex flex-col items-center gap-8 -mt-16">
           <MetisLogo size={36} className="text-[#1a1a1a]" />
           <h1
-            className="max-w-xl text-center text-[2.5rem] leading-[1.15] tracking-tight text-[#1a1a1a]"
+            className="max-w-2xl text-center text-5xl leading-[1.1] tracking-tight text-[#1a1a1a] sm:text-6xl"
             style={{ fontFamily: 'var(--font-serif)' }}
           >
-            Training agents to work
-            <br />
-            reliably for your customers.
+            Autonomous QA that works.
           </h1>
         </div>
       </main>

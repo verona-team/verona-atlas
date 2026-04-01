@@ -111,6 +111,10 @@ export function HalftoneBackground() {
 
       const r = 185, g = 180, b = 70
 
+      const clearX = width - 160
+      const clearY = 28
+      const clearRadius = 120
+
       for (let x = 0; x < width; x += dotSpacing) {
         for (let y = 0; y < height; y += dotSpacing) {
           const nx = x * noiseScale
@@ -119,7 +123,15 @@ export function HalftoneBackground() {
           const n = marbleNoise(simplex, nx, ny)
 
           const normalized = (n + 1) / 2
-          const intensity = Math.pow(Math.max(0, normalized - 0.3) / 0.7, 0.8)
+          let intensity = Math.pow(Math.max(0, normalized - 0.3) / 0.7, 0.8)
+
+          const dx = x - clearX
+          const dy = y - clearY
+          const dist = Math.sqrt(dx * dx + dy * dy)
+          if (dist < clearRadius) {
+            const fade = Math.pow(dist / clearRadius, 3)
+            intensity *= fade
+          }
 
           if (intensity > 0.03) {
             const radius = Math.min(maxRadius, intensity * maxRadius * 1.4)
