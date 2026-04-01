@@ -121,7 +121,7 @@ function IntegrationCard({
         <div>
           <h3 className="text-xl font-medium">{title}</h3>
           <p className="text-base opacity-50 mt-1">{description}</p>
-          {meta && <p className="text-sm opacity-40 mt-1">{meta}</p>}
+          {meta && <p className="text-base opacity-40 mt-1">{meta}</p>}
         </div>
         <span className={`text-sm px-3 py-1 rounded-full ${connected ? 'bg-green-500/10 text-green-600' : 'opacity-40'}`}>
           {connected ? 'Connected' : 'Not connected'}
@@ -195,7 +195,7 @@ function GitHubCard({
           </button>
         )
       ) : (
-        <p className="text-sm opacity-40">Manage repos in project settings.</p>
+        <p className="text-base opacity-40">Manage repos in project settings.</p>
       )}
     </IntegrationCard>
   )
@@ -671,13 +671,13 @@ function SlackCard({
                 </button>
               ))}
               {channels.length === 0 && (
-                <p className="text-sm opacity-40 px-3 py-2">No channels found.</p>
+                <p className="text-base opacity-40 px-3 py-2">No channels found.</p>
               )}
             </div>
           )}
         </div>
       ) : (
-        <button onClick={loadChannels} disabled={loadingChannels} className="text-sm opacity-40 underline">
+        <button onClick={loadChannels} disabled={loadingChannels} className="text-base opacity-40 underline">
           Change channel
         </button>
       )}

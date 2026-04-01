@@ -130,7 +130,3 @@
   }
 }
 
-/* Dashboard terminal font scope */
-.terminal-ui {
-  font-family: var(--font-vt323), monospace;
-}
