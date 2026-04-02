@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { flushLangSmithTraces, getLangSmithTracingClient } from '@/lib/langsmith-ai'
 import { z } from 'zod'
 import { generateTemplates } from '@/lib/test-planner'
 import { fetchRecentCommits } from '@/lib/github'
@@ -12,6 +14,12 @@ const GenerateSchema = z.object({
 })
 
 export async function POST(request: NextRequest) {
+  if (getLangSmithTracingClient()) {
+    after(async () => {
+      await flushLangSmithTraces()
+    })
+  }
+
   const supabase = await createClient()
   const {
     data: { user },
@@ -55,7 +63,7 @@ export async function POST(request: NextRequest) {
   const githubIntegration = integrations?.find((i) => i.type === 'github')
   const posthogIntegration = integrations?.find((i) => i.type === 'posthog')
 
-  let commits: Array<{ sha: string; message: string; date: string; author: string }> = []
+  const commits: Array<{ sha: string; message: string; date: string; author: string }> = []
   if (githubIntegration) {
     try {
       const config = githubIntegration.config as Record<string, Json>
