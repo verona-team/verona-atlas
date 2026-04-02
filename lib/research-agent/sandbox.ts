@@ -4,6 +4,7 @@ import type { IntegrationCredentials } from './types'
 
 export async function createResearchSandbox(
   integrations: IntegrationCredentials[],
+  env?: Record<string, string>,
 ): Promise<Sandbox> {
   const allowRules: Record<string, Array<{ transform: Array<{ headers: Record<string, string> }> }>> = {}
 
@@ -18,6 +19,7 @@ export async function createResearchSandbox(
   const sandbox = await Sandbox.create({
     runtime: 'node24',
     timeout: 800_000,
+    ...(env && Object.keys(env).length > 0 ? { env } : {}),
     networkPolicy: Object.keys(allowRules).length > 0
       ? { allow: allowRules }
       : 'deny-all',
@@ -29,13 +31,17 @@ export async function createResearchSandbox(
 export async function executeInSandbox(
   sandbox: Sandbox,
   code: string,
+  env?: Record<string, string>,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   await sandbox.writeFiles([{
     path: 'script.mjs',
     content: Buffer.from(code),
   }])
 
-  const result = await sandbox.runCommand('node', ['script.mjs'])
+  const result =
+    env && Object.keys(env).length > 0
+      ? await sandbox.runCommand({ cmd: 'node', args: ['script.mjs'], env })
+      : await sandbox.runCommand('node', ['script.mjs'])
 
   const stdout = await result.stdout()
   const stderr = await result.stderr()

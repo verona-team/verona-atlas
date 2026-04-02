@@ -16,6 +16,34 @@ interface AgentContext {
 
 const lsClient = getLangSmithTracingClient()
 
+function buildResearchNotesFromGeneration(result: {
+  text: string
+  steps: Array<{
+    text?: string
+    toolResults: Array<{ toolName: string; output: unknown }>
+  }>
+}): string {
+  const chunks: string[] = []
+  for (const step of result.steps) {
+    if (step.text?.trim()) chunks.push(step.text.trim())
+    for (const tr of step.toolResults) {
+      if (tr.toolName !== 'execute_code') continue
+      const out = tr.output as {
+        purpose?: string
+        exitCode?: number
+        stdout?: string
+        stderr?: string
+      }
+      if (!out || typeof out !== 'object') continue
+      chunks.push(
+        `[execute_code: ${out.purpose ?? 'unnamed'}] exit ${out.exitCode ?? '?'}\nstdout:\n${out.stdout ?? ''}\nstderr:\n${out.stderr ?? ''}`,
+      )
+    }
+  }
+  const joined = chunks.join('\n\n---\n\n')
+  return joined || result.text || ''
+}
+
 async function runResearchLoopCore(ctx: AgentContext): Promise<ResearchReport> {
   const integrationList = Object.keys(ctx.integrationDocs)
 
@@ -47,7 +75,7 @@ Investigate thoroughly:
 
 After gathering data from all available integrations, you will be asked to produce a structured report.`
 
-  const { text: researchNotes } = await generateText({
+  const researchGen = await generateText({
     model,
     system: systemPrompt,
     messages: [{
@@ -64,7 +92,7 @@ After gathering data from all available integrations, you will be asked to produ
         execute: traceable(
           async ({ code, purpose }: { code: string; purpose: string }) => {
             try {
-              const result = await executeInSandbox(ctx.sandbox, code)
+              const result = await executeInSandbox(ctx.sandbox, code, ctx.integrationEnvVars)
               return {
                 purpose,
                 exitCode: result.exitCode,
@@ -106,6 +134,8 @@ After gathering data from all available integrations, you will be asked to produ
     },
     stopWhen: stepCountIs(15),
   })
+
+  const researchNotes = buildResearchNotesFromGeneration(researchGen)
 
   const { output: report } = await generateText({
     model,
