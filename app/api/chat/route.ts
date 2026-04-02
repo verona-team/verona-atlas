@@ -22,6 +22,17 @@ import type { Json } from '@/lib/supabase/types'
 
 export const maxDuration = 800
 
+async function setSessionStatus(
+  serviceClient: ReturnType<typeof createServiceRoleClient>,
+  sessionId: string,
+  status: 'idle' | 'thinking' | 'error',
+) {
+  await serviceClient
+    .from('chat_sessions')
+    .update({ status, status_updated_at: new Date().toISOString() })
+    .eq('id', sessionId)
+}
+
 async function getOrRunResearch(
   serviceClient: ReturnType<typeof createServiceRoleClient>,
   sessionId: string,
@@ -103,6 +114,12 @@ export async function POST(request: Request) {
   const serviceClient = createServiceRoleClient()
   const session = await getOrCreateSession(serviceClient, projectId)
 
+  await setSessionStatus(serviceClient, session.id, 'thinking')
+
+  after(async () => {
+    await setSessionStatus(serviceClient, session.id, 'idle')
+  })
+
   /** Set when flow proposal DB insert fails so onFinish can persist a visible error. */
   let flowProposalInsertError: string | null = null
 
@@ -128,6 +145,7 @@ export async function POST(request: Request) {
 
   const ghReady = await getGithubIntegrationReady(serviceClient, projectId)
   if (!ghReady.ok) {
+    await setSessionStatus(serviceClient, session.id, 'idle')
     return new Response(
       JSON.stringify({
         error: ghReady.reason,
@@ -456,6 +474,7 @@ When the user approves flows and wants to start testing, use the start_test_run 
           }
 
           await maybeSummarizeOlderMessages(serviceClient, session.id)
+          await setSessionStatus(serviceClient, session.id, 'idle')
         },
       })
 

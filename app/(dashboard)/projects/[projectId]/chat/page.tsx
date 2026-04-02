@@ -70,6 +70,8 @@ export default async function ChatPage({ params }: PageProps) {
           projectId={projectId}
           sessionId={session.id}
           initialMessages={messages ?? []}
+          initialSessionStatus={session.status}
+          initialStatusUpdatedAt={session.status_updated_at}
           projectName={project.name}
           appUrl={project.app_url}
         />

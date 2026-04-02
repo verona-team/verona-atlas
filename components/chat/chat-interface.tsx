@@ -60,10 +60,14 @@ function getVisibleTextFromMessageParts(
   return ''
 }
 
+const STALE_THINKING_MS = 15 * 60 * 1000
+
 interface ChatInterfaceProps {
   projectId: string
   sessionId: string
   initialMessages: ChatMessage[]
+  initialSessionStatus: 'idle' | 'thinking' | 'error'
+  initialStatusUpdatedAt: string | null
   projectName: string
   appUrl: string
 }
@@ -72,6 +76,8 @@ export function ChatInterface({
   projectId,
   sessionId,
   initialMessages,
+  initialSessionStatus,
+  initialStatusUpdatedAt,
   projectName,
   appUrl,
 }: ChatInterfaceProps) {
@@ -86,6 +92,19 @@ export function ChatInterface({
   const lastBootstrapKeyRef = useRef<string | null>(null)
   const bootstrapFailureCountRef = useRef(0)
   const dbEmptyRef = useRef(initialMessages.length === 0)
+
+  const computeSessionThinking = useCallback(
+    (status: string, updatedAt: string | null) => {
+      if (status !== 'thinking') return false
+      if (!updatedAt) return true
+      return Date.now() - new Date(updatedAt).getTime() < STALE_THINKING_MS
+    },
+    [],
+  )
+
+  const [backendThinking, setBackendThinking] = useState(() =>
+    computeSessionThinking(initialSessionStatus, initialStatusUpdatedAt),
+  )
 
   useEffect(() => {
     dbEmptyRef.current = dbMessages.length === 0
@@ -158,6 +177,8 @@ export function ChatInterface({
       return
     }
 
+    if (backendThinking) return
+
     const key = `${sessionId}:${bootstrapNonce}`
     if (lastBootstrapKeyRef.current === key) return
     lastBootstrapKeyRef.current = key
@@ -168,6 +189,7 @@ export function ChatInterface({
   }, [
     dbMessages.length,
     bootstrapNonce,
+    backendThinking,
     sessionId,
     projectName,
     appUrl,
@@ -223,6 +245,34 @@ export function ChatInterface({
       supabase.removeChannel(channel)
     }
   }, [sessionId])
+
+  useEffect(() => {
+    const supabase = createClient()
+    const channel = supabase
+      .channel(`session-status-${sessionId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'chat_sessions',
+          filter: `id=eq.${sessionId}`,
+        },
+        (payload) => {
+          const row = payload.new as { status?: string; status_updated_at?: string }
+          if (row.status) {
+            setBackendThinking(
+              computeSessionThinking(row.status, row.status_updated_at ?? null),
+            )
+          }
+        },
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [sessionId, computeSessionThinking])
 
   // Realtime can miss events (tab backgrounded, reconnect gaps). Re-fetch after a response completes.
   useEffect(() => {
@@ -320,6 +370,10 @@ export function ChatInterface({
     }
   }
 
+  const approvedCount = Object.values(flowStates).filter((s) => s === 'approved').length
+  const isStreamActive = status === 'submitted' || status === 'streaming'
+  const isProcessing = isStreamActive || backendThinking
+
   const displayMessages = useMemo(() => {
     const dbRendered = dbMessages
       .filter((m) => m.role !== 'system')
@@ -330,8 +384,6 @@ export function ChatInterface({
         metadata: m.metadata as Record<string, Json> | undefined,
         isStreaming: false,
       }))
-
-    const isStreamActive = status === 'submitted' || status === 'streaming'
 
     // Match DB rows by role + content prefix (UI message ids differ from DB UUIDs).
     const dbContentSet = new Set(
@@ -357,7 +409,6 @@ export function ChatInterface({
           role: m.role as 'user' | 'assistant',
           content: text,
           metadata: undefined as Record<string, Json> | undefined,
-          // Only the last bubble uses this (see MessageBubble); mirror prior behavior.
           isStreaming: isStreamActive && m.role === 'assistant',
         }
       })
@@ -372,17 +423,12 @@ export function ChatInterface({
       return [...dbRendered, ...streamNotYetInDb]
     }
 
-    // After the stream ends, Supabase realtime can lag briefly behind `ready`.
-    // Keep showing stream copy until the same content appears in `dbMessages`.
     if (streamNotYetInDb.length > 0) {
       return [...dbRendered, ...streamNotYetInDb]
     }
 
     return dbRendered
-  }, [dbMessages, streamMessages, status])
-
-  const approvedCount = Object.values(flowStates).filter((s) => s === 'approved').length
-  const isProcessing = status === 'submitted' || status === 'streaming'
+  }, [dbMessages, streamMessages, isStreamActive])
 
   return (
     <div className="flex flex-col h-full">
