@@ -81,8 +81,8 @@ Auth header is automatically injected via X-API-Key.
 The project name is provided as environment variable LANGSMITH_PROJECT_NAME (optional).
 
 Key endpoints:
-- GET /api/v1/sessions?limit=100 — list projects (called "sessions" in the API)
-- POST /api/v1/runs/query — query runs. Body: { "filter": "gte(start_time, \\"ISO_DATE\\")", "limit": 50 } or { "filter": "and(gte(start_time, \\"ISO_DATE\\"), eq(status, \\"error\\"))", "limit": 50 } for failed runs only. Optionally add "session_name": "project-name" to filter by project.
+- GET https://api.smith.langchain.com/sessions?name=PROJECT_NAME — resolve the tracing project (session) UUID (.id on the first object in the array). POST /runs/query must use JSON field "session": ["<session-uuid>"], not "session_name".
+- POST https://api.smith.langchain.com/runs/query — query runs. Body example: { "filter": "gte(start_time, \\"ISO_DATE\\")", "limit": 50, "session": ["<session-uuid>"] }. For failed runs use a filter like and(neq(error, null), gte(start_time, \\"ISO_DATE\\")) or eq(status, "error") per your trace schema.
 - Response .runs[] has .id, .name, .run_type, .status, .error, .start_time, .end_time, .total_tokens, .prompt_tokens, .completion_tokens`,
 
   braintrust: `# Braintrust API

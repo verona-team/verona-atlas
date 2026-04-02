@@ -276,6 +276,29 @@ async def fetch_sentry_realtime_events(config: dict, since_minutes: int = 5) -> 
 DEFAULT_LANGSMITH_URL = "https://api.smith.langchain.com"
 
 
+async def _langsmith_session_id_for_project(
+    client: httpx.AsyncClient,
+    api_url: str,
+    api_key: str,
+    project_name: str | None,
+) -> str | None:
+    """Resolve tracing project (session) UUID. LangSmith /runs/query expects `session`, not `session_name`."""
+    if not project_name:
+        return None
+    response = await client.get(
+        f"{api_url.rstrip('/')}/api/v1/sessions",
+        headers={"X-API-Key": api_key},
+        params={"name": project_name},
+    )
+    if response.status_code != 200:
+        return None
+    data = response.json()
+    if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+        sid = data[0].get("id")
+        return str(sid) if sid else None
+    return None
+
+
 async def fetch_langsmith_traces(config: dict, since_minutes: int = 10) -> list[dict]:
     """Fetch recent LLM traces from LangSmith."""
     api_key_encrypted = config.get("api_key_encrypted")
@@ -291,10 +314,14 @@ async def fetch_langsmith_traces(config: dict, since_minutes: int = 10) -> list[
         "filter": f'gte(start_time, "{since}")',
         "limit": 50,
     }
-    if project_name:
-        body["session_name"] = project_name
 
     async with httpx.AsyncClient() as client:
+        session_id = await _langsmith_session_id_for_project(client, api_url, api_key, project_name)
+        if project_name and not session_id:
+            return []
+        if session_id:
+            body["session"] = [session_id]
+
         response = await client.post(
             f"{api_url}/api/v1/runs/query",
             headers={"X-API-Key": api_key, "Content-Type": "application/json"},
@@ -333,10 +360,14 @@ async def fetch_langsmith_errors(config: dict, since_minutes: int = 10) -> list[
         "filter": f'and(gte(start_time, "{since}"), eq(status, "error"))',
         "limit": 50,
     }
-    if project_name:
-        body["session_name"] = project_name
 
     async with httpx.AsyncClient() as client:
+        session_id = await _langsmith_session_id_for_project(client, api_url, api_key, project_name)
+        if project_name and not session_id:
+            return []
+        if session_id:
+            body["session"] = [session_id]
+
         response = await client.post(
             f"{api_url}/api/v1/runs/query",
             headers={"X-API-Key": api_key, "Content-Type": "application/json"},

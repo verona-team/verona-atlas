@@ -28,6 +28,22 @@ function getBaseUrl(config: LangSmithConfig): string {
   return (config.apiUrl || DEFAULT_LANGSMITH_API_URL).replace(/\/$/, "")
 }
 
+/** LangSmith /runs/query expects `session` (UUIDs), not `session_name`. */
+async function resolveSessionId(
+  base: string,
+  apiKey: string,
+  projectName: string,
+): Promise<string | null> {
+  const response = await fetch(`${base}/api/v1/sessions?name=${encodeURIComponent(projectName)}`, {
+    headers: headers(apiKey),
+  })
+  if (!response.ok) return null
+  const data = (await response.json()) as Array<Record<string, unknown>>
+  if (!Array.isArray(data) || data.length === 0) return null
+  const id = data[0]?.id
+  return id != null ? String(id) : null
+}
+
 function headers(apiKey: string): Record<string, string> {
   return {
     "X-API-Key": apiKey,
@@ -82,7 +98,11 @@ export async function fetchRecentRuns(
   }
 
   if (projectName) {
-    filterBody.session_name = projectName
+    const sessionId = await resolveSessionId(base, config.apiKey, projectName)
+    if (!sessionId) {
+      return []
+    }
+    filterBody.session = [sessionId]
   }
 
   const response = await fetch(`${base}/api/v1/runs/query`, {
@@ -113,7 +133,11 @@ export async function fetchFailedRuns(
   }
 
   if (projectName) {
-    filterBody.session_name = projectName
+    const sessionId = await resolveSessionId(base, config.apiKey, projectName)
+    if (!sessionId) {
+      return []
+    }
+    filterBody.session = [sessionId]
   }
 
   const response = await fetch(`${base}/api/v1/runs/query`, {
