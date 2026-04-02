@@ -26,7 +26,7 @@ export async function gatherIntegrationContext(
   const githubIntegration = integrations?.find((i) => i.type === 'github')
   const posthogIntegration = integrations?.find((i) => i.type === 'posthog')
 
-  let commits: IntegrationData['commits'] = []
+  const commits: IntegrationData['commits'] = []
   if (githubIntegration) {
     try {
       const config = githubIntegration.config as Record<string, Json>

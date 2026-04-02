@@ -1,4 +1,4 @@
-import { streamText, type CoreMessage, type CoreTool, generateObject, tool } from 'ai'
+import { streamText, convertToModelMessages, tool, stepCountIs, type UIMessage } from 'ai'
 import { z } from 'zod'
 import { chatModel } from '@/lib/ai'
 import { createClient } from '@/lib/supabase/server'
@@ -10,6 +10,8 @@ import { gatherIntegrationContext } from '@/lib/chat/integration-context'
 import { triggerTestRun } from '@/lib/modal'
 import type { Json } from '@/lib/supabase/types'
 
+export const maxDuration = 60
+
 export async function POST(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -18,8 +20,8 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json()
-  const { messages, projectId } = body as {
-    messages: Array<{ role: string; content: string }>
+  const { messages: uiMessages, projectId } = body as {
+    messages: UIMessage[]
     projectId: string
   }
 
@@ -52,16 +54,23 @@ export async function POST(request: Request) {
   const serviceClient = createServiceRoleClient()
   const session = await getOrCreateSession(serviceClient, projectId)
 
-  const lastUserMessage = messages[messages.length - 1]
-  if (lastUserMessage && lastUserMessage.role === 'user') {
-    await serviceClient.from('chat_messages').insert({
-      session_id: session.id,
-      role: 'user',
-      content: lastUserMessage.content,
-    })
+  const lastMessage = uiMessages[uiMessages.length - 1]
+  if (lastMessage && lastMessage.role === 'user') {
+    const textContent = lastMessage.parts
+      ?.filter((p: { type: string }) => p.type === 'text')
+      .map((p: { type: string; text?: string }) => p.text ?? '')
+      .join('') ?? ''
+
+    if (textContent) {
+      await serviceClient.from('chat_messages').insert({
+        session_id: session.id,
+        role: 'user',
+        content: textContent,
+      })
+    }
   }
 
-  const { contextSummary, recentMessages } = await buildChatContext(serviceClient, session.id)
+  const { contextSummary } = await buildChatContext(serviceClient, session.id)
 
   const { data: recentRuns } = await serviceClient
     .from('test_runs')
@@ -81,7 +90,6 @@ export async function POST(request: Request) {
   const latestProposals = proposalMessages?.[0]?.metadata as Record<string, Json> | null
   const flowStates = (latestProposals?.flow_states ?? {}) as Record<string, string>
   const approvedCount = Object.values(flowStates).filter((s) => s === 'approved').length
-  const pendingCount = Object.values(flowStates).filter((s) => s === 'pending').length
 
   let flowStatusSummary = ''
   if (latestProposals?.type === 'flow_proposals') {
@@ -112,35 +120,19 @@ ${recentRuns && recentRuns.length > 0 ? `Recent test runs:\n${JSON.stringify(rec
 When the user wants to generate or refresh test flow proposals, use the generate_flow_proposals tool.
 When the user approves flows and wants to start testing (says things like "go", "start testing", "run the tests", "kick it off", etc.), use the start_test_run tool.`
 
-  const coreMessages: CoreMessage[] = recentMessages
-    .filter((m) => m.role !== 'system')
-    .map((m) => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content,
-    }))
-
-  if (messages.length > 0 && lastUserMessage) {
-    const alreadyIncluded = coreMessages.length > 0 &&
-      coreMessages[coreMessages.length - 1].content === lastUserMessage.content
-    if (!alreadyIncluded) {
-      coreMessages.push({
-        role: lastUserMessage.role as 'user' | 'assistant',
-        content: lastUserMessage.content,
-      })
-    }
-  }
+  const modelMessages = await convertToModelMessages(uiMessages)
 
   const result = streamText({
     model: chatModel,
     system: systemPrompt,
-    messages: coreMessages,
+    messages: modelMessages,
     tools: {
       generate_flow_proposals: tool({
         description: 'Generate new UI test flow proposals by analyzing the project\'s integration data (GitHub commits, PostHog sessions, Sentry errors, etc.)',
-        parameters: z.object({
+        inputSchema: z.object({
           reason: z.string().describe('Brief reason for generating proposals'),
         }),
-        execute: async ({ reason }) => {
+        execute: async (_input) => {
           const integrationContext = await gatherIntegrationContext(serviceClient, projectId)
           const proposals = await generateFlowProposals(project.app_url, integrationContext)
           const { content, metadata } = serializeFlowsForMessage(proposals)
@@ -169,10 +161,10 @@ When the user approves flows and wants to start testing (says things like "go", 
       }),
       start_test_run: tool({
         description: 'Start executing the approved test flows. Creates test templates from approved flows and triggers a test run.',
-        parameters: z.object({
+        inputSchema: z.object({
           confirmation: z.string().describe('Brief confirmation message'),
         }),
-        execute: async ({ confirmation }) => {
+        execute: async (_input) => {
           if (approvedCount === 0) {
             return {
               success: false,
@@ -273,7 +265,7 @@ When the user approves flows and wants to start testing (says things like "go", 
         },
       }),
     },
-    maxSteps: 3,
+    stopWhen: stepCountIs(3),
     onFinish: async ({ text }) => {
       if (text) {
         await serviceClient.from('chat_messages').insert({
@@ -287,5 +279,5 @@ When the user approves flows and wants to start testing (says things like "go", 
     },
   })
 
-  return result.toDataStreamResponse()
+  return result.toUIMessageStreamResponse()
 }

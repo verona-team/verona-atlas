@@ -1,10 +1,10 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { useChat } from 'ai/react'
-import { Send, Loader2, RefreshCw } from 'lucide-react'
+import { useChat } from '@ai-sdk/react'
+import { DefaultChatTransport } from 'ai'
+import { Send, Loader2 } from 'lucide-react'
 import { MessageBubble } from './message-bubble'
-import type { ProposedFlow } from './flow-proposal-card'
 import type { Json, ChatMessage } from '@/lib/supabase/types'
 import { createClient } from '@/lib/supabase/client'
 
@@ -25,30 +25,39 @@ export function ChatInterface({
 }: ChatInterfaceProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const [flowStates, setFlowStates] = useState<Record<string, 'pending' | 'approved' | 'rejected'>>({})
-  const [proposalMessageId, setProposalMessageId] = useState<string | null>(null)
+  const [input, setInput] = useState('')
+  const [flowStatesOverride, setFlowStatesOverride] = useState<Record<string, 'pending' | 'approved' | 'rejected'> | null>(null)
   const [dbMessages, setDbMessages] = useState<ChatMessage[]>(initialMessages)
   const hasInitialized = useRef(false)
 
-  useEffect(() => {
+  const { flowStates, proposalMessageId } = (() => {
+    let states: Record<string, 'pending' | 'approved' | 'rejected'> = {}
+    let msgId: string | null = null
     for (const msg of dbMessages) {
       const meta = msg.metadata as Record<string, Json> | null
       if (meta?.type === 'flow_proposals' && meta.flow_states) {
-        setFlowStates(meta.flow_states as Record<string, 'pending' | 'approved' | 'rejected'>)
-        setProposalMessageId(msg.id)
+        states = meta.flow_states as Record<string, 'pending' | 'approved' | 'rejected'>
+        msgId = msg.id
       }
     }
-  }, [dbMessages])
+    if (flowStatesOverride) {
+      states = { ...states, ...flowStatesOverride }
+    }
+    return { flowStates: states, proposalMessageId: msgId }
+  })()
 
-  const { messages, input, handleInputChange, handleSubmit, isLoading, append } = useChat({
-    api: '/api/chat',
-    body: { projectId },
-    initialMessages: dbMessages
+  const { messages, sendMessage, status } = useChat({
+    transport: new DefaultChatTransport({
+      api: '/api/chat',
+      body: { projectId },
+    }),
+    messages: dbMessages
       .filter((m) => m.role !== 'system')
       .map((m) => ({
         id: m.id,
         role: m.role as 'user' | 'assistant',
-        content: m.content,
+        parts: [{ type: 'text' as const, text: m.content }],
+        createdAt: new Date(m.created_at),
       })),
   })
 
@@ -57,12 +66,11 @@ export function ChatInterface({
     hasInitialized.current = true
 
     if (dbMessages.length === 0) {
-      append({
-        role: 'user',
-        content: `I just set up ${projectName} (${appUrl}). Analyze my project data and suggest UI flows to test.`,
+      sendMessage({
+        text: `I just set up ${projectName} (${appUrl}). Analyze my project data and suggest UI flows to test.`,
       })
     }
-  }, [dbMessages.length, projectName, appUrl, append])
+  }, [dbMessages.length, projectName, appUrl, sendMessage])
 
   useEffect(() => {
     const supabase = createClient()
@@ -83,10 +91,8 @@ export function ChatInterface({
             return [...prev, newMsg]
           })
 
-          const meta = newMsg.metadata as Record<string, Json> | null
-          if (meta?.type === 'flow_proposals' && meta.flow_states) {
-            setFlowStates(meta.flow_states as Record<string, 'pending' | 'approved' | 'rejected'>)
-            setProposalMessageId(newMsg.id)
+          if ((newMsg.metadata as Record<string, Json> | null)?.type === 'flow_proposals') {
+            setFlowStatesOverride(null)
           }
         },
       )
@@ -104,9 +110,8 @@ export function ChatInterface({
             prev.map((m) => (m.id === updated.id ? updated : m)),
           )
 
-          const meta = updated.metadata as Record<string, Json> | null
-          if (meta?.flow_states) {
-            setFlowStates(meta.flow_states as Record<string, 'pending' | 'approved' | 'rejected'>)
+          if ((updated.metadata as Record<string, Json> | null)?.flow_states) {
+            setFlowStatesOverride(null)
           }
         },
       )
@@ -126,7 +131,7 @@ export function ChatInterface({
   const handleApproveFlow = useCallback(
     async (flowId: string) => {
       if (!proposalMessageId) return
-      setFlowStates((prev) => ({ ...prev, [flowId]: 'approved' }))
+      setFlowStatesOverride((prev) => ({ ...prev, [flowId]: 'approved' }))
 
       await fetch('/api/chat/flows', {
         method: 'PATCH',
@@ -144,7 +149,7 @@ export function ChatInterface({
   const handleRejectFlow = useCallback(
     async (flowId: string) => {
       if (!proposalMessageId) return
-      setFlowStates((prev) => ({ ...prev, [flowId]: 'rejected' }))
+      setFlowStatesOverride((prev) => ({ ...prev, [flowId]: 'rejected' }))
 
       await fetch('/api/chat/flows', {
         method: 'PATCH',
@@ -159,11 +164,20 @@ export function ChatInterface({
     [proposalMessageId],
   )
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (input.trim() && status === 'ready') {
+      sendMessage({ text: input })
+      setInput('')
+    }
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (input.trim() && !isLoading) {
-        handleSubmit(e as unknown as React.FormEvent<HTMLFormElement>)
+      if (input.trim() && status === 'ready') {
+        sendMessage({ text: input })
+        setInput('')
       }
     }
   }
@@ -174,6 +188,13 @@ export function ChatInterface({
     const meta = dbMsg.metadata as Record<string, Json> | null
     if (meta?.type) return meta
     return undefined
+  }
+
+  const getTextFromParts = (parts: Array<{ type: string; text?: string }>): string => {
+    return parts
+      .filter((p) => p.type === 'text' && p.text)
+      .map((p) => p.text!)
+      .join('')
   }
 
   const allMessages = (() => {
@@ -193,7 +214,7 @@ export function ChatInterface({
       ...streamingMessages.map((m) => ({
         id: m.id,
         role: m.role as 'user' | 'assistant',
-        content: m.content,
+        content: getTextFromParts((m as { parts: Array<{ type: string; text?: string }> }).parts ?? []),
         metadata: undefined as Record<string, Json> | undefined,
         isDb: false,
       })),
@@ -203,11 +224,12 @@ export function ChatInterface({
   })()
 
   const approvedCount = Object.values(flowStates).filter((s) => s === 'approved').length
+  const isProcessing = status === 'submitted' || status === 'streaming'
 
   return (
     <div className="flex flex-col h-full">
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
-        {allMessages.length === 0 && !isLoading && (
+        {allMessages.length === 0 && !isProcessing && (
           <div className="flex items-center justify-center h-full">
             <div className="text-center space-y-4">
               <h2 className="text-3xl">Welcome to Verona</h2>
@@ -231,12 +253,12 @@ export function ChatInterface({
               flowStates={flowStates}
               onApproveFlow={handleApproveFlow}
               onRejectFlow={handleRejectFlow}
-              isStreaming={isLast && isLoading && msg.role === 'assistant'}
+              isStreaming={isLast && status === 'streaming' && msg.role === 'assistant'}
             />
           )
         })}
 
-        {isLoading && allMessages[allMessages.length - 1]?.role === 'user' && (
+        {isProcessing && allMessages[allMessages.length - 1]?.role === 'user' && (
           <div className="flex items-center gap-2 text-sm opacity-50">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span>Verona is thinking...</span>
@@ -254,28 +276,25 @@ export function ChatInterface({
         </div>
       )}
 
-      <form
-        onSubmit={handleSubmit}
-        className="border-t px-4 py-4"
-      >
+      <form onSubmit={handleSubmit} className="border-t px-4 py-4">
         <div className="flex items-end gap-3 max-w-4xl mx-auto">
           <textarea
             ref={inputRef}
             value={input}
-            onChange={handleInputChange}
+            onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Give feedback on the test flows, or say 'start testing' to begin..."
             rows={1}
             className="flex-1 resize-none bg-transparent border rounded-lg px-4 py-3 text-base outline-none placeholder:opacity-30 focus:border-foreground/30 transition-colors"
             style={{ minHeight: '48px', maxHeight: '160px' }}
-            disabled={isLoading}
+            disabled={isProcessing}
           />
           <button
             type="submit"
-            disabled={isLoading || !input.trim()}
+            disabled={isProcessing || !input.trim()}
             className="p-3 rounded-lg border transition-all hover:bg-foreground/5 disabled:opacity-20"
           >
-            {isLoading ? (
+            {isProcessing ? (
               <Loader2 className="w-5 h-5 animate-spin" />
             ) : (
               <Send className="w-5 h-5" />

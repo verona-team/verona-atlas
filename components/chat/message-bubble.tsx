@@ -28,7 +28,7 @@ export function MessageBubble({
   const isRunStarted = metadata?.type === 'test_run_started'
 
   const proposals = isFlowProposal
-    ? (metadata.proposals as { analysis: string; flows: ProposedFlow[] })
+    ? (metadata.proposals as unknown as { analysis: string; flows: ProposedFlow[] })
     : null
 
   return (
