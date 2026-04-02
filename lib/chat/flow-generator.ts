@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { generateObject } from '@/lib/langsmith-ai'
+import { generateText, Output } from '@/lib/langsmith-ai'
 import { model } from '@/lib/ai'
 import { templateStepSchema } from '@/lib/test-planner'
 import type { ResearchReport } from '@/lib/research-agent/types'
@@ -32,9 +32,9 @@ export async function generateFlowProposals(
       ).join('\n')
     : 'No specific findings from integrations.'
 
-  const { object } = await generateObject({
+  const { output } = await generateText({
     model,
-    schema: flowProposalsSchema,
+    output: Output.object({ schema: flowProposalsSchema }),
     prompt: `You are a QA strategist for the web application at ${appUrl}.
 
 A research agent has investigated the user's connected integrations and produced the following report:
@@ -61,7 +61,7 @@ Based on this research, generate 3-5 concrete UI test flows. Each flow should:
 Step types: navigate (go to URL), action (click/type/interact), assertion (verify something), extract (get data), wait (pause)`,
   })
 
-  return object
+  return output
 }
 
 export function serializeFlowsForMessage(proposals: FlowProposals): {
