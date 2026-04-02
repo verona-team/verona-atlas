@@ -6,3 +6,4 @@ httpx
 pydantic
 pyjwt
 cryptography
+browserbase
