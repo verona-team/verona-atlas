@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
 import { Send, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { MessageBubble } from './message-bubble'
 import type { Json, ChatMessage } from '@/lib/supabase/types'
 import { createClient } from '@/lib/supabase/client'
@@ -28,7 +29,15 @@ export function ChatInterface({
   const [input, setInput] = useState('')
   const [flowStatesOverride, setFlowStatesOverride] = useState<Record<string, 'pending' | 'approved' | 'rejected'> | null>(null)
   const [dbMessages, setDbMessages] = useState<ChatMessage[]>(initialMessages)
-  const hasInitialized = useRef(false)
+  /** Bumps on bootstrap failure so we retry auto-send (see onError). */
+  const [bootstrapNonce, setBootstrapNonce] = useState(0)
+  const lastBootstrapKeyRef = useRef<string | null>(null)
+  const bootstrapFailureCountRef = useRef(0)
+  const dbEmptyRef = useRef(initialMessages.length === 0)
+
+  useEffect(() => {
+    dbEmptyRef.current = dbMessages.length === 0
+  }, [dbMessages.length])
 
   const { flowStates, proposalMessageId } = useMemo(() => {
     let states: Record<string, 'pending' | 'approved' | 'rejected'> = {}
@@ -47,22 +56,48 @@ export function ChatInterface({
   }, [dbMessages, flowStatesOverride])
 
   const { messages: streamMessages, sendMessage, status } = useChat({
+    id: `project-${projectId}`,
     transport: new DefaultChatTransport({
       api: '/api/chat',
       body: { projectId },
     }),
+    onError: (err) => {
+      console.error('Chat request failed:', err)
+      toast.error('Could not reach Verona. Check your connection and try again.')
+      if (
+        dbEmptyRef.current &&
+        bootstrapFailureCountRef.current < 2
+      ) {
+        bootstrapFailureCountRef.current += 1
+        lastBootstrapKeyRef.current = null
+        setBootstrapNonce((n) => n + 1)
+      } else if (dbEmptyRef.current) {
+        toast.error('Failed to start the analysis. Type a message below to retry.')
+      }
+    },
   })
 
   useEffect(() => {
-    if (hasInitialized.current) return
-    hasInitialized.current = true
-
-    if (dbMessages.length === 0) {
-      sendMessage({
-        text: `I just set up ${projectName} (${appUrl}). Analyze my project data and suggest UI flows to test.`,
-      })
+    if (dbMessages.length > 0) {
+      bootstrapFailureCountRef.current = 0
+      return
     }
-  }, [dbMessages.length, projectName, appUrl, sendMessage])
+
+    const key = `${sessionId}:${bootstrapNonce}`
+    if (lastBootstrapKeyRef.current === key) return
+    lastBootstrapKeyRef.current = key
+
+    void sendMessage({
+      text: `I just set up ${projectName} (${appUrl}). Analyze my project data and suggest UI flows to test.`,
+    })
+  }, [
+    dbMessages.length,
+    bootstrapNonce,
+    sessionId,
+    projectName,
+    appUrl,
+    sendMessage,
+  ])
 
   useEffect(() => {
     const supabase = createClient()
@@ -194,27 +229,43 @@ export function ChatInterface({
 
     const isStreamActive = status === 'submitted' || status === 'streaming'
 
-    if (!isStreamActive || streamMessages.length === 0) {
-      return dbRendered
+    // Match DB rows by role + content prefix (UI message ids differ from DB UUIDs).
+    const dbContentSet = new Set(
+      dbMessages.map((m) => `${m.role}:${m.content.slice(0, 100)}`),
+    )
+
+    const streamAsDisplay = streamMessages
+      .map((m) => {
+        const text = getTextFromParts(
+          (m as { parts: Array<{ type: string; text?: string }> }).parts ?? [],
+        )
+        return {
+          id: m.id,
+          role: m.role as 'user' | 'assistant',
+          content: text,
+          metadata: undefined as Record<string, Json> | undefined,
+          // Only the last bubble uses this (see MessageBubble); mirror prior behavior.
+          isStreaming: isStreamActive && m.role === 'assistant',
+        }
+      })
+      .filter((m) => m.content.length > 0)
+
+    const streamNotYetInDb = streamAsDisplay.filter((m) => {
+      const key = `${m.role}:${m.content.slice(0, 100)}`
+      return !dbContentSet.has(key)
+    })
+
+    if (isStreamActive) {
+      return [...dbRendered, ...streamNotYetInDb]
     }
 
-    const dbContentSet = new Set(dbMessages.map((m) => `${m.role}:${m.content.slice(0, 100)}`))
+    // After the stream ends, Supabase realtime can lag briefly behind `ready`.
+    // Keep showing stream copy until the same content appears in `dbMessages`.
+    if (streamNotYetInDb.length > 0) {
+      return [...dbRendered, ...streamNotYetInDb]
+    }
 
-    const newStreamMessages = streamMessages
-      .filter((m) => {
-        const text = getTextFromParts((m as { parts: Array<{ type: string; text?: string }> }).parts ?? [])
-        const key = `${m.role}:${text.slice(0, 100)}`
-        return !dbContentSet.has(key) && text.length > 0
-      })
-      .map((m) => ({
-        id: m.id,
-        role: m.role as 'user' | 'assistant',
-        content: getTextFromParts((m as { parts: Array<{ type: string; text?: string }> }).parts ?? []),
-        metadata: undefined as Record<string, Json> | undefined,
-        isStreaming: m.role === 'assistant',
-      }))
-
-    return [...dbRendered, ...newStreamMessages]
+    return dbRendered
   }, [dbMessages, streamMessages, status])
 
   const approvedCount = Object.values(flowStates).filter((s) => s === 'approved').length
