@@ -1,6 +1,14 @@
-import { streamText, convertToModelMessages, tool, stepCountIs, type UIMessage } from 'ai'
+import { convertToModelMessages, tool, stepCountIs, type UIMessage } from 'ai'
+import { after } from 'next/server'
 import { z } from 'zod'
+import { traceable } from 'langsmith/traceable'
 import { model } from '@/lib/ai'
+import {
+  streamText,
+  flushLangSmithTraces,
+  createLangSmithProviderOptions,
+  getLangSmithTracingClient,
+} from '@/lib/langsmith-ai'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceRoleClient } from '@/lib/supabase/service-role'
 import { getOrCreateSession } from '@/lib/chat/session'
@@ -45,6 +53,13 @@ async function getOrRunResearch(
 }
 
 export async function POST(request: Request) {
+  const lsClient = getLangSmithTracingClient()
+  if (lsClient) {
+    after(async () => {
+      await flushLangSmithTraces()
+    })
+  }
+
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {
@@ -87,17 +102,19 @@ export async function POST(request: Request) {
   const session = await getOrCreateSession(serviceClient, projectId)
 
   const lastMessage = uiMessages[uiMessages.length - 1]
+  let lastUserText = ''
   if (lastMessage && lastMessage.role === 'user') {
-    const textContent = lastMessage.parts
-      ?.filter((p: { type: string }) => p.type === 'text')
-      .map((p: { type: string; text?: string }) => p.text ?? '')
-      .join('') ?? ''
+    lastUserText =
+      lastMessage.parts
+        ?.filter((p: { type: string }) => p.type === 'text')
+        .map((p: { type: string; text?: string }) => p.text ?? '')
+        .join('') ?? ''
 
-    if (textContent) {
+    if (lastUserText) {
       await serviceClient.from('chat_messages').insert({
         session_id: session.id,
         role: 'user',
-        content: textContent,
+        content: lastUserText,
       })
     }
   }
@@ -128,14 +145,15 @@ export async function POST(request: Request) {
   let flowStatusSummary = ''
   if (latestProposals?.type === 'flow_proposals') {
     const proposals = latestProposals.proposals as { flows: Array<{ id: string; name: string }> }
-    flowStatusSummary = '\n\nCurrent flow states:\n' + proposals.flows
-      .map((f) => `- ${f.name}: ${flowStates[f.id] ?? 'pending'}`)
-      .join('\n')
+    flowStatusSummary =
+      '\n\nCurrent flow states:\n' +
+      proposals.flows.map((f) => `- ${f.name}: ${flowStates[f.id] ?? 'pending'}`).join('\n')
   }
 
-  const findingsSummary = report.findings.length > 0
-    ? report.findings.map((f) => `- [${f.source}/${f.severity}] ${f.details}`).join('\n')
-    : 'No specific findings from integrations.'
+  const findingsSummary =
+    report.findings.length > 0
+      ? report.findings.map((f) => `- [${f.source}/${f.severity}] ${f.details}`).join('\n')
+      : 'No specific findings from integrations.'
 
   const systemPrompt = `You are Verona, an AI QA strategist that helps teams plan and execute UI testing for their web applications. You are assisting with the project "${project.name}" at ${project.app_url}.
 
@@ -169,166 +187,241 @@ When the user approves flows and wants to start testing, use the start_test_run 
 
   const modelMessages = await convertToModelMessages(uiMessages)
 
-  const result = streamText({
-    model,
-    system: systemPrompt,
-    messages: modelMessages,
-    tools: {
-      generate_flow_proposals: tool({
-        description: 'Generate structured UI test flow proposals with approval cards based on the research report. Use this when the user first asks to analyze their project, or when they want to refresh proposals.',
-        inputSchema: z.object({
-          reason: z.string().describe('Brief reason for generating proposals'),
-          refresh: z.boolean().optional().describe('If true, re-run the research agent to get fresh data before generating proposals'),
-        }),
-        execute: async ({ refresh }) => {
-          const currentReport = refresh
-            ? await getOrRunResearch(serviceClient, session.id, projectId, project.app_url, true)
-            : report
+  const executeGenerateFlowProposals = traceable(
+    async (input: { reason: string; refresh?: boolean }) => {
+      const { refresh } = input
+      const currentReport = refresh
+        ? await getOrRunResearch(serviceClient, session.id, projectId, project.app_url, true)
+        : report
 
-          const proposals = await generateFlowProposals(project.app_url, currentReport)
-          const { content, metadata } = serializeFlowsForMessage(proposals)
+      const proposals = await generateFlowProposals(project.app_url, currentReport)
+      const { content, metadata } = serializeFlowsForMessage(proposals)
 
-          await serviceClient.from('chat_messages').insert({
-            session_id: session.id,
-            role: 'assistant',
-            content,
-            metadata: metadata as unknown as Json,
-          })
+      await serviceClient.from('chat_messages').insert({
+        session_id: session.id,
+        role: 'assistant',
+        content,
+        metadata: metadata as unknown as Json,
+      })
 
-          return {
-            success: true,
-            analysis: proposals.analysis,
-            flowCount: proposals.flows.length,
-            flows: proposals.flows.map((f) => ({
-              id: f.id,
-              name: f.name,
-              description: f.description,
-              rationale: f.rationale,
-              priority: f.priority,
-              stepCount: f.steps.length,
-            })),
-          }
-        },
-      }),
-      start_test_run: tool({
-        description: 'Start executing the approved test flows. Creates test templates from approved flows and triggers a test run.',
-        inputSchema: z.object({
-          confirmation: z.string().describe('Brief confirmation message'),
-        }),
-        execute: async (_input) => {
-          if (approvedCount === 0) {
-            return {
-              success: false,
-              error: 'No approved flows. The user needs to approve at least one flow before starting.',
-            }
-          }
-
-          const proposals = latestProposals?.proposals as {
-            flows: Array<{
-              id: string
-              name: string
-              description: string
-              steps: Array<{
-                order: number
-                instruction: string
-                type: string
-                url?: string
-                expected?: string
-                timeout?: number
-              }>
-            }>
-          }
-
-          const approvedFlows = proposals.flows.filter((f) => flowStates[f.id] === 'approved')
-
-          const createdTemplateIds: string[] = []
-          for (const flow of approvedFlows) {
-            const { data: template, error } = await serviceClient
-              .from('test_templates')
-              .insert({
-                project_id: projectId,
-                name: flow.name,
-                description: flow.description,
-                steps: flow.steps as unknown as Json,
-                source: 'chat_generated',
-              })
-              .select('id')
-              .single()
-
-            if (template) {
-              createdTemplateIds.push(template.id)
-            }
-            if (error) {
-              console.error('Failed to create template:', error)
-            }
-          }
-
-          const { data: testRun, error: runError } = await serviceClient
-            .from('test_runs')
-            .insert({
-              project_id: projectId,
-              trigger: 'chat',
-              status: 'pending',
-            })
-            .select()
-            .single()
-
-          if (runError || !testRun) {
-            return { success: false, error: `Failed to create test run: ${runError?.message}` }
-          }
-
-          try {
-            const modalCallId = await triggerTestRun(testRun.id, projectId)
-            await serviceClient
-              .from('test_runs')
-              .update({ modal_call_id: modalCallId })
-              .eq('id', testRun.id)
-
-            await serviceClient.from('chat_messages').insert({
-              session_id: session.id,
-              role: 'assistant',
-              content: `Testing started! I'm executing ${approvedFlows.length} approved flow(s) in cloud browsers. I'll update you on progress as results come in.`,
-              metadata: {
-                type: 'test_run_started',
-                run_id: testRun.id,
-                template_ids: createdTemplateIds,
-                flow_count: approvedFlows.length,
-              } as unknown as Json,
-            })
-
-            return {
-              success: true,
-              runId: testRun.id,
-              flowCount: approvedFlows.length,
-              templateIds: createdTemplateIds,
-            }
-          } catch (error) {
-            await serviceClient
-              .from('test_runs')
-              .update({
-                status: 'failed',
-                summary: { error: 'Failed to trigger Modal', details: String(error) } as unknown as Json,
-              })
-              .eq('id', testRun.id)
-
-            return { success: false, error: `Failed to trigger test execution: ${String(error)}` }
-          }
-        },
+      return {
+        success: true,
+        analysis: proposals.analysis,
+        flowCount: proposals.flows.length,
+        flows: proposals.flows.map((f) => ({
+          id: f.id,
+          name: f.name,
+          description: f.description,
+          rationale: f.rationale,
+          priority: f.priority,
+          stepCount: f.steps.length,
+        })),
+      }
+    },
+    {
+      name: 'chat_tool_generate_flow_proposals',
+      run_type: 'tool',
+      ...(lsClient ? { client: lsClient } : {}),
+      processInputs: (i) => ({ reason: i.reason, refresh: i.refresh }),
+      processOutputs: (o) => ({
+        success: o.success,
+        flowCount: o.flowCount,
+        flowNames: o.flows?.map((f) => f.name),
       }),
     },
-    stopWhen: stepCountIs(3),
-    onFinish: async ({ text }) => {
-      if (text) {
+  )
+
+  const executeStartTestRun = traceable(
+    async (input: { confirmation: string }) => {
+      void input.confirmation
+      if (approvedCount === 0) {
+        return {
+          success: false,
+          error: 'No approved flows. The user needs to approve at least one flow before starting.',
+        }
+      }
+
+      const proposals = latestProposals?.proposals as {
+        flows: Array<{
+          id: string
+          name: string
+          description: string
+          steps: Array<{
+            order: number
+            instruction: string
+            type: string
+            url?: string
+            expected?: string
+            timeout?: number
+          }>
+        }>
+      }
+
+      const approvedFlows = proposals.flows.filter((f) => flowStates[f.id] === 'approved')
+
+      const createdTemplateIds: string[] = []
+      for (const flow of approvedFlows) {
+        const { data: template, error } = await serviceClient
+          .from('test_templates')
+          .insert({
+            project_id: projectId,
+            name: flow.name,
+            description: flow.description,
+            steps: flow.steps as unknown as Json,
+            source: 'chat_generated',
+          })
+          .select('id')
+          .single()
+
+        if (template) {
+          createdTemplateIds.push(template.id)
+        }
+        if (error) {
+          console.error('Failed to create template:', error)
+        }
+      }
+
+      const { data: testRun, error: runError } = await serviceClient
+        .from('test_runs')
+        .insert({
+          project_id: projectId,
+          trigger: 'chat',
+          status: 'pending',
+        })
+        .select()
+        .single()
+
+      if (runError || !testRun) {
+        return { success: false, error: `Failed to create test run: ${runError?.message}` }
+      }
+
+      try {
+        const modalCallId = await triggerTestRun(testRun.id, projectId)
+        await serviceClient.from('test_runs').update({ modal_call_id: modalCallId }).eq('id', testRun.id)
+
         await serviceClient.from('chat_messages').insert({
           session_id: session.id,
           role: 'assistant',
-          content: text,
+          content: `Testing started! I'm executing ${approvedFlows.length} approved flow(s) in cloud browsers. I'll update you on progress as results come in.`,
+          metadata: {
+            type: 'test_run_started',
+            run_id: testRun.id,
+            template_ids: createdTemplateIds,
+            flow_count: approvedFlows.length,
+          } as unknown as Json,
         })
+
+        return {
+          success: true,
+          runId: testRun.id,
+          flowCount: approvedFlows.length,
+          templateIds: createdTemplateIds,
+        }
+      } catch (error) {
+        await serviceClient
+          .from('test_runs')
+          .update({
+            status: 'failed',
+            summary: { error: 'Failed to trigger Modal', details: String(error) } as unknown as Json,
+          })
+          .eq('id', testRun.id)
+
+        return { success: false, error: `Failed to trigger test execution: ${String(error)}` }
       }
-
-      await maybeSummarizeOlderMessages(serviceClient, session.id)
     },
-  })
+    {
+      name: 'chat_tool_start_test_run',
+      run_type: 'tool',
+      ...(lsClient ? { client: lsClient } : {}),
+      processInputs: (i) => ({ confirmationPreview: i.confirmation?.slice(0, 200) }),
+      processOutputs: (o) => ({
+        success: o.success,
+        runId: 'runId' in o ? o.runId : undefined,
+        flowCount: 'flowCount' in o ? o.flowCount : undefined,
+        error: 'error' in o ? o.error : undefined,
+      }),
+    },
+  )
 
-  return result.toUIMessageStreamResponse()
+  const langsmithStreamOpts = lsClient
+    ? createLangSmithProviderOptions({
+        name: 'verona_chat_stream',
+        metadata: {
+          projectId,
+          sessionId: session.id,
+          userId: user.id,
+          projectName: project.name,
+        },
+        tags: ['verona', 'chat'],
+      })
+    : undefined
+
+  const runChatTurn = traceable(
+    async () => {
+      const result = streamText({
+        model,
+        system: systemPrompt,
+        messages: modelMessages,
+        ...(langsmithStreamOpts
+          ? { providerOptions: { langsmith: langsmithStreamOpts } }
+          : {}),
+        tools: {
+          generate_flow_proposals: tool({
+            description:
+              'Generate structured UI test flow proposals with approval cards based on the research report. Use this when the user first asks to analyze their project, or when they want to refresh proposals.',
+            inputSchema: z.object({
+              reason: z.string().describe('Brief reason for generating proposals'),
+              refresh: z
+                .boolean()
+                .optional()
+                .describe('If true, re-run the research agent to get fresh data before generating proposals'),
+            }),
+            execute: executeGenerateFlowProposals as (input: {
+              reason: string
+              refresh?: boolean
+            }) => ReturnType<typeof executeGenerateFlowProposals>,
+          }),
+          start_test_run: tool({
+            description:
+              'Start executing the approved test flows. Creates test templates from approved flows and triggers a test run.',
+            inputSchema: z.object({
+              confirmation: z.string().describe('Brief confirmation message'),
+            }),
+            execute: executeStartTestRun as (input: {
+              confirmation: string
+            }) => ReturnType<typeof executeStartTestRun>,
+          }),
+        },
+        stopWhen: stepCountIs(3),
+        onFinish: async ({ text }) => {
+          if (text) {
+            await serviceClient.from('chat_messages').insert({
+              session_id: session.id,
+              role: 'assistant',
+              content: text,
+            })
+          }
+
+          await maybeSummarizeOlderMessages(serviceClient, session.id)
+        },
+      })
+
+      return result.toUIMessageStreamResponse()
+    },
+    {
+      name: 'verona_chat_turn',
+      ...(lsClient ? { client: lsClient } : {}),
+      processInputs: () => ({
+        projectId,
+        sessionId: session.id,
+        userId: user.id,
+        lastUserMessagePreview: lastUserText.slice(0, 2000),
+        messageCount: uiMessages.length,
+        researchIntegrations: report.integrationsCovered,
+        researchFindingsCount: report.findings.length,
+      }),
+    },
+  )
+
+  return runChatTurn()
 }

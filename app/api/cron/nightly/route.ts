@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { after } from 'next/server'
 import { createServiceRoleClient } from '@/lib/supabase/service-role'
+import { flushLangSmithTraces, getLangSmithTracingClient } from '@/lib/langsmith-ai'
 import { getOrCreateSession } from '@/lib/chat/session'
 import { runResearchAgent } from '@/lib/research-agent'
 import { generateFlowProposals, serializeFlowsForMessage } from '@/lib/chat/flow-generator'
@@ -15,6 +17,12 @@ export async function GET(request: NextRequest) {
   const authHeader = request.headers.get('authorization')
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  if (getLangSmithTracingClient()) {
+    after(async () => {
+      await flushLangSmithTraces()
+    })
   }
 
   const supabase = createServiceRoleClient()

@@ -1,5 +1,5 @@
-import { generateObject } from 'ai'
 import { z } from 'zod'
+import { generateObject } from '@/lib/langsmith-ai'
 import { model } from '@/lib/ai'
 import { templateStepSchema } from '@/lib/test-planner'
 import type { ResearchReport } from '@/lib/research-agent/types'
