@@ -92,10 +92,10 @@ export default function ProjectSetupPage() {
 
       <div className="flex gap-8 pt-12 pb-8">
         <button
-          onClick={() => router.push(`/projects/${projectId}`)}
+          onClick={() => router.push(`/projects/${projectId}/chat`)}
           className="text-2xl underline"
         >
-          {integrations.some((i) => i.status === 'active') ? 'Done →' : 'Skip for now →'}
+          {integrations.some((i) => i.status === 'active') ? 'Continue to Chat →' : 'Skip for now →'}
         </button>
       </div>
     </div>
@@ -117,13 +117,13 @@ function IntegrationCard({
 }) {
   return (
     <div className="border rounded-lg p-6">
-      <div className="flex items-start justify-between mb-4">
-        <div>
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div className="min-w-0">
           <h3 className="text-2xl font-medium">{title}</h3>
           <p className="text-lg opacity-50 mt-1">{description}</p>
           {meta && <p className="text-base opacity-50 mt-1">{meta}</p>}
         </div>
-        <span className={`text-base px-3 py-1 rounded-full ${connected ? 'bg-green-500/10 text-green-600' : 'opacity-40'}`}>
+        <span className={`text-base px-3 py-1 rounded-full shrink-0 whitespace-nowrap ${connected ? 'bg-green-500/10 text-green-600' : 'opacity-40'}`}>
           {connected ? 'Connected' : 'Not connected'}
         </span>
       </div>

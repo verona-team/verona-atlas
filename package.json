@@ -9,6 +9,8 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.64",
+    "@ai-sdk/react": "^3.0.144",
     "@anthropic-ai/sdk": "^0.80.0",
     "@base-ui/react": "^1.3.0",
     "@octokit/app": "^16.1.2",
@@ -16,8 +18,10 @@
     "@octokit/types": "^16.0.0",
     "@supabase/ssr": "^0.10.0",
     "@supabase/supabase-js": "^2.101.0",
+    "@vercel/sandbox": "^1.9.0",
     "@x402/fetch": "^2.8.0",
     "agentmail": "^0.4.15",
+    "ai": "^6.0.142",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.7.0",

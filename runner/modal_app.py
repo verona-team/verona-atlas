@@ -11,6 +11,7 @@ runner_image = (
         "agentmail",
         "httpx",
         "pydantic",
+        "browserbase",
     )
     .add_local_python_source("runner")
 )

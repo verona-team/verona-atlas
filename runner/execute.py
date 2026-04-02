@@ -15,6 +15,7 @@ from runner.auth import authenticate
 from runner.reporter import send_report
 from runner.encryption import decrypt
 from runner.observability import collect_observability_data, diff_observability_snapshots
+from runner.recordings import save_session_recording
 
 
 async def run_test_pipeline(test_run_id: str, project_id: str):
@@ -120,6 +121,7 @@ async def execute_single_template(supabase, project, template, test_run_id: str,
     start_time = datetime.now(timezone.utc)
     screenshots = []
     integrations = integrations or {}
+    browserbase_session_id: str | None = None
 
     pre_snapshot: dict = {}
     try:
@@ -130,6 +132,11 @@ async def execute_single_template(supabase, project, template, test_run_id: str,
     stagehand = Stagehand(env="BROWSERBASE")
     try:
         await stagehand.init()
+
+        if hasattr(stagehand, 'browserbase_session_id'):
+            browserbase_session_id = stagehand.browserbase_session_id
+        elif hasattr(stagehand, 'session_id'):
+            browserbase_session_id = stagehand.session_id
         
         if project.get("auth_email") and project.get("auth_password_encrypted"):
             password = decrypt(project["auth_password_encrypted"])
@@ -158,6 +165,18 @@ async def execute_single_template(supabase, project, template, test_run_id: str,
             status = "failed"
             error_sources = [k for k, v in observability_errors.items() if v]
             error_message = f"Observability errors detected in: {', '.join(error_sources)}"
+
+        recording_url = None
+        if browserbase_session_id:
+            try:
+                recording_url = await save_session_recording(
+                    supabase,
+                    browserbase_session_id,
+                    test_run_id,
+                    template.get("name", "unknown"),
+                )
+            except Exception as e:
+                print(f"Warning: Failed to save recording: {e}")
         
         result = {
             "test_run_id": test_run_id,
@@ -166,6 +185,7 @@ async def execute_single_template(supabase, project, template, test_run_id: str,
             "duration_ms": duration_ms,
             "error_message": error_message,
             "screenshots": screenshots,
+            "recording_url": recording_url,
             "console_logs": {
                 "steps": step_results,
                 "observability": observability_errors,
