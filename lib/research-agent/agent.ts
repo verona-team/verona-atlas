@@ -1,6 +1,8 @@
-import { generateText, generateObject, tool, stepCountIs } from 'ai'
+import { tool, stepCountIs } from 'ai'
 import { z } from 'zod'
 import { model } from '@/lib/ai'
+import { generateText, generateObject, getLangSmithTracingClient } from '@/lib/langsmith-ai'
+import { traceable } from 'langsmith/traceable'
 import { Sandbox } from '@vercel/sandbox'
 import { executeInSandbox } from './sandbox'
 import { researchReportSchema, type ResearchReport } from './types'
@@ -12,7 +14,9 @@ interface AgentContext {
   sandbox: Sandbox
 }
 
-export async function runResearchLoop(ctx: AgentContext): Promise<ResearchReport> {
+const lsClient = getLangSmithTracingClient()
+
+async function runResearchLoopCore(ctx: AgentContext): Promise<ResearchReport> {
   const integrationList = Object.keys(ctx.integrationDocs)
 
   const envVarDocs = Object.entries(ctx.integrationEnvVars)
@@ -57,24 +61,47 @@ After gathering data from all available integrations, you will be asked to produ
           code: z.string().describe('JavaScript (ES module) code to execute. Use fetch() and console.log().'),
           purpose: z.string().describe('Brief description of what this code investigates'),
         }),
-        execute: async ({ code, purpose }) => {
-          try {
-            const result = await executeInSandbox(ctx.sandbox, code)
-            return {
-              purpose,
-              exitCode: result.exitCode,
-              stdout: result.stdout,
-              stderr: result.stderr || undefined,
+        execute: traceable(
+          async ({ code, purpose }: { code: string; purpose: string }) => {
+            try {
+              const result = await executeInSandbox(ctx.sandbox, code)
+              return {
+                purpose,
+                exitCode: result.exitCode,
+                stdout: result.stdout,
+                stderr: result.stderr || undefined,
+              }
+            } catch (e) {
+              return {
+                purpose,
+                exitCode: 1,
+                stdout: '',
+                stderr: `Execution error: ${String(e)}`,
+              }
             }
-          } catch (e) {
-            return {
-              purpose,
-              exitCode: 1,
-              stdout: '',
-              stderr: `Execution error: ${String(e)}`,
-            }
-          }
-        },
+          },
+          {
+            name: 'research_execute_code_sandbox',
+            run_type: 'tool',
+            ...(lsClient ? { client: lsClient } : {}),
+            processInputs: (inputs) => ({
+              purpose: inputs.purpose,
+              codeLength: inputs.code?.length ?? 0,
+              codePreview: (inputs.code ?? '').slice(0, 4000),
+            }),
+            processOutputs: (out) => ({
+              purpose: out.purpose,
+              exitCode: out.exitCode,
+              stdoutPreview: out.stdout?.slice(0, 8000),
+              stderrPreview: out.stderr?.slice(0, 2000),
+            }),
+          },
+        ) as (input: { code: string; purpose: string }) => Promise<{
+          purpose: string
+          exitCode: number
+          stdout: string
+          stderr?: string
+        }>,
       }),
     },
     stopWhen: stepCountIs(15),
@@ -105,3 +132,20 @@ Focus the recommended flows on:
 
   return report
 }
+
+export const runResearchLoop = traceable(runResearchLoopCore, {
+  name: 'verona_research_loop',
+  ...(lsClient ? { client: lsClient } : {}),
+  processInputs: (inputs: AgentContext) => ({
+    appUrl: inputs.appUrl,
+    integrationTypes: Object.keys(inputs.integrationDocs),
+    envVarKeys: Object.keys(inputs.integrationEnvVars),
+  }),
+  processOutputs: (out) => ({
+    summaryPreview: out.summary?.slice(0, 500),
+    findingsCount: out.findings?.length ?? 0,
+    recommendedFlowCount: out.recommendedFlows?.length ?? 0,
+    integrationsCovered: out.integrationsCovered,
+    integrationsSkipped: out.integrationsSkipped,
+  }),
+})

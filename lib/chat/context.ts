@@ -1,4 +1,4 @@
-import { generateText } from 'ai'
+import { generateText } from '@/lib/langsmith-ai'
 import { model } from '@/lib/ai'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, ChatMessage } from '@/lib/supabase/types'
