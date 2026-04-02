@@ -67,11 +67,10 @@ Next.js 16 (Vercel)          Modal.com (Python)
 3. **Run database migrations:**
    Apply all SQL files in `supabase/migrations/` to your Supabase project via the Supabase dashboard SQL editor or CLI.
 
-4. **Deploy Modal runner:**
+4. **Deploy Modal runner** (from the **repository root**, so the `runner` package resolves correctly):
    ```bash
-   cd runner
    pip install modal
-   modal deploy modal_app.py
+   modal deploy runner/modal_app.py
    ```
    Configure Modal secrets named `atlas-secrets` with the required environment variables.
 
