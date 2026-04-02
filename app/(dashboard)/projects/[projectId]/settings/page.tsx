@@ -205,7 +205,156 @@ export default function ProjectSettingsPage() {
         </div>
       </div>
 
+      <ScheduleSection projectId={projectId} />
+
       <DeleteProjectSection projectId={projectId} projectName={project?.name || ''} />
+    </div>
+  )
+}
+
+const DAYS = [
+  { value: 'mon', label: 'Mon' },
+  { value: 'tue', label: 'Tue' },
+  { value: 'wed', label: 'Wed' },
+  { value: 'thu', label: 'Thu' },
+  { value: 'fri', label: 'Fri' },
+  { value: 'sat', label: 'Sat' },
+  { value: 'sun', label: 'Sun' },
+] as const
+
+function ScheduleSection({ projectId }: { projectId: string }) {
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [enabled, setEnabled] = useState(false)
+  const [time, setTime] = useState('21:00')
+  const [days, setDays] = useState<string[]>(['mon', 'tue', 'wed', 'thu', 'fri'])
+  const [timezone, setTimezone] = useState('')
+
+  useEffect(() => {
+    const detectedTz = Intl.DateTimeFormat().resolvedOptions().timeZone
+    fetch(`/api/projects/${projectId}/schedule`)
+      .then((r) => r.json())
+      .then((data) => {
+        setEnabled(data.schedule_enabled ?? false)
+        setTime(data.schedule_time ?? '21:00')
+        setDays(data.schedule_days ?? ['mon', 'tue', 'wed', 'thu', 'fri'])
+        setTimezone(data.timezone || detectedTz)
+      })
+      .catch(() => {
+        setTimezone(detectedTz)
+      })
+      .finally(() => setLoading(false))
+  }, [projectId])
+
+  async function save() {
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/projects/${projectId}/schedule`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          schedule_enabled: enabled,
+          schedule_time: time,
+          schedule_days: days,
+          timezone,
+        }),
+      })
+      if (res.ok) {
+        toast.success('Schedule updated')
+      } else {
+        toast.error('Failed to update schedule')
+      }
+    } catch {
+      toast.error('Failed to update schedule')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function toggleDay(day: string) {
+    setDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day],
+    )
+  }
+
+  if (loading) return null
+
+  return (
+    <div>
+      <h2 className="text-2xl mb-6">Nightly Testing Schedule</h2>
+      <div className="border rounded-lg p-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-lg">Automatic test suggestions</p>
+            <p className="text-sm opacity-40">
+              Verona will analyze your project and suggest test flows on a schedule
+            </p>
+          </div>
+          <button
+            onClick={() => setEnabled(!enabled)}
+            className={`w-12 h-7 rounded-full transition-colors relative ${
+              enabled ? 'bg-green-500' : 'bg-muted'
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 w-6 h-6 rounded-full bg-white transition-transform ${
+                enabled ? 'left-[22px]' : 'left-0.5'
+              }`}
+            />
+          </button>
+        </div>
+
+        {enabled && (
+          <>
+            <div>
+              <label className="text-sm opacity-60 block mb-2">Time</label>
+              <input
+                type="time"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                className="bg-transparent border rounded px-3 py-2 text-base outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm opacity-60 block mb-2">Days</label>
+              <div className="flex gap-2">
+                {DAYS.map((d) => (
+                  <button
+                    key={d.value}
+                    onClick={() => toggleDay(d.value)}
+                    className={`px-3 py-1.5 text-sm rounded border transition-colors ${
+                      days.includes(d.value)
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'opacity-40 hover:opacity-60'
+                    }`}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-sm opacity-60 block mb-2">Timezone</label>
+              <input
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+                placeholder="America/New_York"
+                className="w-full max-w-sm bg-transparent border-b py-2 text-base outline-none placeholder:opacity-30"
+              />
+            </div>
+          </>
+        )}
+
+        <button
+          onClick={save}
+          disabled={saving}
+          className="text-base underline disabled:opacity-30"
+        >
+          {saving ? 'Saving...' : 'Save schedule'}
+        </button>
+      </div>
     </div>
   )
 }
