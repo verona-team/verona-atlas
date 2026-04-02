@@ -6,11 +6,43 @@ import { createServiceRoleClient } from '@/lib/supabase/service-role'
 import { getOrCreateSession } from '@/lib/chat/session'
 import { buildChatContext, maybeSummarizeOlderMessages } from '@/lib/chat/context'
 import { generateFlowProposals, serializeFlowsForMessage } from '@/lib/chat/flow-generator'
-import { gatherIntegrationContext } from '@/lib/chat/integration-context'
+import { runResearchAgent, type ResearchReport } from '@/lib/research-agent'
 import { triggerTestRun } from '@/lib/modal'
 import type { Json } from '@/lib/supabase/types'
 
-export const maxDuration = 60
+export const maxDuration = 120
+
+async function getOrRunResearch(
+  serviceClient: ReturnType<typeof createServiceRoleClient>,
+  sessionId: string,
+  projectId: string,
+  appUrl: string,
+  forceRefresh = false,
+): Promise<ResearchReport> {
+  if (!forceRefresh) {
+    const { data: session } = await serviceClient
+      .from('chat_sessions')
+      .select('research_report')
+      .eq('id', sessionId)
+      .single()
+
+    if (session?.research_report) {
+      return session.research_report as unknown as ResearchReport
+    }
+  }
+
+  const report = await runResearchAgent(serviceClient, projectId, appUrl)
+
+  await serviceClient
+    .from('chat_sessions')
+    .update({
+      research_report: report as unknown as Json,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', sessionId)
+
+  return report
+}
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -72,54 +104,24 @@ export async function POST(request: Request) {
 
   const { contextSummary } = await buildChatContext(serviceClient, session.id)
 
-  const [integrationContext, recentRunsResult, proposalMessagesResult, integrationsResult] = await Promise.all([
-    gatherIntegrationContext(serviceClient, projectId),
-    serviceClient
-      .from('test_runs')
-      .select('id, status, summary, created_at')
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: false })
-      .limit(3),
-    serviceClient
-      .from('chat_messages')
-      .select('metadata')
-      .eq('session_id', session.id)
-      .not('metadata->type', 'is', null)
-      .order('created_at', { ascending: false })
-      .limit(1),
-    serviceClient
-      .from('integrations')
-      .select('type, status')
-      .eq('project_id', projectId),
-  ])
+  const report = await getOrRunResearch(serviceClient, session.id, projectId, project.app_url)
 
-  const recentRuns = recentRunsResult.data
-  const activeIntegrations = (integrationsResult.data ?? []).filter((i) => i.status === 'active').map((i) => i.type)
-  const disconnectedIntegrations = ['github', 'posthog', 'sentry', 'langsmith', 'braintrust', 'slack'].filter(
-    (t) => !activeIntegrations.includes(t as typeof activeIntegrations[number]),
-  )
+  const { data: recentRuns } = await serviceClient
+    .from('test_runs')
+    .select('id, status, summary, created_at')
+    .eq('project_id', projectId)
+    .order('created_at', { ascending: false })
+    .limit(3)
 
-  let integrationDataSection = ''
-  if (integrationContext.commits.length > 0) {
-    integrationDataSection += `\n## Recent Git Commits (${integrationContext.commits.length})\n${JSON.stringify(integrationContext.commits.slice(0, 15), null, 2)}\n`
-  }
-  if (integrationContext.errorEvents.length > 0) {
-    integrationDataSection += `\n## Error Events from PostHog (${integrationContext.errorEvents.length})\n${JSON.stringify(integrationContext.errorEvents.slice(0, 10), null, 2)}\n`
-  }
-  if (integrationContext.topPages.length > 0) {
-    integrationDataSection += `\n## Top Pages from PostHog\n${JSON.stringify(integrationContext.topPages.slice(0, 10), null, 2)}\n`
-  }
-  if (integrationContext.sessionRecordings.length > 0) {
-    integrationDataSection += `\n## Recent Session Recordings (${integrationContext.sessionRecordings.length})\n${JSON.stringify(integrationContext.sessionRecordings.slice(0, 10), null, 2)}\n`
-  }
-  if (integrationContext.sentryIssues.length > 0) {
-    integrationDataSection += `\n## Sentry Issues (${integrationContext.sentryIssues.length})\n${JSON.stringify(integrationContext.sentryIssues.slice(0, 10), null, 2)}\n`
-  }
-  if (integrationContext.existingTemplates.length > 0) {
-    integrationDataSection += `\n## Existing Test Templates (avoid duplicates)\n${JSON.stringify(integrationContext.existingTemplates, null, 2)}\n`
-  }
+  const { data: proposalMessages } = await serviceClient
+    .from('chat_messages')
+    .select('metadata')
+    .eq('session_id', session.id)
+    .not('metadata->type', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(1)
 
-  const latestProposals = proposalMessagesResult.data?.[0]?.metadata as Record<string, Json> | null
+  const latestProposals = proposalMessages?.[0]?.metadata as Record<string, Json> | null
   const flowStates = (latestProposals?.flow_states ?? {}) as Record<string, string>
   const approvedCount = Object.values(flowStates).filter((s) => s === 'approved').length
 
@@ -131,23 +133,31 @@ export async function POST(request: Request) {
       .join('\n')
   }
 
+  const findingsSummary = report.findings.length > 0
+    ? report.findings.map((f) => `- [${f.source}/${f.severity}] ${f.details}`).join('\n')
+    : 'No specific findings from integrations.'
+
   const systemPrompt = `You are Verona, an AI QA strategist that helps teams plan and execute UI testing for their web applications. You are assisting with the project "${project.name}" at ${project.app_url}.
 
-Connected integrations: ${activeIntegrations.length > 0 ? activeIntegrations.join(', ') : 'none'}
-Not connected: ${disconnectedIntegrations.length > 0 ? disconnectedIntegrations.join(', ') : 'all connected'}
+# Research Report
+A deep analysis agent investigated the user's connected integrations and found:
 
-${integrationDataSection ? `# Live Integration Data\nThe following data was fetched from the user's connected integrations:\n${integrationDataSection}` : 'No integration data is available. The user has not connected integrations, or they returned no recent data.'}
+## Summary
+${report.summary}
 
-Your capabilities:
-1. Propose UI test flows based on the integration data above
-2. Refine test flows based on user feedback
-3. Trigger test execution when the user is ready
+## Key Findings
+${findingsSummary}
 
-Communication style:
+## Recommended Flows
+${report.recommendedFlows.map((f, i) => `${i + 1}. ${f}`).join('\n')}
+
+Integrations covered: ${report.integrationsCovered.join(', ') || 'none'}
+
+# Instructions
 - Be concise and actionable
-- When proposing flows, always explain WHY each flow is recommended, referencing specific commits, errors, or pages from the data above
+- When proposing or discussing flows, reference specific findings from the research report above
 - When the user provides feedback, acknowledge it and explain how you'll incorporate it
-- If the user asks about integration data you don't have, tell them which integration to connect and where (project Settings → Integrations)
+- If the user asks about data from an integration not listed in "integrations covered", tell them to connect it in Settings
 
 ${contextSummary ? `Previous conversation context:\n${contextSummary}\n` : ''}
 ${flowStatusSummary}
@@ -155,7 +165,7 @@ ${flowStatusSummary}
 ${recentRuns && recentRuns.length > 0 ? `Recent test runs:\n${JSON.stringify(recentRuns, null, 2)}\n` : ''}
 
 When the user wants to generate or refresh test flow proposals, use the generate_flow_proposals tool.
-When the user approves flows and wants to start testing (says things like "go", "start testing", "run the tests", "kick it off", etc.), use the start_test_run tool.`
+When the user approves flows and wants to start testing, use the start_test_run tool.`
 
   const modelMessages = await convertToModelMessages(uiMessages)
 
@@ -165,13 +175,17 @@ When the user approves flows and wants to start testing (says things like "go", 
     messages: modelMessages,
     tools: {
       generate_flow_proposals: tool({
-        description: 'Generate structured UI test flow proposals with approval cards. Use this when the user asks to generate, refresh, or create new test flow proposals.',
+        description: 'Generate structured UI test flow proposals with approval cards based on the research report. Use this when the user first asks to analyze their project, or when they want to refresh proposals.',
         inputSchema: z.object({
           reason: z.string().describe('Brief reason for generating proposals'),
+          refresh: z.boolean().optional().describe('If true, re-run the research agent to get fresh data before generating proposals'),
         }),
-        execute: async (_input) => {
-          const freshContext = await gatherIntegrationContext(serviceClient, projectId)
-          const proposals = await generateFlowProposals(project.app_url, freshContext)
+        execute: async ({ refresh }) => {
+          const currentReport = refresh
+            ? await getOrRunResearch(serviceClient, session.id, projectId, project.app_url, true)
+            : report
+
+          const proposals = await generateFlowProposals(project.app_url, currentReport)
           const { content, metadata } = serializeFlowsForMessage(proposals)
 
           await serviceClient.from('chat_messages').insert({

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceRoleClient } from '@/lib/supabase/service-role'
 import { getOrCreateSession } from '@/lib/chat/session'
+import { runResearchAgent } from '@/lib/research-agent'
 import { generateFlowProposals, serializeFlowsForMessage } from '@/lib/chat/flow-generator'
-import { gatherIntegrationContext } from '@/lib/chat/integration-context'
 import { decrypt } from '@/lib/encryption'
 import { postMessage } from '@/lib/slack'
 import type { Json } from '@/lib/supabase/types'
@@ -48,8 +48,17 @@ export async function GET(request: NextRequest) {
 
       const session = await getOrCreateSession(supabase, project.id)
 
-      const integrationContext = await gatherIntegrationContext(supabase, project.id)
-      const proposals = await generateFlowProposals(project.app_url, integrationContext)
+      const report = await runResearchAgent(supabase, project.id, project.app_url)
+
+      await supabase
+        .from('chat_sessions')
+        .update({
+          research_report: report as unknown as Json,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', session.id)
+
+      const proposals = await generateFlowProposals(project.app_url, report)
       const { content, metadata } = serializeFlowsForMessage(proposals)
 
       await supabase.from('chat_messages').insert({
@@ -82,7 +91,7 @@ export async function GET(request: NextRequest) {
               type: 'section',
               text: {
                 type: 'mrkdwn',
-                text: `🧪 *Verona* has suggested *${proposals.flows.length} new test flows* for *${project.name}*.\n\nReview and approve them to kick off testing.`,
+                text: `🧪 *Verona* has suggested *${proposals.flows.length} new test flows* for *${project.name}*.\n\n${report.summary}`,
               },
             },
             {
