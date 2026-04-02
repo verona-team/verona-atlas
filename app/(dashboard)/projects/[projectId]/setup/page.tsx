@@ -142,16 +142,18 @@ function GitHubCard({
   onRefresh: () => void
 }) {
   const [waiting, setWaiting] = useState(false)
+  const installPopupRef = useRef<Window | null>(null)
   const repos = (integration?.meta?.repos as Array<{ full_name: string }>) || []
   const repoNames = repos.map((r) => r.full_name).join(', ')
 
   function openGitHubInstall() {
     setWaiting(true)
     const returnTo = encodeURIComponent(`/projects/${projectId}/setup`)
-    window.open(
-      `/api/integrations/github/install?project_id=${projectId}&return_to=${returnTo}`,
-      '_blank',
-    )
+    installPopupRef.current =
+      window.open(
+        `/api/integrations/github/install?project_id=${projectId}&return_to=${returnTo}`,
+        '_blank',
+      ) ?? null
   }
 
   useEffect(() => {
@@ -163,6 +165,11 @@ function GitHubCard({
           const data = await res.json()
           if (data.connected) {
             await onRefresh()
+            setWaiting(false)
+            toast.success('GitHub connected')
+            installPopupRef.current?.close()
+            installPopupRef.current = null
+            window.focus()
           }
         }
       } catch {
@@ -171,13 +178,6 @@ function GitHubCard({
     }, 3000)
     return () => clearInterval(interval)
   }, [waiting, projectId, onRefresh])
-
-  useEffect(() => {
-    if (waiting && integration) {
-      setWaiting(false)
-      toast.success('GitHub connected')
-    }
-  }, [waiting, integration])
 
   return (
     <IntegrationCard
