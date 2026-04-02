@@ -381,11 +381,12 @@ function SettingsIntegrationCard({
 }) {
   const connected = !!integration
   const [waiting, setWaiting] = useState(false)
+  const connectPopupRef = useRef<Window | null>(null)
 
   function handleConnect() {
     if (openInNewTab) {
       setWaiting(true)
-      window.open(connectUrl, '_blank')
+      connectPopupRef.current = window.open(connectUrl, '_blank') ?? null
     }
   }
 
@@ -401,6 +402,11 @@ function SettingsIntegrationCard({
               const data = await res.json()
               if (data.connected) {
                 await onRefresh()
+                setWaiting(false)
+                toast.success(`${title} connected`)
+                connectPopupRef.current?.close()
+                connectPopupRef.current = null
+                window.focus()
                 return
               }
             }
@@ -410,14 +416,18 @@ function SettingsIntegrationCard({
       await onRefresh()
     }, 3000)
     return () => clearInterval(interval)
-  }, [waiting, onRefresh, type, connectUrl])
+  }, [waiting, onRefresh, type, connectUrl, title])
 
   useEffect(() => {
-    if (waiting && connected) {
+    if (!waiting || !connected || type === 'github') return
+    queueMicrotask(() => {
       setWaiting(false)
       toast.success(`${title} connected`)
-    }
-  }, [waiting, connected, title])
+      connectPopupRef.current?.close()
+      connectPopupRef.current = null
+      window.focus()
+    })
+  }, [waiting, connected, title, type])
 
   return (
     <div className="border rounded-lg p-5">
