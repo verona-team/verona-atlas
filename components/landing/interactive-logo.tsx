@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useMemo } from 'react'
 
 interface Point3D {
   x: number
@@ -138,10 +138,11 @@ export function InteractiveLogo({
     animId: 0,
   })
 
-  const dna = useRef(generateDNAHelix(14, 80, 2)).current
-  const colorIndices = useRef(
-    dna.dotPoints.map((_, i) => i % DOT_COLORS.length)
-  ).current
+  const dna = useMemo(() => generateDNAHelix(14, 80, 2), [])
+  const colorIndices = useMemo(
+    () => dna.dotPoints.map((_, i) => i % DOT_COLORS.length),
+    [dna]
+  )
 
   const PAD = 2.2
   const canvasSize = Math.ceil(size * PAD)
