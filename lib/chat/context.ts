@@ -1,5 +1,5 @@
 import { generateText } from 'ai'
-import { chatModel } from '@/lib/ai'
+import { model } from '@/lib/ai'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, ChatMessage } from '@/lib/supabase/types'
 
@@ -66,7 +66,7 @@ export async function maybeSummarizeOlderMessages(
     .join('\n')
 
   const { text: newSummary } = await generateText({
-    model: chatModel,
+    model,
     prompt: `Summarize this QA testing conversation for context continuity. Preserve:
 - Which test flows were proposed, approved, rejected, or edited
 - Key user preferences and feedback patterns

@@ -1,6 +1,6 @@
 import { generateObject } from 'ai'
 import { z } from 'zod'
-import { chatModel } from '@/lib/ai'
+import { model } from '@/lib/ai'
 import { templateStepSchema } from '@/lib/test-planner'
 import type { Json } from '@/lib/supabase/types'
 
@@ -60,7 +60,7 @@ export async function generateFlowProposals(
     : 'No integration data available yet. Generate general smoke tests and common user flow tests based on the app URL.'
 
   const { object } = await generateObject({
-    model: chatModel,
+    model,
     schema: flowProposalsSchema,
     prompt: `You are a QA strategist for the web application at ${appUrl}.
 

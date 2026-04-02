@@ -1,6 +1,6 @@
 import { streamText, convertToModelMessages, tool, stepCountIs, type UIMessage } from 'ai'
 import { z } from 'zod'
-import { chatModel } from '@/lib/ai'
+import { model } from '@/lib/ai'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceRoleClient } from '@/lib/supabase/service-role'
 import { getOrCreateSession } from '@/lib/chat/session'
@@ -160,7 +160,7 @@ When the user approves flows and wants to start testing (says things like "go", 
   const modelMessages = await convertToModelMessages(uiMessages)
 
   const result = streamText({
-    model: chatModel,
+    model,
     system: systemPrompt,
     messages: modelMessages,
     tools: {

@@ -18,6 +18,7 @@
     "@octokit/types": "^16.0.0",
     "@supabase/ssr": "^0.10.0",
     "@supabase/supabase-js": "^2.101.0",
+    "@vercel/sandbox": "^1.9.0",
     "@x402/fetch": "^2.8.0",
     "agentmail": "^0.4.15",
     "ai": "^6.0.142",

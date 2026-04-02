@@ -1,6 +1,6 @@
 import { generateObject } from 'ai'
 import { z } from 'zod'
-import { chatModel } from '@/lib/ai'
+import { model } from '@/lib/ai'
 
 const templateStepSchema = z.object({
   order: z.number(),
@@ -34,7 +34,7 @@ export async function generateTemplates(context: {
   existingTemplates: Array<{ name: string; description: string | null }>
 }): Promise<GeneratedTemplate[]> {
   const { object } = await generateObject({
-    model: chatModel,
+    model,
     schema: templatesArraySchema,
     prompt: `You are a QA test planner for a web application at ${context.appUrl}.
 
