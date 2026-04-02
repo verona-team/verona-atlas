@@ -143,15 +143,23 @@ async function runResearchAgentCore(
 
   const integrationDocs = await tracedFetchIntegrationDocs({ types: docsToFetch })
 
-  const tracedCreateSandbox = traceable(createResearchSandbox, {
+  async function createSandboxWithEnv(input: {
+    creds: IntegrationCredentials[]
+    env: Record<string, string>
+  }) {
+    return createResearchSandbox(input.creds, input.env)
+  }
+
+  const tracedCreateSandbox = traceable(createSandboxWithEnv, {
     name: 'research_create_sandbox',
     ...(lsClient ? { client: lsClient } : {}),
     processInputs: (inputs) => ({
-      integrationTypes: inputs.input.map((x) => x.type),
-      credentialSlotCount: inputs.input.length,
+      integrationTypes: inputs.creds.map((x) => x.type),
+      credentialSlotCount: inputs.creds.length,
+      envKeys: Object.keys(inputs.env),
     }),
   })
-  const sandbox = await tracedCreateSandbox(creds)
+  const sandbox = await tracedCreateSandbox({ creds, env: envVars })
 
   try {
     const report = await runResearchLoop({
