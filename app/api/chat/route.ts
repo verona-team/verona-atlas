@@ -86,6 +86,9 @@ export async function POST(request: Request) {
   const serviceClient = createServiceRoleClient()
   const session = await getOrCreateSession(serviceClient, projectId)
 
+  /** Set when flow proposal DB insert fails so onFinish can persist a visible error. */
+  let flowProposalInsertError: string | null = null
+
   const lastMessage = uiMessages[uiMessages.length - 1]
   if (lastMessage && lastMessage.role === 'user') {
     const textContent = lastMessage.parts
@@ -188,15 +191,26 @@ When the user approves flows and wants to start testing, use the start_test_run 
           const proposals = await generateFlowProposals(project.app_url, currentReport)
           const { content, metadata } = serializeFlowsForMessage(proposals)
 
-          await serviceClient.from('chat_messages').insert({
+          const { error: insertError } = await serviceClient.from('chat_messages').insert({
             session_id: session.id,
             role: 'assistant',
             content,
             metadata: metadata as unknown as Json,
           })
 
+          if (insertError) {
+            console.error('Failed to insert flow_proposals message:', insertError)
+            flowProposalInsertError = insertError.message
+            return {
+              success: false as const,
+              error: insertError.message,
+              analysis: proposals.analysis,
+              flowCount: proposals.flows.length,
+            }
+          }
+
           return {
-            success: true,
+            success: true as const,
             analysis: proposals.analysis,
             flowCount: proposals.flows.length,
             flows: proposals.flows.map((f) => ({
@@ -323,6 +337,12 @@ When the user approves flows and wants to start testing, use the start_test_run 
           session_id: session.id,
           role: 'assistant',
           content: text,
+        })
+      } else if (flowProposalInsertError) {
+        await serviceClient.from('chat_messages').insert({
+          session_id: session.id,
+          role: 'assistant',
+          content: `I couldn't save your flow proposals (${flowProposalInsertError}). Please try sending your message again, or refresh the page.`,
         })
       }
 

@@ -9,6 +9,56 @@ import { MessageBubble } from './message-bubble'
 import type { Json, ChatMessage } from '@/lib/supabase/types'
 import { createClient } from '@/lib/supabase/client'
 
+function getTextFromParts(parts: Array<{ type: string; text?: string }>): string {
+  return parts
+    .filter((p) => p.type === 'text' && p.text)
+    .map((p) => p.text!)
+    .join('')
+}
+
+/**
+ * Assistant turns are often tool-only (no `text` parts): the model calls
+ * `generate_flow_proposals` and streams no prose. Surface tool output until
+ * the DB row (with flow cards) arrives.
+ */
+function getVisibleTextFromMessageParts(
+  role: string,
+  parts: Array<{
+    type: string
+    text?: string
+    state?: string
+    errorText?: string
+    output?: unknown
+  }>,
+): string {
+  if (role !== 'assistant') {
+    return getTextFromParts(parts)
+  }
+  const plain = getTextFromParts(parts)
+  if (plain.length > 0) return plain
+
+  for (const p of parts) {
+    if (p.type === 'dynamic-tool' || p.type.startsWith('tool-')) {
+      if (p.state === 'output-error' && p.errorText) {
+        return `Something went wrong: ${p.errorText}`
+      }
+      if (p.state === 'output-available' && p.output && typeof p.output === 'object') {
+        const o = p.output as Record<string, unknown>
+        if (o.success === false && typeof o.error === 'string') {
+          return `Could not save proposals: ${o.error}`
+        }
+        if (typeof o.analysis === 'string' && o.analysis.length > 0) {
+          return o.analysis
+        }
+        if (o.success === true && typeof o.flowCount === 'number') {
+          return `Prepared ${o.flowCount} test flow proposal(s) for you.`
+        }
+      }
+    }
+  }
+  return ''
+}
+
 interface ChatInterfaceProps {
   projectId: string
   sessionId: string
@@ -149,6 +199,42 @@ export function ChatInterface({
     }
   }, [sessionId])
 
+  // Realtime can miss events (tab backgrounded, reconnect gaps). Re-fetch after a response completes.
+  useEffect(() => {
+    if (status !== 'ready') return
+
+    const mergeFromServer = (rows: ChatMessage[]) => {
+      setDbMessages((prev) => {
+        const byId = new Map(prev.map((m) => [m.id, m]))
+        for (const row of rows) {
+          byId.set(row.id, row)
+        }
+        return Array.from(byId.values()).sort(
+          (a, b) =>
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+        )
+      })
+    }
+
+    const load = async () => {
+      try {
+        const res = await fetch(
+          `/api/chat/messages?sessionId=${encodeURIComponent(sessionId)}&limit=100`,
+        )
+        if (!res.ok) return
+        const rows = (await res.json()) as ChatMessage[]
+        if (Array.isArray(rows)) mergeFromServer(rows)
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const timeouts = [400, 2000, 6000, 15000].map((ms) =>
+      window.setTimeout(() => void load(), ms),
+    )
+    return () => timeouts.forEach(clearTimeout)
+  }, [status, sessionId])
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
@@ -209,13 +295,6 @@ export function ChatInterface({
     }
   }
 
-  const getTextFromParts = (parts: Array<{ type: string; text?: string }>): string => {
-    return parts
-      .filter((p) => p.type === 'text' && p.text)
-      .map((p) => p.text!)
-      .join('')
-  }
-
   const displayMessages = useMemo(() => {
     const dbRendered = dbMessages
       .filter((m) => m.role !== 'system')
@@ -236,8 +315,17 @@ export function ChatInterface({
 
     const streamAsDisplay = streamMessages
       .map((m) => {
-        const text = getTextFromParts(
-          (m as { parts: Array<{ type: string; text?: string }> }).parts ?? [],
+        const rawParts =
+          (m as { parts: Array<{ type: string; text?: string }> }).parts ?? []
+        const text = getVisibleTextFromMessageParts(
+          m.role,
+          rawParts as Array<{
+            type: string
+            text?: string
+            state?: string
+            errorText?: string
+            output?: unknown
+          }>,
         )
         return {
           id: m.id,
