@@ -5,7 +5,7 @@ import { generateText, Output, getLangSmithTracingClient } from '@/lib/langsmith
 import { traceable } from 'langsmith/traceable'
 import { Sandbox } from '@vercel/sandbox'
 import { executeInSandbox } from './sandbox'
-import { researchReportSchema, type ResearchReport } from './types'
+import { integrationResearchReportSchema, type IntegrationResearchReport } from './types'
 
 interface AgentContext {
   appUrl: string
@@ -44,7 +44,7 @@ function buildResearchNotesFromGeneration(result: {
   return joined || result.text || ''
 }
 
-async function runResearchLoopCore(ctx: AgentContext): Promise<ResearchReport> {
+async function runResearchLoopCore(ctx: AgentContext): Promise<IntegrationResearchReport> {
   const integrationList = Object.keys(ctx.integrationDocs)
 
   const envVarDocs = Object.entries(ctx.integrationEnvVars)
@@ -139,7 +139,7 @@ After gathering data from all available integrations, you will be asked to produ
 
   const { output: report } = await generateText({
     model,
-    output: Output.object({ schema: researchReportSchema }),
+    output: Output.object({ schema: integrationResearchReportSchema }),
     prompt: `Based on the following research investigation of the web application at ${ctx.appUrl}, produce a structured QA research report.
 
 The research agent investigated these integrations: ${integrationList.join(', ')}
