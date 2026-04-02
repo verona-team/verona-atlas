@@ -119,7 +119,7 @@ ${researchNotes}
 
 Produce a comprehensive report with:
 1. An executive summary of all findings
-2. Individual findings categorized by source and severity
+2. Individual findings categorized by source and severity (optional field \`rawData\`: a JSON string of compact supporting facts, e.g. commit SHAs or counts — omit if none)
 3. Specific UI flow recommendations based on the data
 4. Which integrations were covered vs skipped
 
