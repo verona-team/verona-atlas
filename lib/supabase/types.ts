@@ -55,6 +55,8 @@ export type Database = {
           project_id: string
           context_summary: string | null
           research_report: Json | null
+          status: "idle" | "thinking" | "error"
+          status_updated_at: string
           created_at: string
           updated_at: string
         }
@@ -63,6 +65,8 @@ export type Database = {
           project_id: string
           context_summary?: string | null
           research_report?: Json | null
+          status?: "idle" | "thinking" | "error"
+          status_updated_at?: string
           created_at?: string
           updated_at?: string
         }
@@ -71,6 +75,8 @@ export type Database = {
           project_id?: string
           context_summary?: string | null
           research_report?: Json | null
+          status?: "idle" | "thinking" | "error"
+          status_updated_at?: string
           created_at?: string
           updated_at?: string
         }
