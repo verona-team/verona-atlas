@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { getOrCreateSession } from '@/lib/chat/session'
 import { ChatInterface } from '@/components/chat/chat-interface'
+import { ChatNav } from '@/components/chat/chat-nav'
 
 type PageProps = { params: Promise<{ projectId: string }> }
 
@@ -45,9 +46,7 @@ export default async function ChatPage({ params }: PageProps) {
           <h1 className="text-2xl">{project.name}</h1>
           <p className="text-base opacity-40">{project.app_url}</p>
         </div>
-        <div className="text-sm opacity-40">
-          QA Chat
-        </div>
+        <ChatNav projectId={projectId} />
       </div>
       <div className="flex-1 min-h-0">
         <ChatInterface

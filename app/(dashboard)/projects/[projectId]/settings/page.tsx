@@ -113,7 +113,7 @@ export default function ProjectSettingsPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-10">
       <div>
-        <Link href={`/projects/${projectId}`} className="text-lg opacity-50 hover:opacity-80">
+        <Link href={`/projects/${projectId}/chat`} className="text-lg opacity-50 hover:opacity-80">
           ← {project?.name || 'Project'}
         </Link>
         <h1 className="text-4xl mt-3">Settings</h1>

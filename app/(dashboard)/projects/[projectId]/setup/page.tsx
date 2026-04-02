@@ -92,10 +92,10 @@ export default function ProjectSetupPage() {
 
       <div className="flex gap-8 pt-12 pb-8">
         <button
-          onClick={() => router.push(`/projects/${projectId}`)}
+          onClick={() => router.push(`/projects/${projectId}/chat`)}
           className="text-xl underline"
         >
-          {integrations.some((i) => i.status === 'active') ? 'Done →' : 'Skip for now →'}
+          {integrations.some((i) => i.status === 'active') ? 'Continue to Chat →' : 'Skip for now →'}
         </button>
       </div>
     </div>
