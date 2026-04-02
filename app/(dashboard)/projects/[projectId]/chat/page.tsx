@@ -40,15 +40,26 @@ export default async function ChatPage({ params }: PageProps) {
     .order('created_at', { ascending: true })
 
   return (
-    <div className="fixed inset-0 top-[65px] flex flex-col">
-      <div className="flex items-center justify-between px-8 md:px-16 lg:px-24 py-4 border-b shrink-0">
-        <div>
-          <h1 className="text-2xl">{project.name}</h1>
-          <p className="text-base opacity-40">{project.app_url}</p>
+    <div className="fixed inset-0 top-12 flex flex-col">
+      <div className="shrink-0 px-6 pb-3 pt-3 md:px-12 lg:px-16">
+        <div className="flex flex-col gap-4 rounded-xl border border-border/50 bg-muted/25 px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+          <div className="min-w-0">
+            <h1 className="truncate text-lg font-semibold leading-tight">{project.name}</h1>
+            <a
+              href={project.app_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 block truncate text-sm text-muted-foreground underline-offset-2 hover:underline"
+            >
+              {project.app_url}
+            </a>
+          </div>
+          <div className="shrink-0 sm:pl-2">
+            <ChatNav projectId={projectId} />
+          </div>
         </div>
-        <ChatNav projectId={projectId} />
       </div>
-      <div className="flex-1 min-h-0 max-w-4xl w-full mx-auto">
+      <div className="flex min-h-0 w-full max-w-4xl flex-1 mx-auto">
         <ChatInterface
           projectId={projectId}
           sessionId={session.id}
