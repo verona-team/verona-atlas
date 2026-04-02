@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
 
 type IntegrationData = {
   id: string
@@ -475,27 +476,22 @@ function GitHubDetails({
 }) {
   if (!integration) return null
   const repos = (integration.meta?.repos as Array<{ full_name: string; private: boolean }>) || []
+  const linked = repos[0]?.full_name
 
   return (
-    <div>
-      {repos.length > 0 ? (
-        <div className="space-y-1">
-          {repos.map((r) => (
-            <p key={r.full_name}>
-              {r.full_name}
-              {r.private && <span className="ml-2 text-sm opacity-50">private</span>}
-            </p>
-          ))}
-        </div>
+    <div className="space-y-2">
+      {linked ? (
+        <p className="text-base">
+          Linked repository:{' '}
+          <span className="opacity-90">
+            {linked}
+            {repos[0]?.private && <span className="ml-2 text-sm opacity-50">private</span>}
+          </span>
+        </p>
       ) : (
-        <p>No repos selected.</p>
+        <p className="text-base text-amber-600/90">Choose a repository below so the QA agent knows which codebase to use.</p>
       )}
-      <Link
-        href={`/projects/${projectId}/setup`}
-        className="inline-block mt-2 text-sm underline opacity-50"
-      >
-        Manage repos
-      </Link>
+      <GitHubRepoPicker projectId={projectId} onSaved={onRefresh} />
     </div>
   )
 }

@@ -36,7 +36,7 @@ async def fetch_recent_commits(config: dict, since_days: int = 7) -> list[dict]:
 
     all_commits = []
     async with httpx.AsyncClient() as client:
-        for repo in repo_names[:3]:
+        for repo in repo_names[:1]:
             response = await client.get(
                 f"https://api.github.com/repos/{repo}/commits",
                 headers={

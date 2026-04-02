@@ -1,6 +1,5 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { listInstallationRepos } from '@/lib/github'
 import type { Json } from '@/lib/supabase/types'
 
 export async function GET(request: NextRequest) {
@@ -52,24 +51,11 @@ export async function GET(request: NextRequest) {
 
   const installationIdNum = installationId ? Number(installationId) : null
 
-  let repos: Json = []
-  if (installationIdNum) {
-    try {
-      const repoList = await listInstallationRepos(installationIdNum)
-      repos = repoList.map((r) => ({
-        full_name: r.fullName,
-        private: r.private,
-        default_branch: r.defaultBranch,
-      }))
-    } catch (e) {
-      console.warn('Failed to list installation repos:', e)
-    }
-  }
-
   const config: Json = {
     installation_id: installationIdNum ?? installationId,
     setup_action: setupAction,
-    repos,
+    // User must pick exactly one repo via the UI; do not pre-fill all installation repos.
+    repos: [],
   }
 
   const { data: existing } = await supabase

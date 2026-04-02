@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, Json } from '@/lib/supabase/types'
 import { decrypt } from '@/lib/encryption'
 import { getInstallationToken } from '@/lib/github'
+import { primaryGithubRepoFullName } from '@/lib/github-integration-config'
 import { INTEGRATION_REGISTRY } from '@/lib/integrations/registry'
 import { fetchIntegrationDocs } from '@/lib/integrations/docs'
 import { getLangSmithTracingClient } from '@/lib/langsmith-ai'
@@ -77,7 +78,8 @@ async function runResearchAgentCore(
             const token = await getInstallationToken(installationId)
             creds.push({ type, credentials: { installation_token: token } })
             const repos = (config.repos as Array<Record<string, Json>>) || []
-            envVars.GITHUB_REPOS = repos.map((r) => r.full_name as string).filter(Boolean).join(',')
+            const primary = primaryGithubRepoFullName(repos)
+            if (primary) envVars.GITHUB_REPOS = primary
           }
           break
         }

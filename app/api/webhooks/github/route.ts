@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyWebhookSignature, listInstallationRepos } from '@/lib/github'
 import { createServiceRoleClient } from '@/lib/supabase/service-role'
 import type { Json } from '@/lib/supabase/types'
+import { normalizeGithubReposForStorage } from '@/lib/github-integration-config'
 
 export async function POST(request: NextRequest) {
   const body = await request.text()
@@ -45,23 +46,19 @@ async function handleInstallationRepositories(payload: {
 
   try {
     const repos = await listInstallationRepos(installationId)
-    const repoObjects = repos.map((r) => ({
-      full_name: r.fullName,
-      private: r.private,
-      default_branch: r.defaultBranch,
-    }))
 
     for (const integration of matching) {
       const config = integration.config as Record<string, Json>
       const currentSelected = (config.repos as Array<Record<string, Json>>) || []
       const accessibleNames = new Set(repos.map((r) => r.fullName))
-      const filteredSelected = currentSelected.filter((r) =>
-        accessibleNames.has(r.full_name as string),
+      const filteredSelected = normalizeGithubReposForStorage(
+        currentSelected.filter((r) => accessibleNames.has(r.full_name as string)),
       )
 
       const updatedConfig: Json = {
         ...config,
-        repos: filteredSelected.length > 0 ? filteredSelected : repoObjects,
+        // Never replace an explicit selection with the full installation list (multi-repo confuses the agent).
+        repos: filteredSelected.length > 0 ? filteredSelected : [],
       }
 
       await supabase

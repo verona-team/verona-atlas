@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
+import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
 
 type IntegrationStatus = {
   id: string
@@ -143,7 +144,7 @@ function GitHubCard({
 }) {
   const [waiting, setWaiting] = useState(false)
   const repos = (integration?.meta?.repos as Array<{ full_name: string }>) || []
-  const repoNames = repos.map((r) => r.full_name).join(', ')
+  const linkedRepo = repos[0]?.full_name
 
   function openGitHubInstall() {
     setWaiting(true)
@@ -182,9 +183,9 @@ function GitHubCard({
   return (
     <IntegrationCard
       title="GitHub"
-      description="Access private repos, pull recent commits, and use code changes as context for QA tests."
+      description="Connect one repository so Verona can use commits and code as context for QA and flow strategy."
       connected={!!integration}
-      meta={repoNames ? `Repos: ${repoNames}` : undefined}
+      meta={linkedRepo ? `Repository: ${linkedRepo}` : undefined}
     >
       {!integration ? (
         waiting ? (
@@ -195,7 +196,7 @@ function GitHubCard({
           </button>
         )
       ) : (
-        <p className="text-base opacity-50">Manage repos in project settings.</p>
+        <GitHubRepoPicker projectId={projectId} onSaved={onRefresh} />
       )}
     </IntegrationCard>
   )

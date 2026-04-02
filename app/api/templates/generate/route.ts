@@ -8,6 +8,7 @@ import { fetchRecentCommits } from '@/lib/github'
 import { fetchSessionRecordings, fetchErrorEvents, fetchTopPages } from '@/lib/posthog'
 import { decrypt } from '@/lib/encryption'
 import type { Json } from '@/lib/supabase/types'
+import { primaryGithubRepoFullName } from '@/lib/github-integration-config'
 
 const GenerateSchema = z.object({
   projectId: z.string().uuid(),
@@ -69,14 +70,10 @@ export async function POST(request: NextRequest) {
       const config = githubIntegration.config as Record<string, Json>
       const installationId = config.installation_id as number
       const repos = (config.repos as Array<Record<string, Json>>) || []
-      if (installationId && repos.length > 0) {
-        for (const repo of repos.slice(0, 3)) {
-          const repoName = repo.full_name as string
-          if (repoName) {
-            const repoCommits = await fetchRecentCommits(installationId, repoName)
-            commits.push(...repoCommits)
-          }
-        }
+      const repoName = primaryGithubRepoFullName(repos)
+      if (installationId && repoName) {
+        const repoCommits = await fetchRecentCommits(installationId, repoName)
+        commits.push(...repoCommits)
       }
     } catch (e) {
       console.warn('Failed to fetch GitHub commits:', e)
