@@ -10,7 +10,7 @@ import { runResearchAgent, type ResearchReport } from '@/lib/research-agent'
 import { triggerTestRun } from '@/lib/modal'
 import type { Json } from '@/lib/supabase/types'
 
-export const maxDuration = 120
+export const maxDuration = 900
 
 async function getOrRunResearch(
   serviceClient: ReturnType<typeof createServiceRoleClient>,

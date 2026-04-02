@@ -17,7 +17,7 @@ export async function createResearchSandbox(
 
   const sandbox = await Sandbox.create({
     runtime: 'node24',
-    timeout: 120_000,
+    timeout: 900_000,
     networkPolicy: Object.keys(allowRules).length > 0
       ? { allow: allowRules }
       : 'deny-all',
