@@ -4,13 +4,36 @@ import { decrypt } from '@/lib/encryption'
 import { getInstallationToken } from '@/lib/github'
 import { INTEGRATION_REGISTRY } from '@/lib/integrations/registry'
 import { fetchIntegrationDocs } from '@/lib/integrations/docs'
+import { getLangSmithTracingClient } from '@/lib/langsmith-ai'
+import { traceable } from 'langsmith/traceable'
 import { createResearchSandbox, teardownSandbox } from './sandbox'
 import { runResearchLoop } from './agent'
 import type { ResearchReport, IntegrationCredentials } from './types'
 
 export type { ResearchReport }
 
-export async function runResearchAgent(
+const lsClient = getLangSmithTracingClient()
+
+async function fetchIntegrationDocsBundle(input: {
+  types: string[]
+}): Promise<Record<string, string>> {
+  const docs = await Promise.all(
+    input.types.map(async (type) => [type, await fetchIntegrationDocs(type)] as const),
+  )
+  return Object.fromEntries(docs)
+}
+
+const tracedFetchIntegrationDocs = traceable(fetchIntegrationDocsBundle, {
+  name: 'research_fetch_integration_docs',
+  ...(lsClient ? { client: lsClient } : {}),
+  processInputs: (i) => ({ integrationTypes: i.types, count: i.types.length }),
+  processOutputs: (out) => ({
+    docKeys: Object.keys(out),
+    docSizes: Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.length])),
+  }),
+})
+
+async function runResearchAgentCore(
   supabase: SupabaseClient<Database>,
   projectId: string,
   appUrl: string,
@@ -118,12 +141,17 @@ export async function runResearchAgent(
     }
   }
 
-  const docs = await Promise.all(
-    docsToFetch.map(async (type) => [type, await fetchIntegrationDocs(type)] as const),
-  )
-  const integrationDocs = Object.fromEntries(docs)
+  const integrationDocs = await tracedFetchIntegrationDocs({ types: docsToFetch })
 
-  const sandbox = await createResearchSandbox(creds)
+  const tracedCreateSandbox = traceable(createResearchSandbox, {
+    name: 'research_create_sandbox',
+    ...(lsClient ? { client: lsClient } : {}),
+    processInputs: (inputs) => ({
+      integrationTypes: inputs.input.map((x) => x.type),
+      credentialSlotCount: inputs.input.length,
+    }),
+  })
+  const sandbox = await tracedCreateSandbox(creds)
 
   try {
     const report = await runResearchLoop({
@@ -137,3 +165,20 @@ export async function runResearchAgent(
     await teardownSandbox(sandbox)
   }
 }
+
+export const runResearchAgent = traceable(runResearchAgentCore, {
+  name: 'verona_run_research_agent',
+  ...(lsClient ? { client: lsClient } : {}),
+  processInputs: (inputs) => {
+    const args = 'args' in inputs && Array.isArray(inputs.args) ? inputs.args : []
+    const projectId = typeof args[1] === 'string' ? args[1] : undefined
+    const appUrl = typeof args[2] === 'string' ? args[2] : undefined
+    return { projectId, appUrl }
+  },
+  processOutputs: (out) => ({
+    summaryPreview: out.summary?.slice(0, 400),
+    findingsCount: out.findings.length,
+    integrationsCovered: out.integrationsCovered,
+    integrationsSkipped: out.integrationsSkipped,
+  }),
+})
