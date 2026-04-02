@@ -53,49 +53,63 @@ function project(p: Point3D, fov: number, viewDist: number): ProjectedPoint {
 }
 
 interface DNAData {
-  points: Point3D[]
-  backboneEdges: [number, number][]
-  rungEdges: [number, number][]
+  dotPoints: Point3D[]
+  backboneCurve1: Point3D[]
+  backboneCurve2: Point3D[]
+  rungPairs: [number, number][]
 }
 
-function generateDNAHelix(numPointsPerStrand: number, turns: number): DNAData {
-  const points: Point3D[] = []
-  const backboneEdges: [number, number][] = []
-  const rungEdges: [number, number][] = []
+function generateDNAHelix(numDots: number, numCurveSegments: number, turns: number): DNAData {
+  const dotPoints: Point3D[] = []
+  const backboneCurve1: Point3D[] = []
+  const backboneCurve2: Point3D[] = []
+  const rungPairs: [number, number][] = []
 
-  const radius = 0.5
-  const halfHeight = 1.15
+  const radius = 0.55
+  const halfHeight = 1.2
 
-  for (let i = 0; i < numPointsPerStrand; i++) {
-    const t = i / (numPointsPerStrand - 1)
+  for (let i = 0; i < numDots; i++) {
+    const t = i / (numDots - 1)
     const theta = t * turns * 2 * Math.PI
     const y = (t - 0.5) * 2 * halfHeight
 
-    const idx1 = points.length
-    points.push({
+    const idx1 = dotPoints.length
+    dotPoints.push({
       x: radius * Math.cos(theta),
       y,
       z: radius * Math.sin(theta),
     })
 
-    const idx2 = points.length
-    points.push({
+    const idx2 = dotPoints.length
+    dotPoints.push({
       x: radius * Math.cos(theta + Math.PI),
       y,
       z: radius * Math.sin(theta + Math.PI),
     })
 
-    if (i > 0) {
-      backboneEdges.push([idx1 - 2, idx1])
-      backboneEdges.push([idx2 - 2, idx2])
-    }
-
     if (i % 2 === 0) {
-      rungEdges.push([idx1, idx2])
+      rungPairs.push([idx1, idx2])
     }
   }
 
-  return { points, backboneEdges, rungEdges }
+  for (let i = 0; i <= numCurveSegments; i++) {
+    const t = i / numCurveSegments
+    const theta = t * turns * 2 * Math.PI
+    const y = (t - 0.5) * 2 * halfHeight
+
+    backboneCurve1.push({
+      x: radius * Math.cos(theta),
+      y,
+      z: radius * Math.sin(theta),
+    })
+    backboneCurve2.push({
+      x: radius * Math.cos(theta + Math.PI),
+      y,
+      z: radius * Math.sin(theta + Math.PI),
+    })
+  }
+
+  return { dotPoints, backboneCurve1, backboneCurve2, rungPairs }
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -124,9 +138,9 @@ export function InteractiveLogo({
     animId: 0,
   })
 
-  const dna = useRef(generateDNAHelix(24, 2)).current
+  const dna = useRef(generateDNAHelix(14, 80, 2)).current
   const colorIndices = useRef(
-    dna.points.map((_, i) => i % DOT_COLORS.length)
+    dna.dotPoints.map((_, i) => i % DOT_COLORS.length)
   ).current
 
   const PAD = 2.2
@@ -153,63 +167,52 @@ export function InteractiveLogo({
     const fov = 250
     const viewDist = 4.5
 
-    const projected: (ProjectedPoint & { origIdx: number })[] = dna.points.map(
-      (p, i) => {
-        let rotated = rotateX(p, s.rotX)
-        rotated = rotateY(rotated, s.rotY)
-        const proj = project(rotated, fov, viewDist)
-        return { ...proj, origIdx: i }
-      }
-    )
+    const transformAndProject = (p: Point3D) => {
+      let rotated = rotateX(p, s.rotX)
+      rotated = rotateY(rotated, s.rotY)
+      return project(rotated, fov, viewDist)
+    }
 
-    const drawEdges = (
-      edges: [number, number][],
-      lineWidth: number,
-      color: string,
-      alphaScale: number
-    ) => {
-      const sorted = edges
-        .map(([a, b]) => ({
-          a,
-          b,
-          avgZ: (projected[a].z + projected[b].z) / 2,
-        }))
-        .sort((x, y) => y.avgZ - x.avgZ)
+    const projDots = dna.dotPoints.map((p, i) => ({
+      ...transformAndProject(p),
+      origIdx: i,
+    }))
 
-      for (const { a, b, avgZ } of sorted) {
-        const pa = projected[a]
-        const pb = projected[b]
-        const sx1 = w / 2 + pa.x
-        const sy1 = h / 2 + pa.y
-        const sx2 = w / 2 + pb.x
-        const sy2 = h / 2 + pb.y
+    const projCurve1 = dna.backboneCurve1.map(transformAndProject)
+    const projCurve2 = dna.backboneCurve2.map(transformAndProject)
 
+    const sizeScale = size / 120
+
+    const drawCurve = (curve: ProjectedPoint[]) => {
+      if (curve.length < 2) return
+
+      for (let i = 0; i < curve.length - 1; i++) {
+        const p1 = curve[i]
+        const p2 = curve[i + 1]
+        const avgZ = (p1.z + p2.z) / 2
         const depthNorm = (avgZ + 1.8) / 3.6
-        const alpha = (0.35 + 0.55 * depthNorm) * alphaScale
+        const alpha = Math.max(0.25, 0.4 + 0.6 * depthNorm)
 
         ctx.beginPath()
-        ctx.moveTo(sx1, sy1)
-        ctx.lineTo(sx2, sy2)
-        ctx.strokeStyle = hexToRgba(color, alpha)
-        ctx.lineWidth = lineWidth * (0.5 + 0.5 * depthNorm) * (size / 120)
+        ctx.moveTo(w / 2 + p1.x, h / 2 + p1.y)
+        ctx.lineTo(w / 2 + p2.x, h / 2 + p2.y)
+        ctx.strokeStyle = hexToRgba('#1e293b', alpha)
+        ctx.lineWidth = Math.max(1.2, 2.5 * (0.5 + 0.5 * depthNorm) * sizeScale)
         ctx.lineCap = 'round'
         ctx.stroke()
       }
     }
 
-    drawEdges(dna.backboneEdges, 1.6, '#94a3b8', 0.75)
-    drawEdges(dna.rungEdges, 1.0, '#cbd5e1', 0.45)
-
-    const sortedDots = [...projected].sort((a, b) => b.z - a.z)
+    const sortedDots = [...projDots].sort((a, b) => b.z - a.z)
 
     for (const p of sortedDots) {
       const sx = w / 2 + p.x
       const sy = h / 2 + p.y
 
       const depthNorm = (p.z + 1.8) / 3.6
-      const baseRadius = 9
-      const radius = baseRadius * (0.6 + 0.5 * depthNorm) * (size / 120)
-      const alpha = 0.55 + 0.45 * depthNorm
+      const baseRadius = 7
+      const radius = baseRadius * (0.55 + 0.5 * depthNorm) * sizeScale
+      const alpha = 0.6 + 0.4 * depthNorm
 
       const dotColor = DOT_COLORS[colorIndices[p.origIdx]]
 
@@ -218,6 +221,25 @@ export function InteractiveLogo({
       ctx.fillStyle = hexToRgba(dotColor, alpha)
       ctx.fill()
     }
+
+    for (const [a, b] of dna.rungPairs) {
+      const pa = projDots[a]
+      const pb = projDots[b]
+      const avgZ = (pa.z + pb.z) / 2
+      const depthNorm = (avgZ + 1.8) / 3.6
+      const alpha = Math.max(0.15, 0.25 + 0.45 * depthNorm)
+
+      ctx.beginPath()
+      ctx.moveTo(w / 2 + pa.x, h / 2 + pa.y)
+      ctx.lineTo(w / 2 + pb.x, h / 2 + pb.y)
+      ctx.strokeStyle = hexToRgba('#64748b', alpha)
+      ctx.lineWidth = Math.max(0.8, 1.5 * (0.4 + 0.6 * depthNorm) * sizeScale)
+      ctx.lineCap = 'round'
+      ctx.stroke()
+    }
+
+    drawCurve(projCurve1)
+    drawCurve(projCurve2)
   }, [size, canvasSize, dna, colorIndices])
 
   useEffect(() => {
