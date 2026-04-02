@@ -48,13 +48,13 @@ export default async function ProjectOverviewPage({ params }: PageProps) {
     <div className="max-w-4xl mx-auto space-y-14">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-4xl">{project.name}</h1>
-          <p className="text-lg opacity-50 mt-2">{project.app_url}</p>
+          <h1 className="text-5xl">{project.name}</h1>
+          <p className="text-xl opacity-50 mt-2">{project.app_url}</p>
         </div>
         <TriggerRunButton projectId={project.id} />
       </div>
 
-      <div className="flex gap-16 text-xl">
+      <div className="flex gap-16 text-2xl">
         <div>
           <span className="opacity-50">Runs</span>{' '}
           {recentRuns?.length || 0}
@@ -65,7 +65,7 @@ export default async function ProjectOverviewPage({ params }: PageProps) {
         </div>
       </div>
 
-      <nav className="space-y-3 text-xl">
+      <nav className="space-y-3 text-2xl">
         <Link href={`/projects/${project.id}/templates`} className="block py-2 underline">
           Templates
         </Link>
@@ -79,8 +79,8 @@ export default async function ProjectOverviewPage({ params }: PageProps) {
 
       {recentRuns && recentRuns.length > 0 && (
         <div>
-          <h2 className="text-xl mb-4 opacity-50">Recent Runs</h2>
-          <div className="divide-y text-xl">
+          <h2 className="text-2xl mb-4 opacity-50">Recent Runs</h2>
+          <div className="divide-y text-2xl">
             {recentRuns.map((run) => {
               const summary = run.summary as Record<string, number> | null
               return (
@@ -91,12 +91,12 @@ export default async function ProjectOverviewPage({ params }: PageProps) {
                 >
                   <div className="flex items-center gap-6">
                     <RunStatusBadge status={run.status} />
-                    <span className="text-lg opacity-50">
+                    <span className="text-xl opacity-50">
                       {new Date(run.created_at).toLocaleString()}
                     </span>
                   </div>
                   {summary && summary.total > 0 && (
-                    <span className="text-lg opacity-60">
+                    <span className="text-xl opacity-60">
                       {summary.passed}/{summary.total}
                     </span>
                   )}

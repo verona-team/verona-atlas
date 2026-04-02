@@ -41,19 +41,19 @@ export default async function RunHistoryPage({ params }: PageProps) {
   return (
     <div className="max-w-4xl mx-auto space-y-10">
       <div>
-        <Link href={`/projects/${projectId}`} className="text-lg opacity-50 hover:opacity-80">
+        <Link href={`/projects/${projectId}`} className="text-xl opacity-50 hover:opacity-80">
           ← {project.name}
         </Link>
         <div className="flex items-center justify-between mt-3">
-          <h1 className="text-4xl">Runs</h1>
+          <h1 className="text-5xl">Runs</h1>
           <TriggerRunButton projectId={projectId} />
         </div>
       </div>
 
       {(!runs || runs.length === 0) ? (
-        <p className="text-xl opacity-50 py-8">No runs yet.</p>
+        <p className="text-2xl opacity-50 py-8">No runs yet.</p>
       ) : (
-        <div className="divide-y text-xl">
+        <div className="divide-y text-2xl">
           {runs.map((run) => {
             const summary = run.summary as Record<string, number> | null
             const duration =
@@ -69,17 +69,17 @@ export default async function RunHistoryPage({ params }: PageProps) {
               >
                 <div className="flex items-center gap-6">
                   <RunStatusBadge status={run.status} />
-                  <span className="text-lg opacity-50">
+                  <span className="text-xl opacity-50">
                     {new Date(run.created_at).toLocaleString()}
                   </span>
-                  <span className="text-lg opacity-40">{duration}</span>
+                  <span className="text-xl opacity-40">{duration}</span>
                 </div>
                 {summary && summary.total > 0 ? (
-                  <span className="text-lg opacity-60">
+                  <span className="text-xl opacity-60">
                     {summary.passed}/{summary.total}
                   </span>
                 ) : (
-                  <span className="text-lg opacity-30">—</span>
+                  <span className="text-xl opacity-30">—</span>
                 )}
               </Link>
             )

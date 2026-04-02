@@ -133,4 +133,8 @@
 /* Dashboard terminal font scope */
 .terminal-ui {
   font-family: var(--font-vt323), monospace;
+  letter-spacing: 0.025em;
+  font-size: 1.125rem;
+  line-height: 1.6;
 }
+

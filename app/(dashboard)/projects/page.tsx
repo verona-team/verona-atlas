@@ -27,14 +27,14 @@ export default async function ProjectsPage() {
   return (
     <div className="max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-12">
-        <h1 className="text-4xl">Projects</h1>
-        <Link href="/projects/new" className="text-xl underline">
+        <h1 className="text-5xl">Projects</h1>
+        <Link href="/projects/new" className="text-2xl underline">
           + New
         </Link>
       </div>
 
       {(!projects || projects.length === 0) ? (
-        <p className="text-xl opacity-60 py-12">
+        <p className="text-2xl opacity-60 py-12">
           No projects yet.{' '}
           <Link href="/projects/new" className="underline">Create one</Link> to get started.
         </p>
@@ -47,10 +47,10 @@ export default async function ProjectsPage() {
               className="flex items-center justify-between py-6 group"
             >
               <div>
-                <p className="text-xl">{project.name}</p>
-                <p className="text-lg opacity-50 mt-1">{project.app_url}</p>
+                <p className="text-2xl">{project.name}</p>
+                <p className="text-xl opacity-50 mt-1">{project.app_url}</p>
               </div>
-              <span className="text-xl opacity-30 group-hover:opacity-60">→</span>
+              <span className="text-2xl opacity-30 group-hover:opacity-60">→</span>
             </Link>
           ))}
         </div>
