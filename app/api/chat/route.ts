@@ -15,6 +15,8 @@ import { getOrCreateSession } from '@/lib/chat/session'
 import { buildChatContext, maybeSummarizeOlderMessages } from '@/lib/chat/context'
 import { generateFlowProposals, serializeFlowsForMessage } from '@/lib/chat/flow-generator'
 import { runResearchAgent, type ResearchReport } from '@/lib/research-agent'
+import { getGithubIntegrationReady } from '@/lib/github-integration-guard'
+import { normalizeResearchReport } from '@/lib/research-agent/types'
 import { triggerTestRun } from '@/lib/modal'
 import type { Json } from '@/lib/supabase/types'
 
@@ -35,7 +37,7 @@ async function getOrRunResearch(
       .single()
 
     if (session?.research_report) {
-      return session.research_report as unknown as ResearchReport
+      return normalizeResearchReport(session.research_report)
     }
   }
 
@@ -124,6 +126,17 @@ export async function POST(request: Request) {
 
   const { contextSummary } = await buildChatContext(serviceClient, session.id)
 
+  const ghReady = await getGithubIntegrationReady(serviceClient, projectId)
+  if (!ghReady.ok) {
+    return new Response(
+      JSON.stringify({
+        error: ghReady.reason,
+        code: 'GITHUB_SETUP_REQUIRED',
+      }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+
   const report = await getOrRunResearch(serviceClient, session.id, projectId, project.app_url)
 
   const { data: recentRuns } = await serviceClient
@@ -158,16 +171,35 @@ export async function POST(request: Request) {
       ? report.findings.map((f) => `- [${f.source}/${f.severity}] ${f.details}`).join('\n')
       : 'No specific findings from integrations.'
 
+  const ce = report.codebaseExploration
+  const codebaseBlock =
+    ce && ce.summary
+      ? `## Repository understanding (${ce.confidence} confidence)
+${ce.summary}
+
+**Architecture:** ${ce.architecture || '—'}
+
+**Inferred user flows (from code):**
+${ce.inferredUserFlows.length ? ce.inferredUserFlows.map((f, i) => `${i + 1}. ${f}`).join('\n') : '—'}
+
+**Testing implications:** ${ce.testingImplications || '—'}
+
+**Paths examined:** ${ce.keyPathsExamined.length ? ce.keyPathsExamined.slice(0, 40).join(', ') : '—'}
+${ce.truncationWarnings.length ? `\n**Notes:** ${ce.truncationWarnings.join(' ')}` : ''}`
+      : ''
+
   const systemPrompt = `You are Verona, an AI QA strategist that helps teams plan and execute UI testing for their web applications. You are assisting with the project "${project.name}" at ${project.app_url}.
 
 # Research Report
-A deep analysis agent investigated the user's connected integrations and found:
+A deep analysis agent investigated the user's connected integrations and linked GitHub repository.
 
 ## Summary
 ${report.summary}
 
 ## Key Findings
 ${findingsSummary}
+
+${codebaseBlock}
 
 ## Recommended Flows
 ${report.recommendedFlows.map((f, i) => `${i + 1}. ${f}`).join('\n')}
@@ -176,7 +208,7 @@ Integrations covered: ${report.integrationsCovered.join(', ') || 'none'}
 
 # Instructions
 - Be concise and actionable
-- When proposing or discussing flows, reference specific findings from the research report above
+- When proposing or discussing flows, reference specific findings from the research report above and the repository understanding when relevant
 - When the user provides feedback, acknowledge it and explain how you'll incorporate it
 - If the user asks about data from an integration not listed in "integrations covered", tell them to connect it in Settings
 

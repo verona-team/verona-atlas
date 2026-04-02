@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import type { Json } from '@/lib/supabase/types'
+import { clearResearchReportsForProject } from '@/lib/github-integration-guard'
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -73,6 +74,7 @@ export async function GET(request: NextRequest) {
 
     if (error)
       return NextResponse.json({ error: error.message }, { status: 500 })
+    await clearResearchReportsForProject(supabase, projectId)
   } else {
     const { error } = await supabase.from('integrations').insert({
       project_id: projectId,
@@ -83,6 +85,7 @@ export async function GET(request: NextRequest) {
 
     if (error)
       return NextResponse.json({ error: error.message }, { status: 500 })
+    await clearResearchReportsForProject(supabase, projectId)
   }
 
   const redirectPath = returnTo || `/projects/${projectId}/settings`

@@ -32,18 +32,33 @@ export async function generateFlowProposals(
       ).join('\n')
     : 'No specific findings from integrations.'
 
+  const ce = report.codebaseExploration
+  const codebaseBlock = ce
+    ? `## Repository understanding (${ce.confidence} confidence)
+${ce.summary}
+
+Architecture: ${ce.architecture || '—'}
+
+Inferred flows from code: ${ce.inferredUserFlows.length ? ce.inferredUserFlows.join('; ') : '—'}
+
+Testing implications: ${ce.testingImplications || '—'}
+Key paths: ${ce.keyPathsExamined.slice(0, 30).join(', ') || '—'}`
+    : ''
+
   const { output } = await generateText({
     model,
     output: Output.object({ schema: flowProposalsSchema }),
     prompt: `You are a QA strategist for the web application at ${appUrl}.
 
-A research agent has investigated the user's connected integrations and produced the following report:
+A research agent has investigated the user's connected integrations and linked GitHub repository.
 
 ## Executive Summary
 ${report.summary}
 
 ## Findings
 ${findingsBlock}
+
+${codebaseBlock}
 
 ## Recommended Flows (from research)
 ${report.recommendedFlows.map((f, i) => `${i + 1}. ${f}`).join('\n')}
@@ -54,7 +69,7 @@ Integrations skipped: ${report.integrationsSkipped.join(', ') || 'none'}
 
 Based on this research, generate 3-5 concrete UI test flows. Each flow should:
 - Have a unique kebab-case id
-- Explain WHY it's recommended by referencing specific findings (commit SHAs, error messages, page URLs, etc.)
+- Explain WHY it's recommended by referencing specific findings (commits, errors, URLs, routes, or code structure from the repository section)
 - Include detailed step-by-step instructions an AI browser agent can execute
 - Be prioritized by severity of the underlying finding
 

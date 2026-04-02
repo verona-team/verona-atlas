@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { clearResearchReportsForProject } from '@/lib/github-integration-guard'
 
 type RouteContext = { params: Promise<{ integrationId: string }> }
 
@@ -26,7 +27,7 @@ export async function DELETE(
 
   const { data: integration } = await supabase
     .from('integrations')
-    .select('id, project_id')
+    .select('id, project_id, type')
     .eq('id', integrationId)
     .single()
 
@@ -50,6 +51,10 @@ export async function DELETE(
 
   if (error)
     return NextResponse.json({ error: error.message }, { status: 500 })
+
+  if (integration.type === 'github') {
+    await clearResearchReportsForProject(supabase, integration.project_id)
+  }
 
   return NextResponse.json({ success: true })
 }

@@ -1,8 +1,9 @@
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { getOrCreateSession } from '@/lib/chat/session'
 import { ChatInterface } from '@/components/chat/chat-interface'
 import { ChatNav } from '@/components/chat/chat-nav'
+import { getGithubIntegrationReady } from '@/lib/github-integration-guard'
 
 type PageProps = { params: Promise<{ projectId: string }> }
 
@@ -30,6 +31,11 @@ export default async function ChatPage({ params }: PageProps) {
     .single()
 
   if (!project) notFound()
+
+  const gh = await getGithubIntegrationReady(supabase, projectId)
+  if (!gh.ok) {
+    redirect(`/projects/${projectId}/setup`)
+  }
 
   const session = await getOrCreateSession(supabase, projectId)
 
