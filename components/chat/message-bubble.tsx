@@ -36,16 +36,16 @@ export function MessageBubble({
       <div
         className={`max-w-[85%] ${
           isUser
-            ? 'bg-primary text-primary-foreground rounded-2xl rounded-br-sm px-5 py-3'
-            : 'space-y-4'
+            ? 'bg-primary text-primary-foreground rounded-2xl rounded-br-sm px-6 py-4'
+            : 'space-y-5'
         }`}
       >
         {isUser ? (
-          <p className="text-base whitespace-pre-wrap">{content}</p>
+          <p className="text-lg whitespace-pre-wrap">{content}</p>
         ) : (
           <>
-            {!isFlowProposal && (
-              <div className="text-base opacity-90 whitespace-pre-wrap leading-relaxed">
+            {!isFlowProposal && !isRunStarted && (
+              <div className="text-lg opacity-90 whitespace-pre-wrap leading-relaxed">
                 {content}
                 {isStreaming && (
                   <span className="inline-block w-2 h-5 ml-1 bg-foreground/60 animate-pulse" />
@@ -54,11 +54,11 @@ export function MessageBubble({
             )}
 
             {isFlowProposal && proposals && (
-              <div className="space-y-4">
-                <p className="text-base opacity-80 leading-relaxed">
+              <div className="space-y-5">
+                <p className="text-lg opacity-80 leading-relaxed">
                   {proposals.analysis}
                 </p>
-                <p className="text-base opacity-60">
+                <p className="text-lg opacity-60">
                   Here are the UI flows I recommend testing:
                 </p>
                 <div className="space-y-3">
@@ -72,16 +72,16 @@ export function MessageBubble({
                     />
                   ))}
                 </div>
-                <p className="text-sm opacity-50">
+                <p className="text-base opacity-50">
                   Approve or reject each flow, then tell me to start testing when you&apos;re ready.
                 </p>
               </div>
             )}
 
             {isRunStarted && (
-              <div className="flex items-center gap-3 border border-green-500/20 rounded-lg p-4 bg-green-500/5">
-                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                <p className="text-base">{content}</p>
+              <div className="flex items-center gap-3 border border-green-500/20 rounded-lg p-5 bg-green-500/5">
+                <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" />
+                <p className="text-lg">{content}</p>
               </div>
             )}
           </>

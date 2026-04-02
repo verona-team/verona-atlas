@@ -40,15 +40,15 @@ export default async function ChatPage({ params }: PageProps) {
     .order('created_at', { ascending: true })
 
   return (
-    <div className="h-[calc(100vh-80px)] max-w-4xl mx-auto flex flex-col">
-      <div className="flex items-center justify-between py-4 border-b mb-2">
+    <div className="fixed inset-0 top-[65px] flex flex-col">
+      <div className="flex items-center justify-between px-8 md:px-16 lg:px-24 py-4 border-b shrink-0">
         <div>
           <h1 className="text-2xl">{project.name}</h1>
           <p className="text-base opacity-40">{project.app_url}</p>
         </div>
         <ChatNav projectId={projectId} />
       </div>
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 max-w-4xl w-full mx-auto">
         <ChatInterface
           projectId={projectId}
           sessionId={session.id}

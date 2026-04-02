@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { MessageSquare, LayoutList, History, Settings, BarChart3 } from 'lucide-react'
+import { MessageSquare, History, Settings } from 'lucide-react'
 
 interface ChatNavProps {
   projectId: string
@@ -10,8 +10,6 @@ interface ChatNavProps {
 
 const navItems = [
   { label: 'Chat', href: 'chat', icon: MessageSquare },
-  { label: 'Overview', href: 'overview', icon: BarChart3 },
-  { label: 'Templates', href: 'templates', icon: LayoutList },
   { label: 'Runs', href: 'runs', icon: History },
   { label: 'Settings', href: 'settings', icon: Settings },
 ]

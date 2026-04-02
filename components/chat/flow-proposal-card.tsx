@@ -57,13 +57,13 @@ export function FlowProposalCard({
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3">
-            <h4 className="text-lg font-medium truncate">{flow.name}</h4>
-            <span className={`text-sm ${priorityStyles[flow.priority]}`}>
+            <h4 className="text-xl font-medium truncate">{flow.name}</h4>
+            <span className={`text-base ${priorityStyles[flow.priority]}`}>
               {flow.priority}
             </span>
             {state !== 'pending' && (
               <span
-                className={`text-sm px-2 py-0.5 rounded-full ${
+                className={`text-base px-2 py-0.5 rounded-full ${
                   state === 'approved'
                     ? 'bg-green-500/10 text-green-500'
                     : 'bg-red-500/10 text-red-500'
@@ -73,8 +73,8 @@ export function FlowProposalCard({
               </span>
             )}
           </div>
-          <p className="text-base opacity-60 mt-1">{flow.description}</p>
-          <p className="text-sm opacity-40 mt-1 italic">{flow.rationale}</p>
+          <p className="text-lg opacity-60 mt-1">{flow.description}</p>
+          <p className="text-base opacity-40 mt-1 italic">{flow.rationale}</p>
         </div>
 
         {state === 'pending' && (
@@ -82,7 +82,7 @@ export function FlowProposalCard({
             <button
               onClick={() => onApprove(flow.id)}
               disabled={disabled}
-              className="flex items-center gap-1 px-3 py-1.5 text-sm border border-green-500/30 rounded hover:bg-green-500/10 transition-colors disabled:opacity-30"
+              className="flex items-center gap-1.5 px-4 py-2 text-base border border-green-500/30 rounded hover:bg-green-500/10 transition-colors disabled:opacity-30"
               title="Approve"
             >
               <Check className="w-4 h-4 text-green-500" />
@@ -91,7 +91,7 @@ export function FlowProposalCard({
             <button
               onClick={() => onReject(flow.id)}
               disabled={disabled}
-              className="flex items-center gap-1 px-3 py-1.5 text-sm border border-red-500/30 rounded hover:bg-red-500/10 transition-colors disabled:opacity-30"
+              className="flex items-center gap-1.5 px-4 py-2 text-base border border-red-500/30 rounded hover:bg-red-500/10 transition-colors disabled:opacity-30"
               title="Reject"
             >
               <X className="w-4 h-4 text-red-500" />
@@ -103,7 +103,7 @@ export function FlowProposalCard({
 
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1 mt-3 text-sm opacity-50 hover:opacity-80 transition-opacity"
+        className="flex items-center gap-1 mt-3 text-base opacity-50 hover:opacity-80 transition-opacity"
       >
         {expanded ? (
           <ChevronDown className="w-3 h-3" />
@@ -116,7 +116,7 @@ export function FlowProposalCard({
       {expanded && (
         <ol className="mt-3 space-y-2 pl-4 border-l border-border">
           {flow.steps.map((step) => (
-            <li key={step.order} className="text-sm">
+            <li key={step.order} className="text-base">
               <span className="opacity-40 mr-2">{step.order}.</span>
               <span
                 className={`inline-block px-1.5 py-0.5 text-xs rounded mr-2 ${

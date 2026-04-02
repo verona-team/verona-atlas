@@ -72,22 +72,54 @@ export async function POST(request: Request) {
 
   const { contextSummary } = await buildChatContext(serviceClient, session.id)
 
-  const { data: recentRuns } = await serviceClient
-    .from('test_runs')
-    .select('id, status, summary, created_at')
-    .eq('project_id', projectId)
-    .order('created_at', { ascending: false })
-    .limit(3)
+  const [integrationContext, recentRunsResult, proposalMessagesResult, integrationsResult] = await Promise.all([
+    gatherIntegrationContext(serviceClient, projectId),
+    serviceClient
+      .from('test_runs')
+      .select('id, status, summary, created_at')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false })
+      .limit(3),
+    serviceClient
+      .from('chat_messages')
+      .select('metadata')
+      .eq('session_id', session.id)
+      .not('metadata->type', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1),
+    serviceClient
+      .from('integrations')
+      .select('type, status')
+      .eq('project_id', projectId),
+  ])
 
-  const { data: proposalMessages } = await serviceClient
-    .from('chat_messages')
-    .select('metadata')
-    .eq('session_id', session.id)
-    .not('metadata->type', 'is', null)
-    .order('created_at', { ascending: false })
-    .limit(1)
+  const recentRuns = recentRunsResult.data
+  const activeIntegrations = (integrationsResult.data ?? []).filter((i) => i.status === 'active').map((i) => i.type)
+  const disconnectedIntegrations = ['github', 'posthog', 'sentry', 'langsmith', 'braintrust', 'slack'].filter(
+    (t) => !activeIntegrations.includes(t as typeof activeIntegrations[number]),
+  )
 
-  const latestProposals = proposalMessages?.[0]?.metadata as Record<string, Json> | null
+  let integrationDataSection = ''
+  if (integrationContext.commits.length > 0) {
+    integrationDataSection += `\n## Recent Git Commits (${integrationContext.commits.length})\n${JSON.stringify(integrationContext.commits.slice(0, 15), null, 2)}\n`
+  }
+  if (integrationContext.errorEvents.length > 0) {
+    integrationDataSection += `\n## Error Events from PostHog (${integrationContext.errorEvents.length})\n${JSON.stringify(integrationContext.errorEvents.slice(0, 10), null, 2)}\n`
+  }
+  if (integrationContext.topPages.length > 0) {
+    integrationDataSection += `\n## Top Pages from PostHog\n${JSON.stringify(integrationContext.topPages.slice(0, 10), null, 2)}\n`
+  }
+  if (integrationContext.sessionRecordings.length > 0) {
+    integrationDataSection += `\n## Recent Session Recordings (${integrationContext.sessionRecordings.length})\n${JSON.stringify(integrationContext.sessionRecordings.slice(0, 10), null, 2)}\n`
+  }
+  if (integrationContext.sentryIssues.length > 0) {
+    integrationDataSection += `\n## Sentry Issues (${integrationContext.sentryIssues.length})\n${JSON.stringify(integrationContext.sentryIssues.slice(0, 10), null, 2)}\n`
+  }
+  if (integrationContext.existingTemplates.length > 0) {
+    integrationDataSection += `\n## Existing Test Templates (avoid duplicates)\n${JSON.stringify(integrationContext.existingTemplates, null, 2)}\n`
+  }
+
+  const latestProposals = proposalMessagesResult.data?.[0]?.metadata as Record<string, Json> | null
   const flowStates = (latestProposals?.flow_states ?? {}) as Record<string, string>
   const approvedCount = Object.values(flowStates).filter((s) => s === 'approved').length
 
@@ -101,16 +133,21 @@ export async function POST(request: Request) {
 
   const systemPrompt = `You are Verona, an AI QA strategist that helps teams plan and execute UI testing for their web applications. You are assisting with the project "${project.name}" at ${project.app_url}.
 
+Connected integrations: ${activeIntegrations.length > 0 ? activeIntegrations.join(', ') : 'none'}
+Not connected: ${disconnectedIntegrations.length > 0 ? disconnectedIntegrations.join(', ') : 'all connected'}
+
+${integrationDataSection ? `# Live Integration Data\nThe following data was fetched from the user's connected integrations:\n${integrationDataSection}` : 'No integration data is available. The user has not connected integrations, or they returned no recent data.'}
+
 Your capabilities:
-1. Propose UI test flows based on code changes, analytics, and error data
+1. Propose UI test flows based on the integration data above
 2. Refine test flows based on user feedback
 3. Trigger test execution when the user is ready
 
 Communication style:
 - Be concise and actionable
-- When proposing flows, always explain WHY each flow is recommended
-- Reference specific data (commits, errors, pages) in your rationale
+- When proposing flows, always explain WHY each flow is recommended, referencing specific commits, errors, or pages from the data above
 - When the user provides feedback, acknowledge it and explain how you'll incorporate it
+- If the user asks about integration data you don't have, tell them which integration to connect and where (project Settings → Integrations)
 
 ${contextSummary ? `Previous conversation context:\n${contextSummary}\n` : ''}
 ${flowStatusSummary}
@@ -128,13 +165,13 @@ When the user approves flows and wants to start testing (says things like "go", 
     messages: modelMessages,
     tools: {
       generate_flow_proposals: tool({
-        description: 'Generate new UI test flow proposals by analyzing the project\'s integration data (GitHub commits, PostHog sessions, Sentry errors, etc.)',
+        description: 'Generate structured UI test flow proposals with approval cards. Use this when the user asks to generate, refresh, or create new test flow proposals.',
         inputSchema: z.object({
           reason: z.string().describe('Brief reason for generating proposals'),
         }),
         execute: async (_input) => {
-          const integrationContext = await gatherIntegrationContext(serviceClient, projectId)
-          const proposals = await generateFlowProposals(project.app_url, integrationContext)
+          const freshContext = await gatherIntegrationContext(serviceClient, projectId)
+          const proposals = await generateFlowProposals(project.app_url, freshContext)
           const { content, metadata } = serializeFlowsForMessage(proposals)
 
           await serviceClient.from('chat_messages').insert({
