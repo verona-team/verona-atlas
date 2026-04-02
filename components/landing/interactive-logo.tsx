@@ -52,24 +52,50 @@ function project(p: Point3D, fov: number, viewDist: number): ProjectedPoint {
   return { x: p.x * factor, y: p.y * factor, z: p.z, scale: factor }
 }
 
-function generateCubePoints(gridSize: number): Point3D[] {
-  const points: Point3D[] = []
-  const half = (gridSize - 1) / 2
+interface DNAData {
+  points: Point3D[]
+  backboneEdges: [number, number][]
+  rungEdges: [number, number][]
+}
 
-  for (let x = 0; x < gridSize; x++) {
-    for (let y = 0; y < gridSize; y++) {
-      for (let z = 0; z < gridSize; z++) {
-        if ((x + y + z) % 2 === 0) {
-          points.push({
-            x: (x - half) / half,
-            y: (y - half) / half,
-            z: (z - half) / half,
-          })
-        }
-      }
+function generateDNAHelix(numPointsPerStrand: number, turns: number): DNAData {
+  const points: Point3D[] = []
+  const backboneEdges: [number, number][] = []
+  const rungEdges: [number, number][] = []
+
+  const radius = 0.5
+  const halfHeight = 1.15
+
+  for (let i = 0; i < numPointsPerStrand; i++) {
+    const t = i / (numPointsPerStrand - 1)
+    const theta = t * turns * 2 * Math.PI
+    const y = (t - 0.5) * 2 * halfHeight
+
+    const idx1 = points.length
+    points.push({
+      x: radius * Math.cos(theta),
+      y,
+      z: radius * Math.sin(theta),
+    })
+
+    const idx2 = points.length
+    points.push({
+      x: radius * Math.cos(theta + Math.PI),
+      y,
+      z: radius * Math.sin(theta + Math.PI),
+    })
+
+    if (i > 0) {
+      backboneEdges.push([idx1 - 2, idx1])
+      backboneEdges.push([idx2 - 2, idx2])
+    }
+
+    if (i % 2 === 0) {
+      rungEdges.push([idx1, idx2])
     }
   }
-  return points
+
+  return { points, backboneEdges, rungEdges }
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -98,9 +124,9 @@ export function InteractiveLogo({
     animId: 0,
   })
 
-  const points = useRef(generateCubePoints(4)).current
+  const dna = useRef(generateDNAHelix(24, 2)).current
   const colorIndices = useRef(
-    points.map((_, i) => i % DOT_COLORS.length)
+    dna.points.map((_, i) => i % DOT_COLORS.length)
   ).current
 
   const PAD = 2.2
@@ -127,21 +153,61 @@ export function InteractiveLogo({
     const fov = 250
     const viewDist = 4.5
 
-    const projected: (ProjectedPoint & { origIdx: number })[] = points.map((p, i) => {
-      let rotated = rotateX(p, s.rotX)
-      rotated = rotateY(rotated, s.rotY)
-      const proj = project(rotated, fov, viewDist)
-      return { ...proj, origIdx: i }
-    })
+    const projected: (ProjectedPoint & { origIdx: number })[] = dna.points.map(
+      (p, i) => {
+        let rotated = rotateX(p, s.rotX)
+        rotated = rotateY(rotated, s.rotY)
+        const proj = project(rotated, fov, viewDist)
+        return { ...proj, origIdx: i }
+      }
+    )
 
-    projected.sort((a, b) => b.z - a.z)
+    const drawEdges = (
+      edges: [number, number][],
+      lineWidth: number,
+      color: string,
+      alphaScale: number
+    ) => {
+      const sorted = edges
+        .map(([a, b]) => ({
+          a,
+          b,
+          avgZ: (projected[a].z + projected[b].z) / 2,
+        }))
+        .sort((x, y) => y.avgZ - x.avgZ)
 
-    for (const p of projected) {
+      for (const { a, b, avgZ } of sorted) {
+        const pa = projected[a]
+        const pb = projected[b]
+        const sx1 = w / 2 + pa.x
+        const sy1 = h / 2 + pa.y
+        const sx2 = w / 2 + pb.x
+        const sy2 = h / 2 + pb.y
+
+        const depthNorm = (avgZ + 1.8) / 3.6
+        const alpha = (0.35 + 0.55 * depthNorm) * alphaScale
+
+        ctx.beginPath()
+        ctx.moveTo(sx1, sy1)
+        ctx.lineTo(sx2, sy2)
+        ctx.strokeStyle = hexToRgba(color, alpha)
+        ctx.lineWidth = lineWidth * (0.5 + 0.5 * depthNorm) * (size / 120)
+        ctx.lineCap = 'round'
+        ctx.stroke()
+      }
+    }
+
+    drawEdges(dna.backboneEdges, 1.6, '#94a3b8', 0.75)
+    drawEdges(dna.rungEdges, 1.0, '#cbd5e1', 0.45)
+
+    const sortedDots = [...projected].sort((a, b) => b.z - a.z)
+
+    for (const p of sortedDots) {
       const sx = w / 2 + p.x
       const sy = h / 2 + p.y
 
       const depthNorm = (p.z + 1.8) / 3.6
-      const baseRadius = 8
+      const baseRadius = 9
       const radius = baseRadius * (0.6 + 0.5 * depthNorm) * (size / 120)
       const alpha = 0.55 + 0.45 * depthNorm
 
@@ -152,7 +218,7 @@ export function InteractiveLogo({
       ctx.fillStyle = hexToRgba(dotColor, alpha)
       ctx.fill()
     }
-  }, [size, canvasSize, points, colorIndices])
+  }, [size, canvasSize, dna, colorIndices])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -229,7 +295,7 @@ export function InteractiveLogo({
           height: canvasSize,
           touchAction: 'none',
         }}
-        aria-label="Interactive 3D logo"
+        aria-label="Interactive 3D DNA helix"
       />
     </div>
   )
