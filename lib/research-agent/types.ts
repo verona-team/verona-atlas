@@ -5,7 +5,14 @@ export const researchFindingSchema = z.object({
   category: z.string().describe('Category: recent_changes, errors, user_behavior, performance, llm_failures, test_gaps'),
   details: z.string().describe('Natural language description of what was found'),
   severity: z.enum(['critical', 'high', 'medium', 'low']).describe('How important this finding is for QA'),
-  rawData: z.unknown().optional().describe('Key data points supporting this finding'),
+  // Must be a concrete JSON-Schema type for Anthropic structured outputs
+  // (`z.unknown()` becomes `{ description: ... }` with no `type` and triggers 400).
+  rawData: z
+    .string()
+    .optional()
+    .describe(
+      'Optional JSON string of supporting data (e.g. commit SHAs, counts, URLs) — not natural language; use `details` for prose',
+    ),
 })
 
 export const researchReportSchema = z.object({
