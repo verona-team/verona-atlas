@@ -1,21 +1,29 @@
-import Anthropic from '@anthropic-ai/sdk'
+import { generateObject } from 'ai'
+import { z } from 'zod'
+import { chatModel } from '@/lib/ai'
 
-const anthropic = new Anthropic()
+const templateStepSchema = z.object({
+  order: z.number(),
+  instruction: z.string(),
+  type: z.enum(['navigate', 'action', 'assertion', 'extract', 'wait']),
+  url: z.string().optional(),
+  expected: z.string().optional(),
+  timeout: z.number().optional(),
+})
 
-interface GeneratedTemplate {
-  name: string
-  description: string
-  steps: Array<{
-    order: number
-    instruction: string
-    type: 'navigate' | 'action' | 'assertion' | 'extract' | 'wait'
-    url?: string
-    expected?: string
-    timeout?: number
-  }>
-}
+const generatedTemplateSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  steps: z.array(templateStepSchema),
+})
 
-export type { GeneratedTemplate }
+const templatesArraySchema = z.object({
+  templates: z.array(generatedTemplateSchema),
+})
+
+export type GeneratedTemplate = z.infer<typeof generatedTemplateSchema>
+
+export { generatedTemplateSchema, templateStepSchema }
 
 export async function generateTemplates(context: {
   appUrl: string
@@ -25,12 +33,10 @@ export async function generateTemplates(context: {
   topPages: unknown[]
   existingTemplates: Array<{ name: string; description: string | null }>
 }): Promise<GeneratedTemplate[]> {
-  const message = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 4096,
-    messages: [{
-      role: 'user',
-      content: `You are a QA test planner for a web application at ${context.appUrl}.
+  const { object } = await generateObject({
+    model: chatModel,
+    schema: templatesArraySchema,
+    prompt: `You are a QA test planner for a web application at ${context.appUrl}.
 
 Given the following context about recent activity:
 
@@ -58,20 +64,8 @@ Prioritize:
 - Always include at least one smoke test (basic auth + navigation)
 
 For each step, the "instruction" should be a clear natural language instruction that an AI browser agent can execute.
-Step types: navigate (go to URL), action (click/type/interact), assertion (verify something is visible/correct), extract (get data from page), wait (pause)
-
-Return ONLY a valid JSON array of templates. No markdown, no explanation.
-Each template: { "name": "...", "description": "...", "steps": [{ "order": 1, "instruction": "...", "type": "...", "url": "..." }] }`,
-    }],
+Step types: navigate (go to URL), action (click/type/interact), assertion (verify something is visible/correct), extract (get data from page), wait (pause)`,
   })
 
-  const content = message.content[0]
-  if (content.type !== 'text') throw new Error('Unexpected response type')
-
-  let text = content.text.trim()
-  if (text.startsWith('```')) {
-    text = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
-  }
-
-  return JSON.parse(text) as GeneratedTemplate[]
+  return object.templates
 }
