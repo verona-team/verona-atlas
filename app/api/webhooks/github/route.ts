@@ -3,6 +3,7 @@ import { verifyWebhookSignature, listInstallationRepos } from '@/lib/github'
 import { createServiceRoleClient } from '@/lib/supabase/service-role'
 import type { Json } from '@/lib/supabase/types'
 import { normalizeGithubReposForStorage } from '@/lib/github-integration-config'
+import { clearResearchReportsForProject } from '@/lib/github-integration-guard'
 
 export async function POST(request: NextRequest) {
   const body = await request.text()
@@ -33,7 +34,7 @@ async function handleInstallationRepositories(payload: {
 
   const { data: integrations } = await supabase
     .from('integrations')
-    .select('id, config')
+    .select('id, project_id, config')
     .eq('type', 'github')
     .eq('status', 'active')
 
@@ -48,6 +49,7 @@ async function handleInstallationRepositories(payload: {
     const repos = await listInstallationRepos(installationId)
 
     for (const integration of matching) {
+      const projectId = integration.project_id as string
       const config = integration.config as Record<string, Json>
       const currentSelected = (config.repos as Array<Record<string, Json>>) || []
       const accessibleNames = new Set(repos.map((r) => r.fullName))
@@ -65,6 +67,8 @@ async function handleInstallationRepositories(payload: {
         .from('integrations')
         .update({ config: updatedConfig, updated_at: new Date().toISOString() })
         .eq('id', integration.id)
+
+      await clearResearchReportsForProject(supabase, projectId)
     }
   } catch (e) {
     console.error('Failed to sync repos after webhook:', e)
@@ -79,7 +83,7 @@ async function handleInstallationDeleted(payload: {
 
   const { data: integrations } = await supabase
     .from('integrations')
-    .select('id, config')
+    .select('id, project_id, config')
     .eq('type', 'github')
     .eq('status', 'active')
 
@@ -93,5 +97,7 @@ async function handleInstallationDeleted(payload: {
       .from('integrations')
       .update({ status: 'disconnected', updated_at: new Date().toISOString() })
       .eq('id', integration.id)
+
+    await clearResearchReportsForProject(supabase, integration.project_id as string)
   }
 }

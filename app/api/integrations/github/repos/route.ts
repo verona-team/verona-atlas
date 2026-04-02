@@ -7,6 +7,7 @@ import {
   normalizeGithubReposForStorage,
   primaryGithubRepoFullName,
 } from '@/lib/github-integration-config'
+import { clearResearchReportsForProject } from '@/lib/github-integration-guard'
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -167,6 +168,8 @@ export async function PATCH(request: NextRequest) {
 
   if (error)
     return NextResponse.json({ error: error.message }, { status: 500 })
+
+  await clearResearchReportsForProject(supabase, projectId)
 
   return NextResponse.json({ success: true, repos: selectedRepoObjects })
 }

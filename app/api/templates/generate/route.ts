@@ -9,6 +9,7 @@ import { fetchSessionRecordings, fetchErrorEvents, fetchTopPages } from '@/lib/p
 import { decrypt } from '@/lib/encryption'
 import type { Json } from '@/lib/supabase/types'
 import { primaryGithubRepoFullName } from '@/lib/github-integration-config'
+import { getGithubIntegrationReady } from '@/lib/github-integration-guard'
 
 const GenerateSchema = z.object({
   projectId: z.string().uuid(),
@@ -54,6 +55,14 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+
+  const gh = await getGithubIntegrationReady(supabase, projectId)
+  if (!gh.ok) {
+    return NextResponse.json(
+      { error: gh.reason, code: 'GITHUB_SETUP_REQUIRED' },
+      { status: 400 },
+    )
+  }
 
   const { data: integrations } = await supabase
     .from('integrations')

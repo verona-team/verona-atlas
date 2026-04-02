@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
+import { primaryGithubRepoFullName } from '@/lib/github-integration-config'
+import type { Json } from '@/lib/supabase/types'
 
 type IntegrationStatus = {
   id: string
@@ -71,11 +73,17 @@ export default function ProjectSetupPage() {
   const getStatus = (type: string) =>
     integrations.find((i) => i.type === type && i.status === 'active')
 
+  const githubIntegration = getStatus('github')
+  const githubRepos =
+    (githubIntegration?.meta?.repos as Array<Record<string, Json>>) || []
+  const githubRepoSelected = !!primaryGithubRepoFullName(githubRepos)
+  const githubComplete = !!githubIntegration && githubRepoSelected
+
   return (
     <div className="max-w-3xl mx-auto">
       <h1 className="text-5xl mb-4">Connect Integrations</h1>
       <p className="text-xl opacity-50 mb-12">
-        Connect your tools so the QA agent has full context when testing your app. You can always configure these later from project settings.
+        GitHub is required: connect the app and pick one repository so the agent can analyze your code alongside your other tools. Optional integrations can be added later from project settings.
       </p>
 
       {loading ? (
@@ -91,13 +99,23 @@ export default function ProjectSetupPage() {
         </div>
       )}
 
-      <div className="flex gap-8 pt-12 pb-8">
+      <div className="flex flex-col gap-3 pt-12 pb-8">
         <button
-          onClick={() => router.push(`/projects/${projectId}/chat`)}
-          className="text-2xl underline"
+          type="button"
+          onClick={() => {
+            if (!githubComplete) return
+            router.push(`/projects/${projectId}/chat`)
+          }}
+          disabled={!githubComplete}
+          className={`text-2xl underline text-left ${!githubComplete ? 'opacity-30 cursor-not-allowed' : ''}`}
         >
-          {integrations.some((i) => i.status === 'active') ? 'Continue to Chat →' : 'Skip for now →'}
+          Continue to Chat →
         </button>
+        {!githubComplete && (
+          <p className="text-lg opacity-50">
+            Connect GitHub and select a repository to continue.
+          </p>
+        )}
       </div>
     </div>
   )
@@ -108,19 +126,28 @@ function IntegrationCard({
   description,
   connected,
   meta,
+  required,
   children,
 }: {
   title: string
   description: string
   connected: boolean
   meta?: string
+  required?: boolean
   children: React.ReactNode
 }) {
   return (
     <div className="border rounded-lg p-6">
       <div className="flex items-start justify-between gap-4 mb-4">
         <div className="min-w-0">
-          <h3 className="text-2xl font-medium">{title}</h3>
+          <h3 className="text-2xl font-medium">
+            {title}
+            {required && (
+              <span className="ml-2 text-base font-normal text-amber-600 dark:text-amber-500">
+                Required
+              </span>
+            )}
+          </h3>
           <p className="text-lg opacity-50 mt-1">{description}</p>
           {meta && <p className="text-base opacity-50 mt-1">{meta}</p>}
         </div>
@@ -183,9 +210,10 @@ function GitHubCard({
   return (
     <IntegrationCard
       title="GitHub"
-      description="Connect one repository so Verona can use commits and code as context for QA and flow strategy."
+      description="Connect one repository so Verona can analyze commits and source code for QA and UI flow strategy."
       connected={!!integration}
-      meta={linkedRepo ? `Repository: ${linkedRepo}` : undefined}
+      required
+      meta={linkedRepo ? `Repository: ${linkedRepo}` : integration ? 'Select a repository below' : undefined}
     >
       {!integration ? (
         waiting ? (

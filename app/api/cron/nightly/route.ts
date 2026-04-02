@@ -8,6 +8,7 @@ import { generateFlowProposals, serializeFlowsForMessage } from '@/lib/chat/flow
 import { decrypt } from '@/lib/encryption'
 import { postMessage } from '@/lib/slack'
 import type { Json } from '@/lib/supabase/types'
+import { getGithubIntegrationReady } from '@/lib/github-integration-guard'
 
 const DAY_MAP: Record<string, number> = {
   sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6,
@@ -53,6 +54,12 @@ export async function GET(request: NextRequest) {
       const days = (project.schedule_days as string[]) || ['mon', 'tue', 'wed', 'thu', 'fri']
       const activeDayNumbers = days.map((d) => DAY_MAP[d]).filter((n) => n !== undefined)
       if (!activeDayNumbers.includes(localDay)) continue
+
+      const gh = await getGithubIntegrationReady(supabase, project.id)
+      if (!gh.ok) {
+        console.warn(`Nightly: skip project ${project.id} — ${gh.reason}`)
+        continue
+      }
 
       const session = await getOrCreateSession(supabase, project.id)
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
 import { Send, Loader2 } from 'lucide-react'
@@ -74,6 +75,7 @@ export function ChatInterface({
   projectName,
   appUrl,
 }: ChatInterfaceProps) {
+  const router = useRouter()
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [input, setInput] = useState('')
@@ -105,11 +107,34 @@ export function ChatInterface({
     return { flowStates: states, proposalMessageId: msgId }
   }, [dbMessages, flowStatesOverride])
 
+  const chatFetch = useCallback(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const res = await fetch(input, init)
+      if (res.status === 400) {
+        const ct = res.headers.get('content-type') ?? ''
+        if (ct.includes('application/json')) {
+          const data = (await res.clone().json().catch(() => null)) as {
+            code?: string
+            error?: string
+          } | null
+          if (data?.code === 'GITHUB_SETUP_REQUIRED' && data.error) {
+            toast.error(data.error)
+            router.push(`/projects/${projectId}/setup`)
+            return res
+          }
+        }
+      }
+      return res
+    },
+    [projectId, router],
+  )
+
   const { messages: streamMessages, sendMessage, status } = useChat({
     id: `project-${projectId}`,
     transport: new DefaultChatTransport({
       api: '/api/chat',
       body: { projectId },
+      fetch: chatFetch,
     }),
     onError: (err) => {
       console.error('Chat request failed:', err)
