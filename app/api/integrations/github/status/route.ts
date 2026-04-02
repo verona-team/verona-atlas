@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { listInstallationRepos, getAppSlug } from '@/lib/github'
 import { App } from '@octokit/app'
 import { Octokit } from '@octokit/rest'
 import type { Json } from '@/lib/supabase/types'
@@ -91,22 +90,10 @@ export async function GET(request: NextRequest) {
 
     const installation = unlinked[unlinked.length - 1]
 
-    let repos: Json = []
-    try {
-      const repoList = await listInstallationRepos(installation.id)
-      repos = repoList.map((r) => ({
-        full_name: r.fullName,
-        private: r.private,
-        default_branch: r.defaultBranch,
-      }))
-    } catch (e) {
-      console.warn('Failed to list installation repos:', e)
-    }
-
     const config: Json = {
       installation_id: installation.id,
       setup_action: 'install',
-      repos,
+      repos: [],
     }
 
     const { error } = await supabase.from('integrations').insert({

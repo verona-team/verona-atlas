@@ -3,6 +3,10 @@ import { createClient } from '@/lib/supabase/server'
 import { listInstallationRepos } from '@/lib/github'
 import { z } from 'zod'
 import type { Json } from '@/lib/supabase/types'
+import {
+  normalizeGithubReposForStorage,
+  primaryGithubRepoFullName,
+} from '@/lib/github-integration-config'
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -57,14 +61,14 @@ export async function GET(request: NextRequest) {
   try {
     const repos = await listInstallationRepos(installationId)
     const selectedRepos = (config.repos as Array<Record<string, Json>>) || []
-    const selectedNames = new Set(selectedRepos.map((r) => r.full_name as string))
+    const primaryName = primaryGithubRepoFullName(selectedRepos)
 
     return NextResponse.json({
       repos: repos.map((r) => ({
         full_name: r.fullName,
         private: r.private,
         default_branch: r.defaultBranch,
-        selected: selectedNames.has(r.fullName),
+        selected: primaryName === r.fullName,
       })),
     })
   } catch (e) {
@@ -75,7 +79,8 @@ export async function GET(request: NextRequest) {
 
 const UpdateReposSchema = z.object({
   project_id: z.string().uuid(),
-  repos: z.array(z.string().min(1)).min(1).max(10),
+  /** Exactly one repository per project (QA agent scope). */
+  repos: z.array(z.string().min(1)).length(1),
 })
 
 export async function PATCH(request: NextRequest) {
@@ -140,13 +145,15 @@ export async function PATCH(request: NextRequest) {
     )
   }
 
-  const selectedRepoObjects = allRepos
-    .filter((r) => selectedRepoNames.includes(r.fullName))
-    .map((r) => ({
-      full_name: r.fullName,
-      private: r.private,
-      default_branch: r.defaultBranch,
-    }))
+  const selectedRepoObjects = normalizeGithubReposForStorage(
+    allRepos
+      .filter((r) => selectedRepoNames.includes(r.fullName))
+      .map((r) => ({
+        full_name: r.fullName,
+        private: r.private,
+        default_branch: r.defaultBranch,
+      })),
+  )
 
   const updatedConfig: Json = {
     ...config,

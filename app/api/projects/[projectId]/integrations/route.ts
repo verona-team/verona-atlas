@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import type { Json } from '@/lib/supabase/types'
+import { normalizeGithubReposForStorage } from '@/lib/github-integration-config'
 
 type RouteContext = { params: Promise<{ projectId: string }> }
 
@@ -62,9 +63,10 @@ function sanitizeConfig(
   switch (type) {
     case 'github': {
       const repos = (config.repos as Array<Record<string, Json>>) || []
+      const normalized = normalizeGithubReposForStorage(repos)
       return {
         installation_id: config.installation_id ?? null,
-        repos: repos.map((r) => ({
+        repos: normalized.map((r) => ({
           full_name: r.full_name,
           private: r.private,
         })),
