@@ -105,7 +105,7 @@ export default function ProjectSettingsPage() {
   if (loading) {
     return (
       <div className="max-w-4xl mx-auto">
-        <p className="text-xl opacity-40">Loading...</p>
+        <p className="text-2xl opacity-40">Loading...</p>
       </div>
     )
   }
@@ -113,18 +113,18 @@ export default function ProjectSettingsPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-10">
       <div>
-        <Link href={`/projects/${projectId}/chat`} className="text-lg opacity-50 hover:opacity-80">
+        <Link href={`/projects/${projectId}/chat`} className="text-xl opacity-50 hover:opacity-80">
           ← {project?.name || 'Project'}
         </Link>
-        <h1 className="text-4xl mt-3">Settings</h1>
+        <h1 className="text-5xl mt-3">Settings</h1>
       </div>
 
       <div>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl">Integrations</h2>
+          <h2 className="text-3xl">Integrations</h2>
           <Link
             href={`/projects/${projectId}/setup`}
-            className="text-base underline opacity-60 hover:opacity-100"
+            className="text-lg underline opacity-60 hover:opacity-100"
           >
             Add integration →
           </Link>
@@ -422,8 +422,8 @@ function SettingsIntegrationCard({
     <div className="border rounded-lg p-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h3 className="text-lg font-medium">{title}</h3>
-          <span className={`text-xs px-2 py-0.5 rounded-full ${connected ? 'bg-green-500/10 text-green-600' : waiting ? 'bg-yellow-500/10 text-yellow-600' : 'opacity-40 border'}`}>
+          <h3 className="text-xl font-medium">{title}</h3>
+          <span className={`text-sm px-2 py-0.5 rounded-full ${connected ? 'bg-green-500/10 text-green-600' : waiting ? 'bg-yellow-500/10 text-yellow-600' : 'opacity-40 border'}`}>
             {connected ? 'Active' : waiting ? 'Waiting...' : 'Not connected'}
           </span>
         </div>
@@ -431,25 +431,25 @@ function SettingsIntegrationCard({
           {connected ? (
             <button
               onClick={() => onDisconnect(integration.id, title)}
-              className="text-sm opacity-40 hover:opacity-70 underline"
+              className="text-base opacity-40 hover:opacity-70 underline"
             >
               Disconnect
             </button>
           ) : waiting ? (
-            <span className="text-sm opacity-40">Complete setup in the opened tab</span>
+            <span className="text-base opacity-40">Complete setup in the opened tab</span>
           ) : openInNewTab ? (
-            <button onClick={handleConnect} className="text-sm underline opacity-60 hover:opacity-100">
+            <button onClick={handleConnect} className="text-base underline opacity-60 hover:opacity-100">
               Connect →
             </button>
           ) : (
-            <a href={connectUrl} className="text-sm underline opacity-60 hover:opacity-100">
+            <a href={connectUrl} className="text-base underline opacity-60 hover:opacity-100">
               Connect →
             </a>
           )}
         </div>
       </div>
       {connected && children && (
-        <div className="mt-3 text-sm opacity-60">{children}</div>
+        <div className="mt-3 text-base opacity-60">{children}</div>
       )}
     </div>
   )
@@ -483,7 +483,7 @@ function GitHubDetails({
           {repos.map((r) => (
             <p key={r.full_name}>
               {r.full_name}
-              {r.private && <span className="ml-2 text-xs opacity-40">private</span>}
+              {r.private && <span className="ml-2 text-sm opacity-50">private</span>}
             </p>
           ))}
         </div>
@@ -492,7 +492,7 @@ function GitHubDetails({
       )}
       <Link
         href={`/projects/${projectId}/setup`}
-        className="inline-block mt-2 text-xs underline opacity-50"
+        className="inline-block mt-2 text-sm underline opacity-50"
       >
         Manage repos
       </Link>
@@ -561,12 +561,12 @@ function SlackDetails({
       {channelName ? (
         <div className="flex items-center gap-2">
           <p>Channel: #{channelName}</p>
-          <button onClick={loadChannels} disabled={loadingChannels} className="text-xs underline opacity-50">
+          <button onClick={loadChannels} disabled={loadingChannels} className="text-sm underline opacity-50">
             Change
           </button>
         </div>
       ) : (
-        <button onClick={loadChannels} disabled={loadingChannels} className="text-xs underline mt-1">
+        <button onClick={loadChannels} disabled={loadingChannels} className="text-sm underline mt-1">
           {loadingChannels ? 'Loading...' : 'Select a channel'}
         </button>
       )}
@@ -577,7 +577,7 @@ function SlackDetails({
               key={ch.id}
               onClick={() => selectChannel(ch.id, ch.name)}
               disabled={saving}
-              className="block w-full text-left px-2 py-1 rounded text-sm hover:bg-white/5"
+              className="block w-full text-left px-2 py-1 rounded text-base hover:bg-white/5"
             >
               #{ch.name}
             </button>
@@ -623,21 +623,21 @@ function DeleteProjectSection({
 
   return (
     <div className="border border-red-500/20 rounded-lg p-6 mt-4">
-      <h2 className="text-2xl text-red-500/80 mb-2">Danger Zone</h2>
-      <p className="text-base opacity-50 mb-6">
+      <h2 className="text-3xl text-red-500/80 mb-2">Danger Zone</h2>
+      <p className="text-lg opacity-50 mb-6">
         Deleting a project permanently removes all test templates, run history, results, and connected integrations. This cannot be undone.
       </p>
 
       {!showConfirm ? (
         <button
           onClick={() => setShowConfirm(true)}
-          className="text-base text-red-500/80 underline hover:text-red-500"
+          className="text-lg text-red-500/80 underline hover:text-red-500"
         >
           Delete this project
         </button>
       ) : (
         <div className="space-y-4">
-          <p className="text-base">
+          <p className="text-lg">
             Type <span className="font-mono font-medium">{projectName}</span> to confirm:
           </p>
           <input
@@ -646,19 +646,19 @@ function DeleteProjectSection({
             placeholder={projectName}
             autoComplete="off"
             autoFocus
-            className="w-full max-w-sm border-b bg-transparent py-2 text-base outline-none placeholder:opacity-30"
+            className="w-full max-w-sm border-b bg-transparent py-2 text-lg outline-none placeholder:opacity-60"
           />
           <div className="flex gap-4">
             <button
               onClick={handleDelete}
               disabled={!nameMatches || deleting}
-              className="text-base text-red-500 underline disabled:opacity-30 disabled:no-underline"
+              className="text-lg text-red-500 underline disabled:opacity-30 disabled:no-underline"
             >
               {deleting ? 'Deleting...' : 'Permanently delete project'}
             </button>
             <button
               onClick={() => { setShowConfirm(false); setConfirmText('') }}
-              className="text-base opacity-50 underline"
+              className="text-lg opacity-50 underline"
             >
               Cancel
             </button>

@@ -80,13 +80,13 @@ export default function TemplatesPage() {
     try { await Promise.all(generatedTemplates.filter((_, i) => acceptedIndices.has(i)).map(t => fetch('/api/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: projectId, name: t.name, description: t.description, steps: t.steps, source: 'ai_generated' }) }))); setReviewDialogOpen(false); fetchTemplates() } finally { setSavingGenerated(false) }
   }
 
-  if (loading) return <p className="text-xl opacity-50 py-12 max-w-4xl mx-auto">Loading...</p>
+  if (loading) return <p className="text-2xl opacity-50 py-12 max-w-4xl mx-auto">Loading...</p>
 
   return (
     <div className="max-w-4xl mx-auto space-y-10">
       <div className="flex items-center justify-between">
-        <h1 className="text-4xl">Templates</h1>
-        <div className="flex gap-6 text-xl">
+        <h1 className="text-5xl">Templates</h1>
+        <div className="flex gap-6 text-2xl">
           <button onClick={handleGenerate} disabled={generating} className="underline opacity-50 hover:opacity-100 disabled:opacity-20">
             {generating ? '...' : 'AI Generate'}
           </button>
@@ -95,18 +95,18 @@ export default function TemplatesPage() {
       </div>
 
       {templates.length === 0 ? (
-        <p className="text-xl opacity-50 py-8">No templates yet.</p>
+        <p className="text-2xl opacity-50 py-8">No templates yet.</p>
       ) : (
         <div className="divide-y">
           {templates.map((t) => (
             <div key={t.id} className="py-6">
               <div className="flex items-start justify-between">
                 <div>
-                  <span className="text-xl">{t.name}</span>
-                  {t.source === 'ai_generated' && <span className="text-lg opacity-40 ml-3">AI</span>}
-                  {t.description && <p className="text-lg opacity-50 mt-1">{t.description}</p>}
+                  <span className="text-2xl">{t.name}</span>
+                  {t.source === 'ai_generated' && <span className="text-xl opacity-40 ml-3">AI</span>}
+                  {t.description && <p className="text-xl opacity-50 mt-1">{t.description}</p>}
                 </div>
-                <div className="flex items-center gap-4 text-lg">
+                <div className="flex items-center gap-4 text-xl">
                   <div className="flex items-center gap-2">
                     <span className="opacity-40">Active</span>
                     <Switch checked={t.is_active} onCheckedChange={() => handleToggleActive(t)} />
@@ -117,7 +117,7 @@ export default function TemplatesPage() {
               </div>
               <div className="mt-3 space-y-1">
                 {(Array.isArray(t.steps) ? t.steps as TemplateStep[] : []).map((step, idx) => (
-                  <div key={idx} className="text-lg flex gap-3">
+                  <div key={idx} className="text-xl flex gap-3">
                     <span className="opacity-40">{step.type}</span>
                     <span className="opacity-60">{step.instruction}</span>
                   </div>
@@ -131,23 +131,23 @@ export default function TemplatesPage() {
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-2xl">{editingTemplate ? 'Edit Template' : 'Create Template'}</DialogTitle>
-            <DialogDescription className="text-base opacity-60">{editingTemplate ? 'Update details and steps.' : 'Define steps for this test.'}</DialogDescription>
+            <DialogTitle className="text-3xl">{editingTemplate ? 'Edit Template' : 'Create Template'}</DialogTitle>
+            <DialogDescription className="text-lg opacity-60">{editingTemplate ? 'Update details and steps.' : 'Define steps for this test.'}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-6 text-xl">
+          <div className="space-y-6 text-2xl">
             <div>
-              <label className="block text-lg opacity-60 mb-2">Name</label>
-              <input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Login Flow Test" className="w-full border-b bg-transparent py-3 outline-none placeholder:opacity-30" />
+              <label className="block text-xl opacity-60 mb-2">Name</label>
+              <input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Login Flow Test" className="w-full border-b bg-transparent py-3 outline-none placeholder:opacity-60" />
             </div>
             <div>
-              <label className="block text-lg opacity-60 mb-2">Description</label>
-              <textarea value={formDescription} onChange={e => setFormDescription(e.target.value)} placeholder="What does this test verify?" rows={2} className="w-full border-b bg-transparent py-3 outline-none resize-none placeholder:opacity-30" />
+              <label className="block text-xl opacity-60 mb-2">Description</label>
+              <textarea value={formDescription} onChange={e => setFormDescription(e.target.value)} placeholder="What does this test verify?" rows={2} className="w-full border-b bg-transparent py-3 outline-none resize-none placeholder:opacity-60" />
             </div>
             <div className="space-y-4 pt-2">
-              <span className="text-lg opacity-60">Steps</span>
+              <span className="text-xl opacity-60">Steps</span>
               {formSteps.map((step, i) => (
                 <div key={i} className="border p-4 space-y-3">
-                  <div className="flex items-center justify-between text-lg">
+                  <div className="flex items-center justify-between text-xl">
                     <span className="opacity-50">Step {i + 1}</span>
                     <div className="flex gap-3 opacity-50">
                       <button disabled={i === 0} onClick={() => moveStep(i, 'up')} className="disabled:opacity-20">↑</button>
@@ -157,16 +157,16 @@ export default function TemplatesPage() {
                   </div>
                   <div className="grid gap-3 sm:grid-cols-[160px_1fr]">
                     <Select value={step.type} onValueChange={v => updateStep(i, { type: v as StepType })}>
-                      <SelectTrigger className="text-base"><SelectValue /></SelectTrigger>
-                      <SelectContent>{STEP_TYPES.map(t => <SelectItem key={t} value={t} className="text-base">{t}</SelectItem>)}</SelectContent>
+                      <SelectTrigger className="text-lg"><SelectValue /></SelectTrigger>
+                      <SelectContent>{STEP_TYPES.map(t => <SelectItem key={t} value={t} className="text-lg">{t}</SelectItem>)}</SelectContent>
                     </Select>
-                    <input value={step.instruction} onChange={e => updateStep(i, { instruction: e.target.value })} placeholder="Instruction" className="w-full border-b bg-transparent py-2 text-base outline-none placeholder:opacity-30" />
+                    <input value={step.instruction} onChange={e => updateStep(i, { instruction: e.target.value })} placeholder="Instruction" className="w-full border-b bg-transparent py-2 text-lg outline-none placeholder:opacity-60" />
                   </div>
-                  {step.type === 'navigate' && <input value={step.url ?? ''} onChange={e => updateStep(i, { url: e.target.value })} placeholder="URL" className="w-full border-b bg-transparent py-2 text-base outline-none placeholder:opacity-30" />}
-                  {step.type === 'assertion' && <input value={step.expected ?? ''} onChange={e => updateStep(i, { expected: e.target.value })} placeholder="Expected" className="w-full border-b bg-transparent py-2 text-base outline-none placeholder:opacity-30" />}
+                  {step.type === 'navigate' && <input value={step.url ?? ''} onChange={e => updateStep(i, { url: e.target.value })} placeholder="URL" className="w-full border-b bg-transparent py-2 text-lg outline-none placeholder:opacity-60" />}
+                  {step.type === 'assertion' && <input value={step.expected ?? ''} onChange={e => updateStep(i, { expected: e.target.value })} placeholder="Expected" className="w-full border-b bg-transparent py-2 text-lg outline-none placeholder:opacity-60" />}
                 </div>
               ))}
-              <button onClick={addStep} className="text-lg underline opacity-50 hover:opacity-100">+ Add step</button>
+              <button onClick={addStep} className="text-xl underline opacity-50 hover:opacity-100">+ Add step</button>
             </div>
           </div>
           <DialogFooter>
@@ -181,20 +181,20 @@ export default function TemplatesPage() {
       <Dialog open={reviewDialogOpen} onOpenChange={setReviewDialogOpen}>
         <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-2xl">Review AI Templates</DialogTitle>
-            <DialogDescription className="text-base opacity-60">Click to select, then save.</DialogDescription>
+            <DialogTitle className="text-3xl">Review AI Templates</DialogTitle>
+            <DialogDescription className="text-lg opacity-60">Click to select, then save.</DialogDescription>
           </DialogHeader>
-          <div className="divide-y text-xl">
+          <div className="divide-y text-2xl">
             {generatedTemplates.map((gt, idx) => (
               <div key={idx} className={`py-5 cursor-pointer ${acceptedIndices.has(idx) ? 'opacity-100' : 'opacity-50'}`} onClick={() => toggleAccepted(idx)}>
                 <div className="flex items-center gap-3">
-                  <span className="text-xl">{acceptedIndices.has(idx) ? '☑' : '☐'}</span>
+                  <span className="text-2xl">{acceptedIndices.has(idx) ? '☑' : '☐'}</span>
                   <span>{gt.name}</span>
                 </div>
-                <p className="text-lg opacity-50 mt-1">{gt.description}</p>
+                <p className="text-xl opacity-50 mt-1">{gt.description}</p>
                 <div className="mt-2 space-y-1">
                   {gt.steps.map((s, si) => (
-                    <div key={si} className="text-lg flex gap-3"><span className="opacity-40">{s.type}</span><span className="opacity-60">{s.instruction}</span></div>
+                    <div key={si} className="text-xl flex gap-3"><span className="opacity-40">{s.type}</span><span className="opacity-60">{s.instruction}</span></div>
                   ))}
                 </div>
               </div>

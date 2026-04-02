@@ -69,8 +69,8 @@ export default function RunDetailPage() {
     return () => { supabase.removeChannel(channel) }
   }, [runId, fetchRunData])
 
-  if (loading) return <p className="text-xl opacity-50 py-12 max-w-4xl mx-auto">Loading...</p>
-  if (!run) return <p className="text-xl opacity-50 py-12 max-w-4xl mx-auto">Run not found</p>
+  if (loading) return <p className="text-2xl opacity-50 py-12 max-w-4xl mx-auto">Loading...</p>
+  if (!run) return <p className="text-2xl opacity-50 py-12 max-w-4xl mx-auto">Run not found</p>
 
   const summary = run.summary as { total?: number; passed?: number; failed?: number; errors?: number; ai_analysis?: string; [key: string]: unknown } | null
   const duration = run.started_at && run.completed_at
@@ -80,23 +80,23 @@ export default function RunDetailPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-10">
       <div>
-        <Link href={`/projects/${projectId}/runs`} className="text-lg opacity-50 hover:opacity-80">
+        <Link href={`/projects/${projectId}/runs`} className="text-xl opacity-50 hover:opacity-80">
           ← Runs
         </Link>
         <div className="flex items-center gap-4 mt-3">
-          <h1 className="text-4xl">{projectName}</h1>
+          <h1 className="text-5xl">{projectName}</h1>
           <RunStatusBadge status={run.status} />
         </div>
       </div>
 
-      <div className="flex gap-12 text-xl">
+      <div className="flex gap-12 text-2xl">
         <div><span className="opacity-50">Trigger</span> {run.trigger}</div>
         <div><span className="opacity-50">Duration</span> {duration}</div>
         <div><span className="opacity-50">ID</span> {run.id.slice(0, 8)}</div>
       </div>
 
       {summary && typeof summary.total === 'number' && (
-        <div className="flex gap-12 text-xl">
+        <div className="flex gap-12 text-2xl">
           <div>{summary.total} total</div>
           <div className="text-green-700">{summary.passed || 0} passed</div>
           <div className="text-red-700">{summary.failed || 0} failed</div>
@@ -106,19 +106,19 @@ export default function RunDetailPage() {
 
       {summary?.ai_analysis && (
         <div>
-          <h2 className="text-xl opacity-50 mb-3">AI Analysis</h2>
-          <pre className="text-lg whitespace-pre-wrap opacity-70">{String(summary.ai_analysis)}</pre>
+          <h2 className="text-2xl opacity-50 mb-3">AI Analysis</h2>
+          <pre className="text-xl whitespace-pre-wrap opacity-70">{String(summary.ai_analysis)}</pre>
         </div>
       )}
 
       <div>
-        <h2 className="text-xl opacity-50 mb-4">Results ({results.length})</h2>
+        <h2 className="text-2xl opacity-50 mb-4">Results ({results.length})</h2>
         {results.length === 0 ? (
-          <p className="text-xl opacity-50">
+          <p className="text-2xl opacity-50">
             {['pending', 'planning', 'running'].includes(run.status) ? 'Running...' : 'No results'}
           </p>
         ) : (
-          <div className="divide-y text-xl">
+          <div className="divide-y text-2xl">
             {results.map((result) => (
               <div key={result.id}>
                 <button
@@ -131,13 +131,13 @@ export default function RunDetailPage() {
                     </span>
                     <span>{result.test_templates?.name || 'Unknown'}</span>
                   </div>
-                  <span className="text-lg opacity-40">
+                  <span className="text-xl opacity-40">
                     {result.duration_ms ? `${(result.duration_ms / 1000).toFixed(1)}s` : ''}
                   </span>
                 </button>
 
                 {expandedResult === result.id && (
-                  <div className="pb-6 pl-8 space-y-4 text-lg">
+                  <div className="pb-6 pl-8 space-y-4 text-xl">
                     {result.error_message && (
                       <pre className="whitespace-pre-wrap text-red-700">{result.error_message}</pre>
                     )}
