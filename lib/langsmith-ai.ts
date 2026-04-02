@@ -18,8 +18,8 @@ const wrapped = wrapAISDK(ai, lsClient ? { client: lsClient } : {})
 
 export const generateText = wrapped.generateText
 export const streamText = wrapped.streamText
-export const generateObject = wrapped.generateObject
 
+export { Output } from 'ai'
 export { createLangSmithProviderOptions } from 'langsmith/experimental/vercel'
 
 export async function flushLangSmithTraces(): Promise<void> {

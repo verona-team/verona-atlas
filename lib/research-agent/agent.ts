@@ -1,7 +1,7 @@
 import { tool, stepCountIs } from 'ai'
 import { z } from 'zod'
 import { model } from '@/lib/ai'
-import { generateText, generateObject, getLangSmithTracingClient } from '@/lib/langsmith-ai'
+import { generateText, Output, getLangSmithTracingClient } from '@/lib/langsmith-ai'
 import { traceable } from 'langsmith/traceable'
 import { Sandbox } from '@vercel/sandbox'
 import { executeInSandbox } from './sandbox'
@@ -107,9 +107,9 @@ After gathering data from all available integrations, you will be asked to produ
     stopWhen: stepCountIs(15),
   })
 
-  const { object: report } = await generateObject({
+  const { output: report } = await generateText({
     model,
-    schema: researchReportSchema,
+    output: Output.object({ schema: researchReportSchema }),
     prompt: `Based on the following research investigation of the web application at ${ctx.appUrl}, produce a structured QA research report.
 
 The research agent investigated these integrations: ${integrationList.join(', ')}

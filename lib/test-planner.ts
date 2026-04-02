@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { generateObject } from '@/lib/langsmith-ai'
+import { generateText, Output } from '@/lib/langsmith-ai'
 import { model } from '@/lib/ai'
 
 const templateStepSchema = z.object({
@@ -33,9 +33,9 @@ export async function generateTemplates(context: {
   topPages: unknown[]
   existingTemplates: Array<{ name: string; description: string | null }>
 }): Promise<GeneratedTemplate[]> {
-  const { object } = await generateObject({
+  const { output } = await generateText({
     model,
-    schema: templatesArraySchema,
+    output: Output.object({ schema: templatesArraySchema }),
     prompt: `You are a QA test planner for a web application at ${context.appUrl}.
 
 Given the following context about recent activity:
@@ -67,5 +67,5 @@ For each step, the "instruction" should be a clear natural language instruction 
 Step types: navigate (go to URL), action (click/type/interact), assertion (verify something is visible/correct), extract (get data from page), wait (pause)`,
   })
 
-  return object.templates
+  return output.templates
 }
