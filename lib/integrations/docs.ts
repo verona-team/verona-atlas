@@ -81,9 +81,19 @@ Auth header is automatically injected via X-API-Key.
 The project name is provided as environment variable LANGSMITH_PROJECT_NAME (optional).
 
 Key endpoints:
-- GET /api/v1/sessions?limit=100 — list projects (called "sessions" in the API)
-- POST /api/v1/runs/query — query runs. Body: { "filter": "gte(start_time, \\"ISO_DATE\\")", "limit": 50 } or { "filter": "and(gte(start_time, \\"ISO_DATE\\"), eq(status, \\"error\\"))", "limit": 50 } for failed runs only. Optionally add "session_name": "project-name" to filter by project.
-- Response .runs[] has .id, .name, .run_type, .status, .error, .start_time, .end_time, .total_tokens, .prompt_tokens, .completion_tokens`,
+
+1. GET /api/v1/sessions?limit=100 — list all projects (called "sessions" in the API).
+   Response is an array of objects with .id, .name, .start_time, .extra, .trace_tier
+
+2. POST /api/v1/runs/query — query runs. IMPORTANT: You MUST provide a "session" field with an array of session UUIDs (project IDs from step 1). The API will NOT work with just "session_name" or without a session filter.
+   Body example: { "session": ["<session-uuid>"], "filter": "gte(start_time, \\"ISO_DATE\\")", "limit": 50, "select": ["name", "run_type", "status", "error", "start_time", "end_time", "total_tokens"] }
+   For failed runs: { "session": ["<session-uuid>"], "filter": "and(gte(start_time, \\"ISO_DATE\\"), eq(status, \\"error\\"))", "limit": 50 }
+   Response: { "runs": [...], "cursors": {...} }
+   Each run has .id, .name, .run_type, .status, .error, .start_time, .end_time, .total_tokens, .prompt_tokens, .completion_tokens
+
+3. GET /api/v1/sessions/<session-id> — get details for a single project/session
+
+Workflow: First list sessions (step 1), then use the session IDs to query runs (step 2).`,
 
   braintrust: `# Braintrust API
 Base URL: https://api.braintrust.dev
