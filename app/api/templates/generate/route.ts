@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { getServerUser } from '@/lib/supabase/server-user'
 import { flushLangSmithTraces, getLangSmithTracingClient } from '@/lib/langsmith-ai'
 import { z } from 'zod'
 import { generateTemplates } from '@/lib/test-planner'
@@ -23,9 +24,7 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getServerUser(supabase)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json()

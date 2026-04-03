@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { getServerUser } from '@/lib/supabase/server-user'
 import { z } from 'zod'
 
 const ScheduleSchema = z.object({
@@ -15,7 +16,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
   const { projectId } = await context.params
   const supabase = await createClient()
 
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getServerUser(supabase)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { data: membership } = await supabase
@@ -43,7 +44,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   const { projectId } = await context.params
   const supabase = await createClient()
 
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getServerUser(supabase)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json()

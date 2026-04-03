@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { getServerUser } from '@/lib/supabase/server-user'
 import { encrypt } from '@/lib/encryption'
 import { z } from 'zod'
 import type { Json } from '@/lib/supabase/types'
@@ -39,9 +40,7 @@ async function validatePosthogCredentials(
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getServerUser(supabase)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json()

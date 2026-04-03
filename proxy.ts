@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
+import { getServerUser } from '@/lib/supabase/server-user'
 
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -30,9 +31,7 @@ export async function proxy(request: NextRequest) {
   )
 
   // Refresh the session - IMPORTANT: do not remove this
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getServerUser(supabase)
 
   const { pathname } = request.nextUrl
 

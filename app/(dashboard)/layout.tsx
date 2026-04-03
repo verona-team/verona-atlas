@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { getServerUser } from '@/lib/supabase/server-user'
 import { MenuBar } from '@/components/dashboard/menu-bar'
 
 export default async function DashboardLayout({
@@ -9,9 +10,7 @@ export default async function DashboardLayout({
 }) {
   const supabase = await createClient()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getServerUser(supabase)
 
   if (!user) {
     redirect('/login')

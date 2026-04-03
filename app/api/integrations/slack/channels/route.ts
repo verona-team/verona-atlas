@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { getServerUser } from '@/lib/supabase/server-user'
 import { decrypt } from '@/lib/encryption'
 import { listChannels } from '@/lib/slack'
 import { z } from 'zod'
@@ -7,9 +8,7 @@ import type { Json } from '@/lib/supabase/types'
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getServerUser(supabase)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const projectId = request.nextUrl.searchParams.get('project_id')
@@ -78,9 +77,7 @@ const SetChannelSchema = z.object({
 
 export async function PATCH(request: NextRequest) {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getServerUser(supabase)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json()

@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { getServerUser } from '@/lib/supabase/server-user'
 import { getGithubIntegrationReady } from '@/lib/github-integration-guard'
 
 type PageProps = { params: Promise<{ projectId: string }> }
@@ -7,9 +8,7 @@ type PageProps = { params: Promise<{ projectId: string }> }
 export default async function ProjectPage({ params }: PageProps) {
   const { projectId } = await params
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getServerUser(supabase)
 
   if (user) {
     const { data: membership } = await supabase

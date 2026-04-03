@@ -10,6 +10,7 @@ import {
   getLangSmithTracingClient,
 } from '@/lib/langsmith-ai'
 import { createClient } from '@/lib/supabase/server'
+import { getServerUser } from '@/lib/supabase/server-user'
 import { createServiceRoleClient } from '@/lib/supabase/service-role'
 import { getOrCreateSession } from '@/lib/chat/session'
 import { buildChatContext, maybeSummarizeOlderMessages } from '@/lib/chat/context'
@@ -74,7 +75,7 @@ export async function POST(request: Request) {
   }
 
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getServerUser(supabase)
   if (!user) {
     return new Response('Unauthorized', { status: 401 })
   }
@@ -168,7 +169,7 @@ export async function POST(request: Request) {
     .from('chat_messages')
     .select('metadata')
     .eq('session_id', session.id)
-    .not('metadata->type', 'is', null)
+    .eq('metadata->>type', 'flow_proposals')
     .order('created_at', { ascending: false })
     .limit(1)
 
@@ -306,23 +307,41 @@ When the user approves flows and wants to start testing, use the start_test_run 
         }
       }
 
-      const proposals = latestProposals?.proposals as {
-        flows: Array<{
-          id: string
-          name: string
-          description: string
-          steps: Array<{
-            order: number
-            instruction: string
-            type: string
-            url?: string
-            expected?: string
-            timeout?: number
-          }>
-        }>
+      const proposals = latestProposals?.proposals as
+        | {
+            flows: Array<{
+              id: string
+              name: string
+              description: string
+              steps: Array<{
+                order: number
+                instruction: string
+                type: string
+                url?: string
+                expected?: string
+                timeout?: number
+              }>
+            }>
+          }
+        | undefined
+
+      if (!proposals?.flows?.length) {
+        return {
+          success: false,
+          error:
+            'Could not find flow proposals for this session. Ask the user to generate proposals again, then approve flows before starting.',
+        }
       }
 
       const approvedFlows = proposals.flows.filter((f) => flowStates[f.id] === 'approved')
+
+      if (approvedFlows.length === 0) {
+        return {
+          success: false,
+          error:
+            'No approved flows match the current proposal set. Regenerate flow proposals or approve flows again, then start testing.',
+        }
+      }
 
       const createdTemplateIds: string[] = []
       for (const flow of approvedFlows) {
