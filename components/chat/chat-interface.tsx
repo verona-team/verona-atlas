@@ -22,6 +22,18 @@ function getTextFromParts(parts: Array<{ type: string; text?: string }>): string
  * `generate_flow_proposals` and streams no prose. Surface tool output until
  * the DB row (with flow cards) arrives.
  */
+/** Realtime UPDATE payloads may include only changed columns; merge so we never drop `content`. */
+function mergeChatMessageRow(prev: ChatMessage, patch: ChatMessage): ChatMessage {
+  const defined = Object.fromEntries(
+    Object.entries(patch).filter(([, v]) => v !== undefined),
+  ) as Partial<ChatMessage>
+  const merged = { ...prev, ...defined }
+  if (merged.content == null) {
+    merged.content = prev.content ?? ''
+  }
+  return merged
+}
+
 function getVisibleTextFromMessageParts(
   role: string,
   parts: Array<{
@@ -212,7 +224,11 @@ export function ChatInterface({
           const newMsg = payload.new as ChatMessage
           setDbMessages((prev) => {
             if (prev.some((m) => m.id === newMsg.id)) return prev
-            return [...prev, newMsg]
+            const safe: ChatMessage = {
+              ...newMsg,
+              content: newMsg.content ?? '',
+            }
+            return [...prev, safe]
           })
 
           if ((newMsg.metadata as Record<string, Json> | null)?.type === 'flow_proposals') {
@@ -231,7 +247,9 @@ export function ChatInterface({
         (payload) => {
           const updated = payload.new as ChatMessage
           setDbMessages((prev) =>
-            prev.map((m) => (m.id === updated.id ? updated : m)),
+            prev.map((m) =>
+              m.id === updated.id ? mergeChatMessageRow(m, updated) : m,
+            ),
           )
 
           if ((updated.metadata as Record<string, Json> | null)?.flow_states) {
@@ -380,14 +398,14 @@ export function ChatInterface({
       .map((m) => ({
         id: m.id,
         role: m.role as 'user' | 'assistant',
-        content: m.content,
+        content: m.content ?? '',
         metadata: m.metadata as Record<string, Json> | undefined,
         isStreaming: false,
       }))
 
     // Match DB rows by role + content prefix (UI message ids differ from DB UUIDs).
     const dbContentSet = new Set(
-      dbMessages.map((m) => `${m.role}:${m.content.slice(0, 100)}`),
+      dbMessages.map((m) => `${m.role}:${(m.content ?? '').slice(0, 100)}`),
     )
 
     const streamAsDisplay = streamMessages
@@ -415,7 +433,7 @@ export function ChatInterface({
       .filter((m) => m.content.length > 0)
 
     const streamNotYetInDb = streamAsDisplay.filter((m) => {
-      const key = `${m.role}:${m.content.slice(0, 100)}`
+      const key = `${m.role}:${(m.content ?? '').slice(0, 100)}`
       return !dbContentSet.has(key)
     })
 
