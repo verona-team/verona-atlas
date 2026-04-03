@@ -116,7 +116,6 @@ Next.js 16 (Vercel)          Modal.com (Python)
 │   ├── execute.py                # Main orchestrator
 │   ├── auth.py                   # Login + 2FA handling
 │   ├── test_executor.py          # Template step execution
-│   ├── planner.py                # AI test prioritization
 │   ├── reporter.py               # Slack reporting
 │   ├── integrations.py           # GitHub + PostHog Python clients
 │   └── encryption.py             # AES-256-GCM decrypt (matches TS)

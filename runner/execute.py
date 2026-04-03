@@ -1,6 +1,6 @@
 """
 Atlas Test Runner — Main Orchestrator
-Loads project → plans tests → executes → reports results
+Loads project → executes templates (DB order) → reports results
 """
 import os
 import asyncio
@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 
 from supabase import create_client as create_supabase_client
 
-from runner.planner import plan_tests
 from runner.test_executor import execute_template
 from runner.auth import authenticate
 from runner.reporter import send_report
@@ -52,15 +51,12 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
             }).eq("id", test_run_id).execute()
             return
 
-        # 5. Plan tests (prioritize templates using AI)
-        planned_templates = await plan_tests(project, integrations, templates)
-
-        # 6. Update status to running
+        # 5. Update status to running
         supabase.table("test_runs").update({"status": "running"}).eq("id", test_run_id).execute()
 
-        # 7. Execute each template
+        # 6. Execute each template (order from DB query)
         results = []
-        for template in planned_templates:
+        for template in templates:
             start_time = datetime.now(timezone.utc)
             try:
                 result = await execute_single_template(supabase, project, template, test_run_id, integrations)
@@ -80,7 +76,7 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
                 supabase.table("test_results").insert(error_result).execute()
                 results.append(error_result)
 
-        # 8. Aggregate results
+        # 7. Aggregate results
         passed = sum(1 for r in results if r.get("status") == "passed")
         failed = sum(1 for r in results if r.get("status") == "failed")
         errors = sum(1 for r in results if r.get("status") == "error")
@@ -94,14 +90,14 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
             "skipped": skipped,
         }
 
-        # 9. Update test run as completed
+        # 8. Update test run as completed
         supabase.table("test_runs").update({
             "status": "completed",
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "summary": summary,
         }).eq("id", test_run_id).execute()
 
-        # 10. Send Slack report
+        # 9. Send Slack report
         await send_report(supabase, project, integrations, test_run_id, results, summary)
 
     except Exception as e:
