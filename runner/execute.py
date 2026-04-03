@@ -62,7 +62,6 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
                 result = await execute_single_template(supabase, project, template, test_run_id, integrations)
                 results.append(result)
             except Exception as e:
-                # Record failed result
                 duration_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
                 error_result = {
                     "test_run_id": test_run_id,
@@ -110,12 +109,42 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
         raise
 
 
+async def upload_screenshots(supabase, screenshots: list[dict], test_run_id: str, template_name: str) -> list[str]:
+    """Upload screenshot PNGs to Supabase Storage and return public URLs."""
+    import base64
+
+    urls: list[str] = []
+    supabase_url = os.environ.get("SUPABASE_URL", "")
+    safe_name = template_name.replace(" ", "_").replace("/", "_")[:50]
+
+    for i, shot in enumerate(screenshots):
+        raw_b64 = shot.get("base64", "")
+        if not raw_b64:
+            continue
+
+        try:
+            image_bytes = base64.b64decode(raw_b64)
+            label = shot.get("label", f"step_{i}")[:60]
+            file_path = f"{test_run_id}/{safe_name}_{label}.png"
+
+            supabase.storage.from_("test-screenshots").upload(
+                path=file_path,
+                file=image_bytes,
+                file_options={"content-type": "image/png"},
+            )
+            public_url = f"{supabase_url}/storage/v1/object/public/test-screenshots/{file_path}"
+            urls.append(public_url)
+        except Exception as e:
+            print(f"Warning: failed to upload screenshot {i}: {e}")
+
+    return urls
+
+
 async def execute_single_template(supabase, project, template, test_run_id: str, integrations: dict | None = None) -> dict:
     """Execute a single test template in an isolated browser session."""
     from stagehand import Stagehand
     
     start_time = datetime.now(timezone.utc)
-    screenshots = []
     integrations = integrations or {}
     browserbase_session_id: str | None = None
 
@@ -138,15 +167,17 @@ async def execute_single_template(supabase, project, template, test_run_id: str,
             password = decrypt(project["auth_password_encrypted"])
             await authenticate(stagehand, project, password)
         
-        step_results = await execute_template(stagehand, template, project)
+        agent_result = await execute_template(stagehand, template, project, integrations)
         
-        all_passed = all(s.get("passed", False) for s in step_results)
-        status = "passed" if all_passed else "failed"
-        error_message = None
-        if not all_passed:
-            failed_steps = [s for s in step_results if not s.get("passed", False)]
-            error_message = "; ".join(s.get("error", "Unknown error") for s in failed_steps)
-        
+        test_passed = agent_result.get("passed", False)
+        status = "passed" if test_passed else "failed"
+        error_message = None if test_passed else agent_result.get("summary", "Test failed")
+
+        bugs = agent_result.get("bugs_found", [])
+        if bugs and status == "passed":
+            status = "failed"
+            error_message = "; ".join(b.get("description", "") for b in bugs)
+
         duration_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
 
         observability_errors: dict = {}
@@ -162,6 +193,17 @@ async def execute_single_template(supabase, project, template, test_run_id: str,
             error_sources = [k for k, v in observability_errors.items() if v]
             error_message = f"Observability errors detected in: {', '.join(error_sources)}"
 
+        screenshot_urls: list[str] = []
+        raw_screenshots = agent_result.get("screenshots", [])
+        if raw_screenshots:
+            try:
+                screenshot_urls = await upload_screenshots(
+                    supabase, raw_screenshots, test_run_id,
+                    template.get("name", "unknown"),
+                )
+            except Exception as e:
+                print(f"Warning: screenshot upload failed: {e}")
+
         recording_url = None
         if browserbase_session_id:
             try:
@@ -173,17 +215,27 @@ async def execute_single_template(supabase, project, template, test_run_id: str,
                 )
             except Exception as e:
                 print(f"Warning: Failed to save recording: {e}")
-        
+
+        actions_for_log = []
+        for a in agent_result.get("actions", []):
+            entry = {k: v for k, v in a.items() if k != "screenshot_base64"}
+            actions_for_log.append(entry)
+
         result = {
             "test_run_id": test_run_id,
             "test_template_id": template["id"],
             "status": status,
             "duration_ms": duration_ms,
             "error_message": error_message,
-            "screenshots": screenshots,
+            "screenshots": screenshot_urls,
             "recording_url": recording_url,
             "console_logs": {
-                "steps": step_results,
+                "agent_summary": agent_result.get("summary", ""),
+                "bugs_found": bugs,
+                "actions": actions_for_log,
+                "iterations_used": agent_result.get("iterations_used", 0),
+                "max_iterations": agent_result.get("max_iterations", 0),
+                "hit_iteration_limit": agent_result.get("hit_iteration_limit", False),
                 "observability": observability_errors,
             },
         }
