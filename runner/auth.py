@@ -3,10 +3,11 @@ Authentication handler for test apps.
 Uses Stagehand agent() for login + AgentMail for 2FA codes.
 """
 import os
+import re
 import asyncio
 from datetime import datetime, timezone
 
-from agentmail import AgentMailClient
+from agentmail import AgentMail
 
 
 async def authenticate(stagehand, project: dict, password: str):
@@ -49,31 +50,32 @@ async def handle_2fa(stagehand, project: dict, agent):
     if not inbox_id:
         raise ValueError("2FA detected but no AgentMail inbox configured for this project")
     
-    agentmail = AgentMailClient(api_key=os.environ["AGENTMAIL_API_KEY"])
-    
+    agentmail = AgentMail(api_key=os.environ["AGENTMAIL_API_KEY"])
+
     poll_start = datetime.now(timezone.utc)
     timeout_seconds = 60
     code = None
-    
+
     while (datetime.now(timezone.utc) - poll_start).total_seconds() < timeout_seconds:
-        messages = agentmail.inboxes.messages.list(inbox_id, limit=5)
-        
-        if messages:
-            for msg in messages:
-                msg_date = datetime.fromisoformat(msg.created_at.replace("Z", "+00:00"))
-                if msg_date < poll_start:
-                    continue
-                    
-                text = getattr(msg, "text", "") or getattr(msg, "subject", "") or ""
-                import re
-                match = re.search(r"\b(\d{4,8})\b", text)
-                if match:
-                    code = match.group(1)
-                    break
-        
+        list_resp = agentmail.inboxes.messages.list(inbox_id=inbox_id, limit=5)
+        rows = list_resp.messages or []
+
+        for msg in rows:
+            msg_date = msg.created_at
+            if msg_date.tzinfo is None:
+                msg_date = msg_date.replace(tzinfo=timezone.utc)
+            if msg_date < poll_start:
+                continue
+
+            text = (msg.text or msg.subject or msg.preview or "") or ""
+            match = re.search(r"\b(\d{4,8})\b", text)
+            if match:
+                code = match.group(1)
+                break
+
         if code:
             break
-            
+
         await asyncio.sleep(2)
     
     if not code:
