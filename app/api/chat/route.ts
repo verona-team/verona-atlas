@@ -175,7 +175,6 @@ export async function POST(request: Request) {
 
   const latestProposals = proposalMessages?.[0]?.metadata as Record<string, Json> | null
   const flowStates = (latestProposals?.flow_states ?? {}) as Record<string, string>
-  const approvedCount = Object.values(flowStates).filter((s) => s === 'approved').length
 
   let flowStatusSummary = ''
   if (latestProposals?.type === 'flow_proposals') {
@@ -249,7 +248,7 @@ When the user approves flows and wants to start testing, use the start_test_run 
         : report
 
       const proposals = await generateFlowProposals(project.app_url, currentReport)
-      const { content, metadata } = serializeFlowsForMessage(proposals)
+      const { content, metadata, flows: persistedFlows } = serializeFlowsForMessage(proposals)
 
       const { error: insertError } = await serviceClient.from('chat_messages').insert({
         session_id: session.id,
@@ -265,15 +264,15 @@ When the user approves flows and wants to start testing, use the start_test_run 
           success: false,
           error: insertError.message,
           analysis: proposals.analysis,
-          flowCount: proposals.flows.length,
+          flowCount: persistedFlows.length,
         }
       }
 
       return {
         success: true,
         analysis: proposals.analysis,
-        flowCount: proposals.flows.length,
-        flows: proposals.flows.map((f) => ({
+        flowCount: persistedFlows.length,
+        flows: persistedFlows.map((f) => ({
           id: f.id,
           name: f.name,
           description: f.description,
@@ -300,14 +299,27 @@ When the user approves flows and wants to start testing, use the start_test_run 
   const executeStartTestRun = traceable(
     async (input: { confirmation: string }) => {
       void input.confirmation
-      if (approvedCount === 0) {
+
+      const { data: freshProposalRows } = await serviceClient
+        .from('chat_messages')
+        .select('metadata')
+        .eq('session_id', session.id)
+        .eq('metadata->>type', 'flow_proposals')
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      const freshMeta = freshProposalRows?.[0]?.metadata as Record<string, Json> | null
+      const flowStatesAtRun = (freshMeta?.flow_states ?? {}) as Record<string, string>
+      const approvedCountAtRun = Object.values(flowStatesAtRun).filter((s) => s === 'approved').length
+
+      if (approvedCountAtRun === 0) {
         return {
           success: false,
           error: 'No approved flows. The user needs to approve at least one flow before starting.',
         }
       }
 
-      const proposals = latestProposals?.proposals as
+      const proposals = freshMeta?.proposals as
         | {
             flows: Array<{
               id: string
@@ -333,7 +345,7 @@ When the user approves flows and wants to start testing, use the start_test_run 
         }
       }
 
-      const approvedFlows = proposals.flows.filter((f) => flowStates[f.id] === 'approved')
+      const approvedFlows = proposals.flows.filter((f) => flowStatesAtRun[f.id] === 'approved')
 
       if (approvedFlows.length === 0) {
         return {
