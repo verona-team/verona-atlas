@@ -12,7 +12,7 @@ runner_image = (
         "stagehand",
         "supabase",
         "anthropic",
-        "agentmail",
+        "agentmail>=0.4",
         "httpx",
         "pydantic",
         "browserbase",
