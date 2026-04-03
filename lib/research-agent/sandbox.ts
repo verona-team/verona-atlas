@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { Sandbox } from '@vercel/sandbox'
 import { INTEGRATION_REGISTRY } from '@/lib/integrations/registry'
 import type { IntegrationCredentials } from './types'
@@ -33,15 +34,17 @@ export async function executeInSandbox(
   code: string,
   env?: Record<string, string>,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const scriptName = `script_${randomUUID().replace(/-/g, '').slice(0, 12)}.mjs`
+
   await sandbox.writeFiles([{
-    path: 'script.mjs',
+    path: scriptName,
     content: Buffer.from(code),
   }])
 
   const result =
     env && Object.keys(env).length > 0
-      ? await sandbox.runCommand({ cmd: 'node', args: ['script.mjs'], env })
-      : await sandbox.runCommand('node', ['script.mjs'])
+      ? await sandbox.runCommand({ cmd: 'node', args: [scriptName], env })
+      : await sandbox.runCommand('node', [scriptName])
 
   const stdout = await result.stdout()
   const stderr = await result.stderr()
