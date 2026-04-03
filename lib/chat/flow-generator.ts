@@ -79,23 +79,45 @@ Step types: navigate (go to URL), action (click/type/interact), assertion (verif
   return output
 }
 
+/**
+ * LLM outputs can repeat the same kebab-case id for multiple flows. Using those ids
+ * as object keys collapses `flow_states` to a single entry so one approval/rejection
+ * applies to every card that shares the id. Assign stable unique ids before persisting.
+ */
+function dedupeFlowIds(flows: FlowProposals['flows']): FlowProposals['flows'] {
+  const seen = new Map<string, number>()
+  return flows.map((flow) => {
+    const n = (seen.get(flow.id) ?? 0) + 1
+    seen.set(flow.id, n)
+    if (n === 1) return flow
+    return { ...flow, id: `${flow.id}-${n}` }
+  })
+}
+
 export function serializeFlowsForMessage(proposals: FlowProposals): {
   content: string
   metadata: Record<string, Json>
+  flows: FlowProposals['flows']
 } {
-  const flowList = proposals.flows
+  const flows = dedupeFlowIds(proposals.flows)
+  const proposalsForStorage: FlowProposals = { ...proposals, flows }
+
+  const flowList = flows
     .map((f, i) => `**${i + 1}. ${f.name}** (${f.priority} priority)\n${f.description}\n_Rationale: ${f.rationale}_\n${f.steps.length} steps`)
     .join('\n\n')
 
   const content = `${proposals.analysis}\n\nHere are the UI flows I recommend testing:\n\n${flowList}\n\nYou can approve, reject, or edit each flow. Once you're happy with the test plan, just tell me to start testing and I'll kick off the browser sessions.`
 
-  const metadata = {
-    type: 'flow_proposals' as Json,
-    proposals: proposals as unknown as Json,
-    flow_states: Object.fromEntries(
-      proposals.flows.map((f) => [f.id, 'pending'])
-    ) as Json,
+  const flow_states: Record<string, Json> = {}
+  for (const f of flows) {
+    flow_states[f.id] = 'pending'
   }
 
-  return { content, metadata }
+  const metadata = {
+    type: 'flow_proposals' as Json,
+    proposals: proposalsForStorage as unknown as Json,
+    flow_states: flow_states as Json,
+  }
+
+  return { content, metadata, flows }
 }

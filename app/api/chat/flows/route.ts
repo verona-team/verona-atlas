@@ -34,7 +34,16 @@ export async function PATCH(request: NextRequest) {
   }
 
   const metadata = (message.metadata ?? {}) as Record<string, Json>
-  const flowStates = (metadata.flow_states ?? {}) as Record<string, string>
+  const proposals = metadata.proposals as { flows?: Array<{ id: string }> } | undefined
+  const flowIds =
+    proposals?.flows?.map((f) => f.id) ??
+    Object.keys((metadata.flow_states ?? {}) as Record<string, string>)
+
+  const previous = (metadata.flow_states ?? {}) as Record<string, string>
+  const flowStates: Record<string, string> = {}
+  for (const id of flowIds) {
+    flowStates[id] = previous[id] ?? 'pending'
+  }
   flowStates[flowId] = action === 'approve' ? 'approved' : 'rejected'
 
   const { error: updateError } = await supabase
