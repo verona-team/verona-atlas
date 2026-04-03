@@ -74,6 +74,9 @@ function getVisibleTextFromMessageParts(
 
 const STALE_THINKING_MS = 15 * 60 * 1000
 
+/** Pixels from the bottom to still count as "following" new messages (tolerance for sub-pixel / font rounding). */
+const NEAR_BOTTOM_THRESHOLD_PX = 96
+
 interface ChatInterfaceProps {
   projectId: string
   sessionId: string
@@ -95,6 +98,8 @@ export function ChatInterface({
 }: ChatInterfaceProps) {
   const router = useRouter()
   const scrollRef = useRef<HTMLDivElement>(null)
+  /** When true, incoming message updates may scroll the pane to keep the latest content in view. */
+  const stickToBottomRef = useRef(true)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [input, setInput] = useState('')
   const [flowStatesOverride, setFlowStatesOverride] = useState<Record<string, 'pending' | 'approved' | 'rejected'> | null>(null)
@@ -328,11 +333,41 @@ export function ChatInterface({
     return () => timeouts.forEach(clearTimeout)
   }, [status, sessionId])
 
+  const updateStickToBottomFromScroll = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    stickToBottomRef.current = distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_PX
+  }, [])
+
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
-  }, [streamMessages, dbMessages])
+    const el = scrollRef.current
+    if (!el) return
+    el.addEventListener('scroll', updateStickToBottomFromScroll, { passive: true })
+    updateStickToBottomFromScroll()
+    return () => el.removeEventListener('scroll', updateStickToBottomFromScroll)
+  }, [updateStickToBottomFromScroll])
+
+  const scrollPaneToBottomIfStuck = useCallback(() => {
+    const el = scrollRef.current
+    if (!el || !stickToBottomRef.current) return
+    el.scrollTop = el.scrollHeight
+  }, [])
+
+  useEffect(() => {
+    scrollPaneToBottomIfStuck()
+  }, [streamMessages, dbMessages, scrollPaneToBottomIfStuck])
+
+  /** Streamed text / async layout can grow the thread without a new React message row; keep pinned users aligned. */
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      scrollPaneToBottomIfStuck()
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [scrollPaneToBottomIfStuck])
 
   const handleApproveFlow = useCallback(
     async (flowId: string) => {
@@ -373,8 +408,13 @@ export function ChatInterface({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (input.trim() && status === 'ready') {
+      stickToBottomRef.current = true
       sendMessage({ text: input })
       setInput('')
+      requestAnimationFrame(() => {
+        scrollPaneToBottomIfStuck()
+        requestAnimationFrame(() => scrollPaneToBottomIfStuck())
+      })
     }
   }
 
@@ -382,8 +422,13 @@ export function ChatInterface({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       if (input.trim() && status === 'ready') {
+        stickToBottomRef.current = true
         sendMessage({ text: input })
         setInput('')
+        requestAnimationFrame(() => {
+          scrollPaneToBottomIfStuck()
+          requestAnimationFrame(() => scrollPaneToBottomIfStuck())
+        })
       }
     }
   }
