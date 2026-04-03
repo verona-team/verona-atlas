@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 STAGEHAND_AGENT_MODEL = "google/gemini-2.5-computer-use-preview-10-2025"
-OUTER_AGENT_MODEL = "claude-opus-4-20250514"
+OUTER_AGENT_MODEL = "claude-opus-4-6"
 
 TOOLS: list[dict[str, Any]] = [
     {
