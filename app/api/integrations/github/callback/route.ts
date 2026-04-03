@@ -1,13 +1,12 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { getServerUser } from '@/lib/supabase/server-user'
 import type { Json } from '@/lib/supabase/types'
 import { clearResearchReportsForProject } from '@/lib/github-integration-guard'
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getServerUser(supabase)
   if (!user) {
     return NextResponse.redirect(new URL('/login', request.nextUrl.origin))
   }

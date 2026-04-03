@@ -1,16 +1,17 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
+import { getServerUser } from '@/lib/supabase/server-user'
 
 export default async function ProjectsPage() {
   const supabase = await createClient()
 
-  const { data: userData } = await supabase.auth.getUser()
-  if (!userData.user) return null
+  const user = await getServerUser(supabase)
+  if (!user) return null
 
   const { data: membership } = await supabase
     .from('org_members')
     .select('org_id')
-    .eq('user_id', userData.user.id)
+    .eq('user_id', user.id)
     .limit(1)
     .single()
 

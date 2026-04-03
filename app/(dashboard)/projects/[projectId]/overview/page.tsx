@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { getServerUser } from '@/lib/supabase/server-user'
 import { TriggerRunButton } from '@/components/dashboard/trigger-run-button'
 import { RunStatusBadge } from '@/components/dashboard/run-status-badge'
 
@@ -10,7 +11,7 @@ export default async function ProjectOverviewPage({ params }: PageProps) {
   const { projectId } = await params
   const supabase = await createClient()
 
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getServerUser(supabase)
   if (!user) return null
 
   const { data: membership } = await supabase

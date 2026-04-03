@@ -1,5 +1,6 @@
 import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { getServerUser } from '@/lib/supabase/server-user'
 import { getOrCreateSession } from '@/lib/chat/session'
 import { ChatInterface } from '@/components/chat/chat-interface'
 import { ChatNav } from '@/components/chat/chat-nav'
@@ -11,7 +12,7 @@ export default async function ChatPage({ params }: PageProps) {
   const { projectId } = await params
   const supabase = await createClient()
 
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getServerUser(supabase)
   if (!user) return null
 
   const { data: membership } = await supabase

@@ -1,15 +1,16 @@
 import { createClient } from '@/lib/supabase/server'
+import { getServerUser } from '@/lib/supabase/server-user'
 
 export default async function SettingsPage() {
   const supabase = await createClient()
 
-  const { data: user } = await supabase.auth.getUser()
-  if (!user.user) return null
+  const user = await getServerUser(supabase)
+  if (!user) return null
 
   const { data: membership } = await supabase
     .from('org_members')
     .select('org_id, role, organizations(id, name, slug, plan)')
-    .eq('user_id', user.user.id)
+    .eq('user_id', user.id)
     .limit(1)
     .single()
 
