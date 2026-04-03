@@ -1,3 +1,7 @@
+"""
+Deploy from repo root: `modal deploy runner/modal_app.py`
+(Not from `runner/` — add_local_python_source("runner") expects a sibling `runner/` dir.)
+"""
 import modal
 
 app = modal.App("atlas-runner")
