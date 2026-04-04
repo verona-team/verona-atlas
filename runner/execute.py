@@ -16,6 +16,7 @@ from runner.reporter import send_report
 from runner.encryption import decrypt
 from runner.observability import collect_observability_data, diff_observability_snapshots
 from runner.recordings import save_session_recording
+from runner.browser import create_stagehand_session, cleanup_session
 
 
 def _template_ids_from_trigger_ref(trigger_ref: str | None) -> list[str] | None:
@@ -175,8 +176,6 @@ async def upload_screenshots(supabase, screenshots: list[dict], test_run_id: str
 
 async def execute_single_template(supabase, project, template, test_run_id: str, integrations: dict | None = None) -> dict:
     """Execute a single test template in an isolated browser session."""
-    from stagehand import Stagehand
-    
     start_time = datetime.now(timezone.utc)
     integrations = integrations or {}
     browserbase_session_id: str | None = None
@@ -186,22 +185,24 @@ async def execute_single_template(supabase, project, template, test_run_id: str,
         pre_snapshot = await collect_observability_data(integrations, window_minutes=1)
     except Exception as e:
         print(f"Warning: pre-test observability snapshot failed: {e}")
-    
-    stagehand = Stagehand(env="BROWSERBASE")
-    try:
-        await stagehand.init()
 
-        if hasattr(stagehand, 'browserbase_session_id'):
-            browserbase_session_id = stagehand.browserbase_session_id
-        elif hasattr(stagehand, 'session_id'):
-            browserbase_session_id = stagehand.session_id
-        
+    session_ctx = await create_stagehand_session()
+    client = session_ctx["client"]
+    session = session_ctx["session"]
+    page = session_ctx["page"]
+    playwright_inst = session_ctx["playwright"]
+    browser = session_ctx["browser"]
+    browserbase_session_id = session_ctx["session_id"]
+
+    print(f"Browserbase session started: {browserbase_session_id}")
+
+    try:
         if project.get("auth_email") and project.get("auth_password_encrypted"):
             password = decrypt(project["auth_password_encrypted"])
-            await authenticate(stagehand, project, password)
-        
-        agent_result = await execute_template(stagehand, template, project, integrations)
-        
+            await authenticate(page, session, project, password)
+
+        agent_result = await execute_template(session, page, template, project, integrations)
+
         test_passed = agent_result.get("passed", False)
         status = "passed" if test_passed else "failed"
         error_message = None if test_passed else agent_result.get("summary", "Test failed")
@@ -277,7 +278,4 @@ async def execute_single_template(supabase, project, template, test_run_id: str,
         return result
         
     finally:
-        try:
-            await stagehand.close()
-        except Exception:
-            pass
+        await cleanup_session(client, session, browser, playwright_inst)

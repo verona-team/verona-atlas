@@ -16,7 +16,9 @@ runner_image = (
         "httpx",
         "pydantic",
         "browserbase",
+        "playwright",
     )
+    .run_commands("playwright install --with-deps chromium")
     .add_local_python_source("runner")
 )
 

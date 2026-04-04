@@ -1,6 +1,6 @@
 """
 Authentication handler for test apps.
-Uses Stagehand agent() for login + AgentMail for 2FA codes.
+Uses Stagehand v3 session.execute() for login + AgentMail for 2FA codes.
 """
 import os
 import re
@@ -9,42 +9,49 @@ from datetime import datetime, timezone
 
 from agentmail import AgentMail
 
+from runner.prompts import STAGEHAND_AGENT_MODEL
 
-async def authenticate(stagehand, project: dict, password: str):
-    """Authenticate into the target application with optional 2FA."""
+
+async def authenticate(page, session, project: dict, password: str):
+    """Authenticate into the target application with optional 2FA.
+
+    Args:
+        page: Playwright Page for direct navigation
+        session: Stagehand v3 AsyncSession for AI-powered actions
+        project: Project dict with auth_email, app_url, etc.
+        password: Decrypted password
+    """
     app_url = project["app_url"].rstrip("/")
     email = project["auth_email"]
     
-    # Navigate to login
-    page = stagehand.page
     await page.goto(f"{app_url}/login")
-    await asyncio.sleep(2)  # Wait for page load
+    await asyncio.sleep(2)
     
-    # Use agent for login flow
-    agent = stagehand.agent(
-        model="google/gemini-2.5-computer-use-preview-10-2025",
-        system_prompt="You are a QA tester logging into a web application. Be precise and wait for elements to load.",
+    await session.execute(
+        execute_options={
+            "instruction": (
+                f'Enter the email "{email}" in the email/username field, '
+                f'enter the password "{password}" in the password field, '
+                f'then click the login/sign-in button.'
+            ),
+            "max_steps": 10,
+        },
+        agent_config={"model": STAGEHAND_AGENT_MODEL},
+        timeout=60.0,
     )
     
-    await agent.execute(
-        f'Enter the email "{email}" in the email/username field, '
-        f'enter the password "{password}" in the password field, '
-        f'then click the login/sign-in button.',
-        max_steps=10,
+    await asyncio.sleep(3)
+    
+    observe_response = await session.observe(
+        instruction="Is there a verification code input, 2FA input, OTP input, or any multi-factor authentication prompt?",
     )
     
-    await asyncio.sleep(3)  # Wait for login to process
-    
-    # Check for 2FA
-    observations = await stagehand.observe(
-        "Is there a verification code input, 2FA input, OTP input, or any multi-factor authentication prompt?"
-    )
-    
-    if observations and len(observations) > 0:
-        await handle_2fa(stagehand, project, agent)
+    results = observe_response.data.result if hasattr(observe_response, "data") else []
+    if results and len(results) > 0:
+        await handle_2fa(session, project)
 
 
-async def handle_2fa(stagehand, project: dict, agent):
+async def handle_2fa(session, project: dict):
     """Handle 2FA by polling AgentMail for verification code."""
     inbox_id = project.get("agentmail_inbox_id")
     if not inbox_id:
@@ -81,10 +88,13 @@ async def handle_2fa(stagehand, project: dict, agent):
     if not code:
         raise TimeoutError(f"2FA code not received within {timeout_seconds}s")
     
-    # Enter the 2FA code
-    await agent.execute(
-        f'Enter the verification code "{code}" in the verification/OTP input field and submit.',
-        max_steps=5,
+    await session.execute(
+        execute_options={
+            "instruction": f'Enter the verification code "{code}" in the verification/OTP input field and submit.',
+            "max_steps": 5,
+        },
+        agent_config={"model": STAGEHAND_AGENT_MODEL},
+        timeout=30.0,
     )
     
     await asyncio.sleep(2)

@@ -1,10 +1,10 @@
 """
 Agentic test executor — ReAct loop powered by Claude Opus (outer reasoning)
-and Stagehand agent.execute() (inner browser actions).
+and Stagehand session.execute() (inner browser actions via Stagehand v3 API).
 
 Architecture:
   Outer loop (Claude Opus):  observe screenshot → reason → pick tool → repeat
-  Inner loop (Stagehand/Gemini CU):  agent.execute(instruction) performs
+  Inner loop (Stagehand v3): session.execute(instruction) performs
       multi-step browser interactions within a single action
 """
 import asyncio
@@ -25,17 +25,17 @@ from runner.prompts import (
 )
 
 
-async def capture_page_state(stagehand) -> dict:
-    """Capture a snapshot of the current browser page state."""
+async def capture_page_state(page) -> dict:
+    """Capture a snapshot of the current browser page state via Playwright."""
     url = ""
     screenshot_b64 = ""
     try:
-        url = stagehand.page.url
+        url = page.url
     except Exception:
         pass
 
     try:
-        raw = await stagehand.page.screenshot(type="png")
+        raw = await page.screenshot(type="png")
         if isinstance(raw, bytes):
             screenshot_b64 = base64.b64encode(raw).decode("ascii")
         elif isinstance(raw, str):
@@ -50,8 +50,8 @@ async def capture_page_state(stagehand) -> dict:
     }
 
 
-async def execute_browser_action(stagehand, instruction: str) -> dict:
-    """Run a single instruction through the Stagehand computer-use agent.
+async def execute_browser_action(session, page, instruction: str) -> dict:
+    """Run a single instruction through the Stagehand v3 execute (agent) endpoint.
 
     Returns a dict with the execution outcome and post-action page state.
     """
@@ -60,19 +60,27 @@ async def execute_browser_action(stagehand, instruction: str) -> dict:
     agent_output: str | None = None
 
     try:
-        agent = stagehand.agent(
-            model=STAGEHAND_AGENT_MODEL,
-            system_prompt="You are a QA tester executing test steps on a web application. Be precise and wait for elements to load.",
+        result = await session.execute(
+            execute_options={
+                "instruction": instruction,
+                "max_steps": 10,
+            },
+            agent_config={
+                "model": STAGEHAND_AGENT_MODEL,
+            },
+            timeout=120.0,
         )
-        result = await agent.execute(instruction, max_steps=10)
         if result is not None:
-            agent_output = str(result)
+            if hasattr(result, "data") and hasattr(result.data, "result"):
+                agent_output = result.data.result.message
+            else:
+                agent_output = str(result)
     except Exception as e:
         success = False
         error = str(e)
 
     await asyncio.sleep(1)
-    page_state = await capture_page_state(stagehand)
+    page_state = await capture_page_state(page)
 
     return {
         "success": success,
@@ -82,14 +90,15 @@ async def execute_browser_action(stagehand, instruction: str) -> dict:
     }
 
 
-async def execute_observe_dom(stagehand, query: str) -> dict:
-    """Run a DOM-level observation via Stagehand.observe()."""
+async def execute_observe_dom(session, query: str) -> dict:
+    """Run a DOM-level observation via Stagehand v3 observe endpoint."""
     try:
-        observations = await stagehand.observe(query)
-        found = observations is not None and len(observations) > 0
+        response = await session.observe(instruction=query)
+        results = response.data.result if hasattr(response, "data") else []
+        found = results is not None and len(results) > 0
         return {
             "found": found,
-            "observations": str(observations) if observations else "No matching elements found.",
+            "observations": str([r.to_dict() for r in results]) if results else "No matching elements found.",
         }
     except Exception as e:
         return {
@@ -158,12 +167,20 @@ def _compress_messages(
 
 
 async def execute_template(
-    stagehand,
+    session,
+    page,
     template: dict,
     project: dict,
     integrations: dict[str, dict] | None = None,
 ) -> dict:
     """Execute a test template using the agentic ReAct loop.
+
+    Args:
+        session: Stagehand v3 AsyncSession (for AI-powered act/observe/execute)
+        page: Playwright Page (for screenshots and direct navigation)
+        template: Test template dict from DB
+        project: Project dict from DB
+        integrations: Integration configs
 
     Returns a rich result dict containing:
       - passed: bool
@@ -183,7 +200,7 @@ async def execute_template(
     anthropic = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
     system_prompt = build_system_prompt(template, project, integrations)
 
-    initial_state = await capture_page_state(stagehand)
+    initial_state = await capture_page_state(page)
 
     initial_content: list[dict] = [
         {"type": "text", "text": (
@@ -241,8 +258,6 @@ async def execute_template(
             })
             break
 
-        # response.content is a list of Anthropic ContentBlock objects;
-        # the SDK handles serialization when we pass them back in messages.
         assistant_content = response.content
         messages.append({"role": "assistant", "content": assistant_content})
 
@@ -278,7 +293,7 @@ async def execute_template(
                 instruction = tool_input.get("instruction", "")
                 print(f"  [iter {iteration}] browser_action: {instruction[:100]}")
 
-                result = await execute_browser_action(stagehand, instruction)
+                result = await execute_browser_action(session, page, instruction)
                 action_record["success"] = result["success"]
                 action_record["error"] = result["error"]
                 action_record["url_after"] = result["page_state"]["url"]
@@ -313,7 +328,7 @@ async def execute_template(
                 query = tool_input.get("query", "")
                 print(f"  [iter {iteration}] observe_dom: {query[:100]}")
 
-                result = await execute_observe_dom(stagehand, query)
+                result = await execute_observe_dom(session, query)
                 action_record["found"] = result["found"]
                 action_record["observations"] = result["observations"][:500]
 
