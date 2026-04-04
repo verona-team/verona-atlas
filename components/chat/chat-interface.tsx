@@ -309,7 +309,7 @@ export function ChatInterface({
         }
         return Array.from(byId.values()).sort(
           (a, b) =>
-            new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+            new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime(),
         )
       })
     }

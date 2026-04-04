@@ -12,32 +12,57 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.4"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       chat_messages: {
         Row: {
-          id: string
-          session_id: string
-          role: "system" | "user" | "assistant"
           content: string
-          metadata: Json
-          created_at: string
+          created_at: string | null
+          id: string
+          metadata: Json | null
+          role: string
+          session_id: string
         }
         Insert: {
-          id?: string
-          session_id: string
-          role: "system" | "user" | "assistant"
           content: string
-          metadata?: Json
-          created_at?: string
+          created_at?: string | null
+          id?: string
+          metadata?: Json | null
+          role: string
+          session_id: string
         }
         Update: {
-          id?: string
-          session_id?: string
-          role?: "system" | "user" | "assistant"
           content?: string
-          metadata?: Json
-          created_at?: string
+          created_at?: string | null
+          id?: string
+          metadata?: Json | null
+          role?: string
+          session_id?: string
         }
         Relationships: [
           {
@@ -51,34 +76,34 @@ export type Database = {
       }
       chat_sessions: {
         Row: {
+          context_summary: string | null
+          created_at: string | null
           id: string
           project_id: string
-          context_summary: string | null
           research_report: Json | null
-          status: "idle" | "thinking" | "error"
-          status_updated_at: string
-          created_at: string
-          updated_at: string
+          status: string
+          status_updated_at: string | null
+          updated_at: string | null
         }
         Insert: {
+          context_summary?: string | null
+          created_at?: string | null
           id?: string
           project_id: string
-          context_summary?: string | null
           research_report?: Json | null
-          status?: "idle" | "thinking" | "error"
-          status_updated_at?: string
-          created_at?: string
-          updated_at?: string
+          status?: string
+          status_updated_at?: string | null
+          updated_at?: string | null
         }
         Update: {
+          context_summary?: string | null
+          created_at?: string | null
           id?: string
           project_id?: string
-          context_summary?: string | null
           research_report?: Json | null
-          status?: "idle" | "thinking" | "error"
-          status_updated_at?: string
-          created_at?: string
-          updated_at?: string
+          status?: string
+          status_updated_at?: string | null
+          updated_at?: string | null
         }
         Relationships: [
           {
@@ -201,10 +226,10 @@ export type Database = {
           id: string
           name: string
           org_id: string
-          timezone: string
-          schedule_enabled: boolean
-          schedule_time: string
-          schedule_days: string[]
+          schedule_days: string[] | null
+          schedule_enabled: boolean | null
+          schedule_time: string | null
+          timezone: string | null
           updated_at: string
         }
         Insert: {
@@ -217,10 +242,10 @@ export type Database = {
           id?: string
           name: string
           org_id: string
-          timezone?: string
-          schedule_enabled?: boolean
-          schedule_time?: string
-          schedule_days?: string[]
+          schedule_days?: string[] | null
+          schedule_enabled?: boolean | null
+          schedule_time?: string | null
+          timezone?: string | null
           updated_at?: string
         }
         Update: {
@@ -233,10 +258,10 @@ export type Database = {
           id?: string
           name?: string
           org_id?: string
-          timezone?: string
-          schedule_enabled?: boolean
-          schedule_time?: string
-          schedule_days?: string[]
+          schedule_days?: string[] | null
+          schedule_enabled?: boolean | null
+          schedule_time?: string | null
+          timezone?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -410,7 +435,13 @@ export type Database = {
     }
     Enums: {
       integration_status: "active" | "disconnected"
-      integration_type: "github" | "posthog" | "slack" | "sentry" | "langsmith" | "braintrust"
+      integration_type:
+        | "github"
+        | "posthog"
+        | "slack"
+        | "sentry"
+        | "langsmith"
+        | "braintrust"
       org_role: "owner" | "member"
       result_status: "passed" | "failed" | "error" | "skipped"
       run_status: "pending" | "planning" | "running" | "completed" | "failed"
@@ -541,10 +572,20 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       integration_status: ["active", "disconnected"],
-      integration_type: ["github", "posthog", "slack", "sentry", "langsmith", "braintrust"],
+      integration_type: [
+        "github",
+        "posthog",
+        "slack",
+        "sentry",
+        "langsmith",
+        "braintrust",
+      ],
       org_role: ["owner", "member"],
       result_status: ["passed", "failed", "error", "skipped"],
       run_status: ["pending", "planning", "running", "completed", "failed"],
