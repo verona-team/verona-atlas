@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, ChatSession } from '@/lib/supabase/types'
+import { chatServerLog } from '@/lib/chat/server-log'
 
 export async function getOrCreateSession(
   supabase: SupabaseClient<Database>,
@@ -20,6 +21,11 @@ export async function getOrCreateSession(
     .single()
 
   if (error || !created) {
+    chatServerLog('error', 'chat_session_create_failed', {
+      err: error,
+      projectId,
+      supabaseMessage: error?.message,
+    })
     throw new Error(`Failed to create chat session: ${error?.message}`)
   }
 

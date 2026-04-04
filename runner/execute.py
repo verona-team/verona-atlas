@@ -2,6 +2,7 @@
 Atlas Test Runner — Main Orchestrator
 Loads project → executes templates (DB order) → reports results
 """
+import json
 import os
 import asyncio
 import traceback
@@ -17,6 +18,23 @@ from runner.observability import collect_observability_data, diff_observability_
 from runner.recordings import save_session_recording
 
 
+def _template_ids_from_trigger_ref(trigger_ref: str | None) -> list[str] | None:
+    """If set, the run should only execute these template rows (e.g. chat-approved flows)."""
+    if not trigger_ref or not str(trigger_ref).strip():
+        return None
+    try:
+        obj = json.loads(trigger_ref)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    raw = obj.get("template_ids")
+    if not isinstance(raw, list):
+        return None
+    ids = [str(x) for x in raw if x]
+    return ids or None
+
+
 async def run_test_pipeline(test_run_id: str, project_id: str):
     """Full test execution pipeline."""
     supabase_url = os.environ["SUPABASE_URL"]
@@ -29,32 +47,47 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
         if not project:
             raise ValueError(f"Project {project_id} not found")
 
-        # 2. Load integrations
+        # 2. Load test run (scope: which templates this invocation should execute)
+        run_row = supabase.table("test_runs").select("trigger_ref").eq("id", test_run_id).single().execute().data
+        if not run_row:
+            raise ValueError(f"Test run {test_run_id} not found")
+
+        scoped_template_ids = _template_ids_from_trigger_ref(run_row.get("trigger_ref"))
+
+        # 3. Load integrations
         integrations_resp = supabase.table("integrations").select("*").eq("project_id", project_id).execute()
         integrations = {i["type"]: i for i in (integrations_resp.data or [])}
 
-        # 3. Update status to planning
+        # 4. Update status to planning
         supabase.table("test_runs").update({
             "status": "planning",
             "started_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", test_run_id).execute()
 
-        # 4. Load active templates
-        templates_resp = supabase.table("test_templates").select("*").eq("project_id", project_id).eq("is_active", True).execute()
+        # 5. Load active templates (full project, or only IDs recorded on this run for chat flows)
+        q = supabase.table("test_templates").select("*").eq("project_id", project_id).eq("is_active", True)
+        if scoped_template_ids is not None:
+            q = q.in_("id", scoped_template_ids)
+        templates_resp = q.execute()
         templates = templates_resp.data or []
 
         if not templates:
+            msg = (
+                "No active test templates found for this run"
+                if scoped_template_ids is not None
+                else "No active test templates found"
+            )
             supabase.table("test_runs").update({
                 "status": "completed",
                 "completed_at": datetime.now(timezone.utc).isoformat(),
-                "summary": {"message": "No active test templates found", "total": 0, "passed": 0, "failed": 0},
+                "summary": {"message": msg, "total": 0, "passed": 0, "failed": 0},
             }).eq("id", test_run_id).execute()
             return
 
-        # 5. Update status to running
+        # 6. Update status to running
         supabase.table("test_runs").update({"status": "running"}).eq("id", test_run_id).execute()
 
-        # 6. Execute each template (order from DB query)
+        # 7. Execute each template (order from DB query)
         results = []
         for template in templates:
             start_time = datetime.now(timezone.utc)
@@ -75,7 +108,7 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
                 supabase.table("test_results").insert(error_result).execute()
                 results.append(error_result)
 
-        # 7. Aggregate results
+        # 8. Aggregate results
         passed = sum(1 for r in results if r.get("status") == "passed")
         failed = sum(1 for r in results if r.get("status") == "failed")
         errors = sum(1 for r in results if r.get("status") == "error")
@@ -89,14 +122,14 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
             "skipped": skipped,
         }
 
-        # 8. Update test run as completed
+        # 9. Update test run as completed
         supabase.table("test_runs").update({
             "status": "completed",
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "summary": summary,
         }).eq("id", test_run_id).execute()
 
-        # 9. Send Slack report
+        # 10. Send Slack report
         await send_report(supabase, project, integrations, test_run_id, results, summary)
 
     except Exception as e:

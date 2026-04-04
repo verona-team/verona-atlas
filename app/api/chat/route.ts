@@ -19,6 +19,7 @@ import { runResearchAgent, type ResearchReport } from '@/lib/research-agent'
 import { getGithubIntegrationReady } from '@/lib/github-integration-guard'
 import { normalizeResearchReport } from '@/lib/research-agent/types'
 import { triggerTestRun } from '@/lib/modal'
+import { chatServerLog } from '@/lib/chat/server-log'
 import type { Json } from '@/lib/supabase/types'
 
 export const maxDuration = 800
@@ -74,22 +75,33 @@ export async function POST(request: Request) {
     })
   }
 
+  let logProjectId = ''
+  let logSessionId = ''
+  let logUserId = ''
+
   const supabase = await createClient()
   const user = await getServerUser(supabase)
   if (!user) {
     return new Response('Unauthorized', { status: 401 })
   }
+  logUserId = user.id
 
-  const body = await request.json()
-  const { messages: uiMessages, projectId } = body as {
-    messages: UIMessage[]
-    projectId: string
+  let body: { messages: UIMessage[]; projectId: string }
+  try {
+    body = (await request.json()) as { messages: UIMessage[]; projectId: string }
+  } catch (err) {
+    chatServerLog('error', 'chat_post_invalid_json', { err, userId: logUserId })
+    return new Response('Invalid JSON body', { status: 400 })
   }
+
+  const { messages: uiMessages, projectId } = body
 
   if (!projectId) {
     return new Response('projectId is required', { status: 400 })
   }
+  logProjectId = projectId
 
+  try {
   const { data: membership } = await supabase
     .from('org_members')
     .select('org_id')
@@ -112,14 +124,15 @@ export async function POST(request: Request) {
     return new Response('Project not found', { status: 404 })
   }
 
-  const serviceClient = createServiceRoleClient()
-  const session = await getOrCreateSession(serviceClient, projectId)
+    const serviceClient = createServiceRoleClient()
+    const session = await getOrCreateSession(serviceClient, projectId)
+    logSessionId = session.id
 
-  await setSessionStatus(serviceClient, session.id, 'thinking')
+    await setSessionStatus(serviceClient, session.id, 'thinking')
 
-  after(async () => {
-    await setSessionStatus(serviceClient, session.id, 'idle')
-  })
+    after(async () => {
+      await setSessionStatus(serviceClient, session.id, 'idle')
+    })
 
   /** Set when flow proposal DB insert fails so onFinish can persist a visible error. */
   let flowProposalInsertError: string | null = null
@@ -134,11 +147,19 @@ export async function POST(request: Request) {
         .join('') ?? ''
 
     if (lastUserText) {
-      await serviceClient.from('chat_messages').insert({
+      const { error: userMsgErr } = await serviceClient.from('chat_messages').insert({
         session_id: session.id,
         role: 'user',
         content: lastUserText,
       })
+      if (userMsgErr) {
+        chatServerLog('warn', 'chat_user_message_persist_failed', {
+          err: userMsgErr,
+          projectId,
+          sessionId: session.id,
+          userId: user.id,
+        })
+      }
     }
   }
 
@@ -240,46 +261,69 @@ When the user approves flows and wants to start testing, use the start_test_run 
 
   const modelMessages = await convertToModelMessages(uiMessages)
 
+  const logChatTool = (
+    level: 'error' | 'warn' | 'info',
+    event: string,
+    extra?: Record<string, unknown>,
+  ) => {
+    chatServerLog(level, event, {
+      projectId,
+      sessionId: session.id,
+      userId: user.id,
+      ...extra,
+    })
+  }
+
   const executeGenerateFlowProposals = traceable(
     async (input: { reason: string; refresh?: boolean }) => {
-      const { refresh } = input
-      const currentReport = refresh
-        ? await getOrRunResearch(serviceClient, session.id, projectId, project.app_url, true)
-        : report
+      try {
+        const { refresh } = input
+        const currentReport = refresh
+          ? await getOrRunResearch(serviceClient, session.id, projectId, project.app_url, true)
+          : report
 
-      const proposals = await generateFlowProposals(project.app_url, currentReport)
-      const { content, metadata, flows: persistedFlows } = serializeFlowsForMessage(proposals)
+        const proposals = await generateFlowProposals(project.app_url, currentReport)
+        const { content, metadata, flows: persistedFlows } = serializeFlowsForMessage(proposals)
 
-      const { error: insertError } = await serviceClient.from('chat_messages').insert({
-        session_id: session.id,
-        role: 'assistant',
-        content,
-        metadata: metadata as unknown as Json,
-      })
+        const { error: insertError } = await serviceClient.from('chat_messages').insert({
+          session_id: session.id,
+          role: 'assistant',
+          content,
+          metadata: metadata as unknown as Json,
+        })
 
-      if (insertError) {
-        console.error('Failed to insert flow_proposals message:', insertError)
-        flowProposalInsertError = insertError.message
+        if (insertError) {
+          flowProposalInsertError = insertError.message
+          logChatTool('error', 'chat_tool_flow_proposals_db_insert_failed', {
+            supabaseMessage: insertError.message,
+            flowCount: persistedFlows.length,
+          })
+          return {
+            success: false,
+            error: insertError.message,
+            analysis: proposals.analysis,
+            flowCount: persistedFlows.length,
+          }
+        }
+
+        logChatTool('info', 'chat_tool_flow_proposals_ok', { flowCount: persistedFlows.length })
+
         return {
-          success: false,
-          error: insertError.message,
+          success: true,
           analysis: proposals.analysis,
           flowCount: persistedFlows.length,
+          flows: persistedFlows.map((f) => ({
+            id: f.id,
+            name: f.name,
+            description: f.description,
+            rationale: f.rationale,
+            priority: f.priority,
+            stepCount: f.steps.length,
+          })),
         }
-      }
-
-      return {
-        success: true,
-        analysis: proposals.analysis,
-        flowCount: persistedFlows.length,
-        flows: persistedFlows.map((f) => ({
-          id: f.id,
-          name: f.name,
-          description: f.description,
-          rationale: f.rationale,
-          priority: f.priority,
-          stepCount: f.steps.length,
-        })),
+      } catch (err) {
+        logChatTool('error', 'chat_tool_flow_proposals_exception', { err })
+        throw err
       }
     },
     {
@@ -300,6 +344,7 @@ When the user approves flows and wants to start testing, use the start_test_run 
     async (input: { confirmation: string }) => {
       void input.confirmation
 
+      try {
       const { data: freshProposalRows } = await serviceClient
         .from('chat_messages')
         .select('metadata')
@@ -313,6 +358,7 @@ When the user approves flows and wants to start testing, use the start_test_run 
       const approvedCountAtRun = Object.values(flowStatesAtRun).filter((s) => s === 'approved').length
 
       if (approvedCountAtRun === 0) {
+        logChatTool('warn', 'chat_tool_start_test_run_no_approved_flows', {})
         return {
           success: false,
           error: 'No approved flows. The user needs to approve at least one flow before starting.',
@@ -338,6 +384,7 @@ When the user approves flows and wants to start testing, use the start_test_run 
         | undefined
 
       if (!proposals?.flows?.length) {
+        logChatTool('warn', 'chat_tool_start_test_run_missing_proposals', {})
         return {
           success: false,
           error:
@@ -348,6 +395,7 @@ When the user approves flows and wants to start testing, use the start_test_run 
       const approvedFlows = proposals.flows.filter((f) => flowStatesAtRun[f.id] === 'approved')
 
       if (approvedFlows.length === 0) {
+        logChatTool('warn', 'chat_tool_start_test_run_no_matching_approved', {})
         return {
           success: false,
           error:
@@ -356,6 +404,7 @@ When the user approves flows and wants to start testing, use the start_test_run 
       }
 
       const createdTemplateIds: string[] = []
+      const templateInsertErrors: string[] = []
       for (const flow of approvedFlows) {
         const { data: template, error } = await serviceClient
           .from('test_templates')
@@ -369,11 +418,30 @@ When the user approves flows and wants to start testing, use the start_test_run 
           .select('id')
           .single()
 
-        if (template) {
-          createdTemplateIds.push(template.id)
+        if (error || !template) {
+          logChatTool('error', 'chat_tool_start_test_run_template_insert_failed', {
+            flowName: flow.name,
+            flowId: flow.id,
+            supabaseMessage: error?.message,
+          })
+          templateInsertErrors.push(error?.message ?? 'Unknown error saving template')
+          continue
         }
-        if (error) {
-          console.error('Failed to create template:', error)
+        createdTemplateIds.push(template.id)
+      }
+
+      if (createdTemplateIds.length !== approvedFlows.length) {
+        logChatTool('error', 'chat_tool_start_test_run_partial_template_save', {
+          approvedCount: approvedFlows.length,
+          savedCount: createdTemplateIds.length,
+          templateInsertErrors,
+        })
+        return {
+          success: false,
+          error:
+            templateInsertErrors.length > 0
+              ? `Could not save approved flows to the database, so cloud browsers were not started. ${templateInsertErrors.join(' ')}`
+              : 'Could not save approved flows to the database, so cloud browsers were not started.',
         }
       }
 
@@ -383,11 +451,15 @@ When the user approves flows and wants to start testing, use the start_test_run 
           project_id: projectId,
           trigger: 'chat',
           status: 'pending',
+          trigger_ref: JSON.stringify({ template_ids: createdTemplateIds }),
         })
         .select()
         .single()
 
       if (runError || !testRun) {
+        logChatTool('error', 'chat_tool_start_test_run_db_insert_failed', {
+          supabaseMessage: runError?.message,
+        })
         return { success: false, error: `Failed to create test run: ${runError?.message}` }
       }
 
@@ -395,7 +467,7 @@ When the user approves flows and wants to start testing, use the start_test_run 
         const modalCallId = await triggerTestRun(testRun.id, projectId)
         await serviceClient.from('test_runs').update({ modal_call_id: modalCallId }).eq('id', testRun.id)
 
-        await serviceClient.from('chat_messages').insert({
+        const { error: startedMsgErr } = await serviceClient.from('chat_messages').insert({
           session_id: session.id,
           role: 'assistant',
           content: `Testing started! I'm executing ${approvedFlows.length} approved flow(s) in cloud browsers. I'll update you on progress as results come in.`,
@@ -406,6 +478,20 @@ When the user approves flows and wants to start testing, use the start_test_run 
             flow_count: approvedFlows.length,
           } as unknown as Json,
         })
+        if (startedMsgErr) {
+          logChatTool('warn', 'chat_tool_start_test_run_started_message_failed', {
+            err: startedMsgErr,
+            runId: testRun.id,
+            modalCallId,
+          })
+        }
+
+        logChatTool('info', 'chat_tool_start_test_run_modal_spawned', {
+          runId: testRun.id,
+          modalCallId,
+          flowCount: approvedFlows.length,
+          templateIds: createdTemplateIds,
+        })
 
         return {
           success: true,
@@ -414,6 +500,7 @@ When the user approves flows and wants to start testing, use the start_test_run 
           templateIds: createdTemplateIds,
         }
       } catch (error) {
+        logChatTool('error', 'chat_tool_start_test_run_modal_failed', { err: error, runId: testRun.id })
         await serviceClient
           .from('test_runs')
           .update({
@@ -423,6 +510,10 @@ When the user approves flows and wants to start testing, use the start_test_run 
           .eq('id', testRun.id)
 
         return { success: false, error: `Failed to trigger test execution: ${String(error)}` }
+      }
+      } catch (err) {
+        logChatTool('error', 'chat_tool_start_test_run_exception', { err })
+        throw err
       }
     },
     {
@@ -461,6 +552,9 @@ When the user approves flows and wants to start testing, use the start_test_run 
         ...(langsmithStreamOpts
           ? { providerOptions: { langsmith: langsmithStreamOpts } }
           : {}),
+        onError: ({ error }) => {
+          logChatTool('error', 'chat_stream_text_error', { err: error })
+        },
         tools: {
           generate_flow_proposals: tool({
             description:
@@ -489,27 +583,58 @@ When the user approves flows and wants to start testing, use the start_test_run 
           }),
         },
         stopWhen: stepCountIs(3),
-        onFinish: async ({ text }) => {
-          if (text) {
-            await serviceClient.from('chat_messages').insert({
-              session_id: session.id,
-              role: 'assistant',
-              content: text,
-            })
-          } else if (flowProposalInsertError) {
-            await serviceClient.from('chat_messages').insert({
-              session_id: session.id,
-              role: 'assistant',
-              content: `I couldn't save your flow proposals (${flowProposalInsertError}). Please try sending your message again, or refresh the page.`,
-            })
-          }
+        onFinish: async ({ text, finishReason }) => {
+          try {
+            if (finishReason && finishReason !== 'stop') {
+              logChatTool('warn', 'chat_stream_finish_non_stop', { finishReason })
+            }
+            if (text) {
+              const { error: assistantMsgErr } = await serviceClient.from('chat_messages').insert({
+                session_id: session.id,
+                role: 'assistant',
+                content: text,
+              })
+              if (assistantMsgErr) {
+                logChatTool('error', 'chat_assistant_message_persist_failed', {
+                  err: assistantMsgErr,
+                })
+              }
+            } else if (flowProposalInsertError) {
+              const { error: fallbackErr } = await serviceClient.from('chat_messages').insert({
+                session_id: session.id,
+                role: 'assistant',
+                content: `I couldn't save your flow proposals (${flowProposalInsertError}). Please try sending your message again, or refresh the page.`,
+              })
+              if (fallbackErr) {
+                logChatTool('error', 'chat_flow_proposals_fallback_message_failed', {
+                  err: fallbackErr,
+                })
+              }
+            }
 
-          await maybeSummarizeOlderMessages(serviceClient, session.id)
-          await setSessionStatus(serviceClient, session.id, 'idle')
+            try {
+              await maybeSummarizeOlderMessages(serviceClient, session.id)
+            } catch (err) {
+              logChatTool('error', 'chat_summarize_messages_failed', { err })
+            }
+            await setSessionStatus(serviceClient, session.id, 'idle')
+          } catch (err) {
+            logChatTool('error', 'chat_on_finish_failed', { err })
+            try {
+              await setSessionStatus(serviceClient, session.id, 'error')
+            } catch (statusErr) {
+              logChatTool('error', 'chat_on_finish_set_session_error_failed', { err: statusErr })
+            }
+          }
         },
       })
 
-      return result.toUIMessageStreamResponse()
+      return result.toUIMessageStreamResponse({
+        onError: (error) => {
+          logChatTool('error', 'chat_ui_message_stream_error', { err: error })
+          return error instanceof Error ? error.message : 'Chat stream error'
+        },
+      })
     },
     {
       name: 'verona_chat_turn',
@@ -527,4 +652,27 @@ When the user approves flows and wants to start testing, use the start_test_run 
   )
 
   return runChatTurn()
+  } catch (err) {
+    chatServerLog('error', 'chat_post_unhandled_exception', {
+      err,
+      projectId: logProjectId || undefined,
+      sessionId: logSessionId || undefined,
+      userId: logUserId || undefined,
+    })
+    if (logSessionId) {
+      try {
+        const errorPathClient = createServiceRoleClient()
+        await setSessionStatus(errorPathClient, logSessionId, 'error')
+      } catch (statusErr) {
+        chatServerLog('error', 'chat_post_set_session_error_failed', {
+          err: statusErr,
+          sessionId: logSessionId,
+        })
+      }
+    }
+    return new Response(
+      JSON.stringify({ error: 'Chat request failed. Please try again.' }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
 }
