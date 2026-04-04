@@ -1,16 +1,18 @@
 """
 Agentic test executor — ReAct loop powered by Claude Opus (outer reasoning)
-and Stagehand agent.execute() (inner browser actions).
+and Stagehand session.execute() (inner browser actions via Stagehand v3 API).
 
 Architecture:
   Outer loop (Claude Opus):  observe screenshot → reason → pick tool → repeat
-  Inner loop (Stagehand/Gemini CU):  agent.execute(instruction) performs
+  Inner loop (Stagehand v3): session.execute(instruction) performs
       multi-step browser interactions within a single action
 """
 import asyncio
 import base64
 import json
 import os
+import time
+import traceback
 from datetime import datetime, timezone
 from typing import Any
 
@@ -25,23 +27,23 @@ from runner.prompts import (
 )
 
 
-async def capture_page_state(stagehand) -> dict:
-    """Capture a snapshot of the current browser page state."""
+async def capture_page_state(page) -> dict:
+    """Capture a snapshot of the current browser page state via Playwright."""
     url = ""
     screenshot_b64 = ""
     try:
-        url = stagehand.page.url
+        url = page.url
     except Exception:
         pass
 
     try:
-        raw = await stagehand.page.screenshot(type="png")
+        raw = await page.screenshot(type="png")
         if isinstance(raw, bytes):
             screenshot_b64 = base64.b64encode(raw).decode("ascii")
         elif isinstance(raw, str):
             screenshot_b64 = raw
     except Exception as e:
-        print(f"Warning: screenshot capture failed: {e}")
+        print(f"[EXECUTOR] WARNING: screenshot capture failed: {type(e).__name__}: {e}")
 
     return {
         "url": url,
@@ -50,8 +52,8 @@ async def capture_page_state(stagehand) -> dict:
     }
 
 
-async def execute_browser_action(stagehand, instruction: str) -> dict:
-    """Run a single instruction through the Stagehand computer-use agent.
+async def execute_browser_action(session, page, instruction: str) -> dict:
+    """Run a single instruction through the Stagehand v3 execute (agent) endpoint.
 
     Returns a dict with the execution outcome and post-action page state.
     """
@@ -59,20 +61,36 @@ async def execute_browser_action(stagehand, instruction: str) -> dict:
     error: str | None = None
     agent_output: str | None = None
 
+    t0 = time.time()
     try:
-        agent = stagehand.agent(
-            model=STAGEHAND_AGENT_MODEL,
-            system_prompt="You are a QA tester executing test steps on a web application. Be precise and wait for elements to load.",
+        response = await session.execute(
+            execute_options={
+                "instruction": instruction,
+                "max_steps": 10,
+            },
+            agent_config={
+                "model": STAGEHAND_AGENT_MODEL,
+                "system_prompt": "You are a QA tester executing test steps on a web application. Be precise and wait for elements to load before interacting.",
+            },
+            timeout=120.0,
         )
-        result = await agent.execute(instruction, max_steps=10)
-        if result is not None:
-            agent_output = str(result)
+        elapsed = time.time() - t0
+        result_data = response.data.result
+        agent_output = result_data.message
+        if not result_data.success:
+            success = False
+            error = result_data.message or "Agent execute reported failure"
+            print(f"[EXECUTOR]     execute returned success=false ({elapsed:.1f}s): {error}")
+        else:
+            print(f"[EXECUTOR]     execute succeeded ({elapsed:.1f}s): {(agent_output or '')[:120]}")
     except Exception as e:
+        elapsed = time.time() - t0
         success = False
         error = str(e)
+        print(f"[EXECUTOR]     execute EXCEPTION ({elapsed:.1f}s): {type(e).__name__}: {e}")
 
     await asyncio.sleep(1)
-    page_state = await capture_page_state(stagehand)
+    page_state = await capture_page_state(page)
 
     return {
         "success": success,
@@ -82,16 +100,30 @@ async def execute_browser_action(stagehand, instruction: str) -> dict:
     }
 
 
-async def execute_observe_dom(stagehand, query: str) -> dict:
-    """Run a DOM-level observation via Stagehand.observe()."""
+async def execute_observe_dom(session, query: str) -> dict:
+    """Run a DOM-level observation via Stagehand v3 observe endpoint."""
+    t0 = time.time()
     try:
-        observations = await stagehand.observe(query)
-        found = observations is not None and len(observations) > 0
+        response = await session.observe(instruction=query)
+        elapsed = time.time() - t0
+        results = response.data.result
+        found = bool(results and len(results) > 0)
+        if found:
+            observations_str = str([
+                {"description": r.description, "selector": r.selector}
+                for r in results
+            ])
+            print(f"[EXECUTOR]     observe found {len(results)} element(s) ({elapsed:.1f}s)")
+        else:
+            observations_str = "No matching elements found."
+            print(f"[EXECUTOR]     observe found 0 elements ({elapsed:.1f}s)")
         return {
             "found": found,
-            "observations": str(observations) if observations else "No matching elements found.",
+            "observations": observations_str,
         }
     except Exception as e:
+        elapsed = time.time() - t0
+        print(f"[EXECUTOR]     observe EXCEPTION ({elapsed:.1f}s): {type(e).__name__}: {e}")
         return {
             "found": False,
             "observations": f"Observation failed: {e}",
@@ -99,12 +131,7 @@ async def execute_observe_dom(stagehand, query: str) -> dict:
 
 
 def _strip_images_from_message(msg: dict) -> dict:
-    """Return a copy of *msg* with image blocks replaced by text placeholders.
-
-    This preserves the message structure (and therefore role alternation)
-    while reducing the token cost of older turns that no longer need
-    full-resolution screenshots.
-    """
+    """Return a copy of *msg* with image blocks replaced by text placeholders."""
     content = msg.get("content")
     if content is None or isinstance(content, str):
         return msg
@@ -140,13 +167,7 @@ def _compress_messages(
     messages: list[dict],
     keep_recent_images: int = 8,
 ) -> list[dict]:
-    """Strip screenshot images from older messages to manage context size.
-
-    Messages are never removed or reordered — only image data in older
-    turns is replaced with a text placeholder.  This keeps the full
-    conversation history for reasoning while staying within the context
-    window.
-    """
+    """Strip screenshot images from older messages to manage context size."""
     if len(messages) <= keep_recent_images:
         return messages
 
@@ -158,21 +179,23 @@ def _compress_messages(
 
 
 async def execute_template(
-    stagehand,
+    session,
+    page,
     template: dict,
     project: dict,
     integrations: dict[str, dict] | None = None,
 ) -> dict:
     """Execute a test template using the agentic ReAct loop.
 
-    Returns a rich result dict containing:
-      - passed: bool
-      - summary: str
-      - bugs_found: list[dict]
-      - actions: list[dict]          (full trace of every action taken)
-      - screenshot_urls: list[str]   (populated later by caller uploading to storage)
-      - screenshots: list[dict]      (raw screenshot data for upload)
+    Args:
+        session: Stagehand v3 AsyncSession (for AI-powered act/observe/execute)
+        page: Playwright Page (for screenshots and direct navigation)
+        template: Test template dict from DB
+        project: Project dict from DB
+        integrations: Integration configs
     """
+    tpl_name = template.get("name", "unnamed")
+    app_url = project.get("app_url", "?")
     steps = template.get("steps", [])
     if isinstance(steps, str):
         steps = json.loads(steps)
@@ -180,10 +203,20 @@ async def execute_template(
 
     max_iterations = max(len(steps) * 10, 10)
 
+    print(f"[EXECUTOR] execute_template — {tpl_name!r}")
+    print(f"[EXECUTOR]   app_url        = {app_url}")
+    print(f"[EXECUTOR]   steps          = {len(steps)}")
+    print(f"[EXECUTOR]   max_iterations = {max_iterations}")
+    print(f"[EXECUTOR]   outer model    = {OUTER_AGENT_MODEL}")
+    print(f"[EXECUTOR]   inner model    = {STAGEHAND_AGENT_MODEL}")
+
     anthropic = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
     system_prompt = build_system_prompt(template, project, integrations)
 
-    initial_state = await capture_page_state(stagehand)
+    print("[EXECUTOR] Capturing initial page state...")
+    initial_state = await capture_page_state(page)
+    print(f"[EXECUTOR]   initial url        = {initial_state['url']}")
+    print(f"[EXECUTOR]   has screenshot     = {bool(initial_state['screenshot_base64'])}")
 
     initial_content: list[dict] = [
         {"type": "text", "text": (
@@ -220,10 +253,16 @@ async def execute_template(
             "timestamp": initial_state["timestamp"],
         })
 
+    loop_t0 = time.time()
+
     for iteration in range(max_iterations):
         iterations_used = iteration + 1
         messages = _compress_messages(messages, keep_recent_images=12)
 
+        print(f"[EXECUTOR] --- Iteration {iteration}/{max_iterations - 1} (messages={len(messages)}) ---")
+
+        # Call outer agent (Claude Opus)
+        llm_t0 = time.time()
         try:
             response = anthropic.messages.create(
                 model=OUTER_AGENT_MODEL,
@@ -231,8 +270,12 @@ async def execute_template(
                 tools=TOOLS,
                 messages=messages,
             )
+            llm_elapsed = time.time() - llm_t0
+            print(f"[EXECUTOR]   LLM call: {llm_elapsed:.1f}s  stop_reason={response.stop_reason}  "
+                  f"usage=in:{response.usage.input_tokens}/out:{response.usage.output_tokens}")
         except Exception as e:
-            print(f"Error: outer agent LLM call failed on iteration {iteration}: {e}")
+            llm_elapsed = time.time() - llm_t0
+            print(f"[EXECUTOR]   LLM EXCEPTION ({llm_elapsed:.1f}s): {type(e).__name__}: {e}")
             actions.append({
                 "iteration": iteration,
                 "tool": "llm_error",
@@ -241,8 +284,6 @@ async def execute_template(
             })
             break
 
-        # response.content is a list of Anthropic ContentBlock objects;
-        # the SDK handles serialization when we pass them back in messages.
         assistant_content = response.content
         messages.append({"role": "assistant", "content": assistant_content})
 
@@ -252,11 +293,13 @@ async def execute_template(
                 if hasattr(b, "text")
             ]
             test_summary = " ".join(text_parts) if text_parts else "Agent ended without explicit completion."
+            print(f"[EXECUTOR]   Agent ended turn (no tool call). Summary preview: {test_summary[:150]}")
             completed = True
             break
 
         tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
         if not tool_use_blocks:
+            print("[EXECUTOR]   No tool_use blocks and stop_reason != end_turn — treating as completed")
             completed = True
             break
 
@@ -276,9 +319,9 @@ async def execute_template(
 
             if tool_name == "browser_action":
                 instruction = tool_input.get("instruction", "")
-                print(f"  [iter {iteration}] browser_action: {instruction[:100]}")
+                print(f"[EXECUTOR]   tool: browser_action — {instruction[:120]}")
 
-                result = await execute_browser_action(stagehand, instruction)
+                result = await execute_browser_action(session, page, instruction)
                 action_record["success"] = result["success"]
                 action_record["error"] = result["error"]
                 action_record["url_after"] = result["page_state"]["url"]
@@ -311,9 +354,9 @@ async def execute_template(
 
             elif tool_name == "observe_dom":
                 query = tool_input.get("query", "")
-                print(f"  [iter {iteration}] observe_dom: {query[:100]}")
+                print(f"[EXECUTOR]   tool: observe_dom — {query[:120]}")
 
-                result = await execute_observe_dom(stagehand, query)
+                result = await execute_observe_dom(session, query)
                 action_record["found"] = result["found"]
                 action_record["observations"] = result["observations"][:500]
 
@@ -328,7 +371,10 @@ async def execute_template(
                 test_summary = tool_input.get("summary", "")
                 bugs_found = tool_input.get("bugs_found", [])
 
-                print(f"  [iter {iteration}] complete_test: passed={test_passed}")
+                print(f"[EXECUTOR]   tool: complete_test — passed={test_passed}  bugs={len(bugs_found)}")
+                print(f"[EXECUTOR]     summary: {test_summary[:200]}")
+                for bug in bugs_found:
+                    print(f"[EXECUTOR]     bug: [{bug.get('severity', '?')}] {bug.get('description', '?')[:120]}")
 
                 tool_results.append({
                     "type": "tool_result",
@@ -342,6 +388,7 @@ async def execute_template(
                 break
 
             else:
+                print(f"[EXECUTOR]   tool: UNKNOWN — {tool_name}")
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tool_id,
@@ -356,8 +403,20 @@ async def execute_template(
 
         messages.append({"role": "user", "content": tool_results})
 
+    loop_elapsed = time.time() - loop_t0
+
     if not completed:
         test_summary = f"Test execution hit the iteration limit ({max_iterations}). The test flow may be incomplete."
+        print(f"[EXECUTOR] WARNING: Hit iteration limit ({max_iterations})")
+
+    print(f"[EXECUTOR] execute_template — finished")
+    print(f"[EXECUTOR]   loop time    = {loop_elapsed:.1f}s")
+    print(f"[EXECUTOR]   iterations   = {iterations_used}/{max_iterations}")
+    print(f"[EXECUTOR]   passed       = {test_passed}")
+    print(f"[EXECUTOR]   completed    = {completed}")
+    print(f"[EXECUTOR]   actions      = {len(actions)}")
+    print(f"[EXECUTOR]   screenshots  = {len(screenshots)}")
+    print(f"[EXECUTOR]   bugs         = {len(bugs_found)}")
 
     return {
         "passed": test_passed,

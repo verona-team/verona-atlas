@@ -1,4 +1,4 @@
-stagehand
+stagehand>=3.19,<4
 supabase
 anthropic
 agentmail>=0.4
@@ -7,3 +7,4 @@ pydantic
 pyjwt
 cryptography
 browserbase
+playwright
