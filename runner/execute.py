@@ -126,7 +126,7 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
                 results.append(result)
             except Exception as e:
                 tpl_elapsed = time.time() - tpl_t0
-                duration_ms = int((datetime.now(timezone.utc) - datetime.now(timezone.utc)).total_seconds() * 1000)
+                duration_ms = int(tpl_elapsed * 1000)
                 print(f"[PIPELINE] Template {idx + 1}/{len(templates)} EXCEPTION after {tpl_elapsed:.1f}s: {type(e).__name__}: {e}")
                 print(f"[PIPELINE]   traceback:\n{traceback.format_exc()}")
                 error_result = {
