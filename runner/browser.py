@@ -20,6 +20,11 @@ STAGEHAND_SESSION_MODEL = "anthropic/claude-sonnet-4-6"
 async def create_stagehand_session() -> dict[str, Any]:
     """Create a Stagehand session backed by a Browserbase cloud browser.
 
+    On partial failure (e.g. Playwright CDP connection fails after the
+    Browserbase session is already running), all previously-allocated
+    resources are torn down before re-raising so we never leak a paid
+    cloud browser session.
+
     Returns a dict with:
       - client:     AsyncStagehand API client
       - session:    AsyncSession bound to the Browserbase session
@@ -41,25 +46,36 @@ async def create_stagehand_session() -> dict[str, Any]:
 
     print(f"Creating Stagehand client (model: {STAGEHAND_SESSION_MODEL})...")
 
-    client = AsyncStagehand(
-        browserbase_api_key=bb_api_key,
-        browserbase_project_id=bb_project_id,
-        model_api_key=model_api_key,
-    )
+    client: AsyncStagehand | None = None
+    session: Any = None
+    pw: Any = None
+    browser: Any = None
 
-    print("Starting Stagehand session...")
-    session = await client.sessions.start(model_name=STAGEHAND_SESSION_MODEL)
-    session_id = session.id
-    print(f"Stagehand session started: {session_id}")
-    print(f"Browserbase live view: https://www.browserbase.com/sessions/{session_id}")
+    try:
+        client = AsyncStagehand(
+            browserbase_api_key=bb_api_key,
+            browserbase_project_id=bb_project_id,
+            model_api_key=model_api_key,
+        )
 
-    print("Connecting Playwright to Browserbase session via CDP...")
-    pw = await async_playwright().start()
-    cdp_url = f"wss://connect.browserbase.com?apiKey={bb_api_key}&sessionId={session_id}"
-    browser = await pw.chromium.connect_over_cdp(cdp_url)
-    context = browser.contexts[0]
-    page = context.pages[0] if context.pages else await context.new_page()
-    print("Playwright connected successfully")
+        print("Starting Stagehand session...")
+        session = await client.sessions.start(model_name=STAGEHAND_SESSION_MODEL)
+        session_id = session.id
+        print(f"Stagehand session started: {session_id}")
+        print(f"Browserbase live view: https://www.browserbase.com/sessions/{session_id}")
+
+        print("Connecting Playwright to Browserbase session via CDP...")
+        pw = await async_playwright().start()
+        cdp_url = f"wss://connect.browserbase.com?apiKey={bb_api_key}&sessionId={session_id}"
+        browser = await pw.chromium.connect_over_cdp(cdp_url)
+        context = browser.contexts[0]
+        page = context.pages[0] if context.pages else await context.new_page()
+        print("Playwright connected successfully")
+
+    except BaseException:
+        print("Session creation failed — cleaning up partial resources...")
+        await _cleanup_partial(client, session, browser, pw)
+        raise
 
     return {
         "client": client,
@@ -71,26 +87,44 @@ async def create_stagehand_session() -> dict[str, Any]:
     }
 
 
-async def cleanup_session(
-    client: AsyncStagehand,
+async def _cleanup_partial(
+    client: AsyncStagehand | None,
     session: Any,
     browser: Any,
     playwright_inst: Any,
 ) -> None:
-    """Tear down Playwright + Stagehand session resources."""
-    try:
-        await browser.close()
-    except Exception:
-        pass
-    try:
-        await playwright_inst.stop()
-    except Exception:
-        pass
-    try:
-        await session.end()
-    except Exception:
-        pass
-    try:
-        await client.close()
-    except Exception:
-        pass
+    """Best-effort teardown of whatever resources were allocated so far."""
+    if browser is not None:
+        try:
+            await browser.close()
+        except Exception:
+            pass
+    if playwright_inst is not None:
+        try:
+            await playwright_inst.stop()
+        except Exception:
+            pass
+    if session is not None:
+        try:
+            await session.end()
+        except Exception:
+            pass
+    if client is not None:
+        try:
+            await client.close()
+        except Exception:
+            pass
+
+
+async def cleanup_session(
+    client: AsyncStagehand | None,
+    session: Any,
+    browser: Any,
+    playwright_inst: Any,
+) -> None:
+    """Tear down Playwright + Stagehand session resources.
+
+    Accepts None for any argument so callers don't need to guard against
+    partial initialisation.
+    """
+    await _cleanup_partial(client, session, browser, playwright_inst)

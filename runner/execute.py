@@ -186,17 +186,23 @@ async def execute_single_template(supabase, project, template, test_run_id: str,
     except Exception as e:
         print(f"Warning: pre-test observability snapshot failed: {e}")
 
-    session_ctx = await create_stagehand_session()
-    client = session_ctx["client"]
-    session = session_ctx["session"]
-    page = session_ctx["page"]
-    playwright_inst = session_ctx["playwright"]
-    browser = session_ctx["browser"]
-    browserbase_session_id = session_ctx["session_id"]
-
-    print(f"Browserbase session started: {browserbase_session_id}")
+    client = None
+    session = None
+    page = None
+    playwright_inst = None
+    browser = None
 
     try:
+        session_ctx = await create_stagehand_session()
+        client = session_ctx["client"]
+        session = session_ctx["session"]
+        page = session_ctx["page"]
+        playwright_inst = session_ctx["playwright"]
+        browser = session_ctx["browser"]
+        browserbase_session_id = session_ctx["session_id"]
+
+        print(f"Browserbase session started: {browserbase_session_id}")
+
         if project.get("auth_email") and project.get("auth_password_encrypted"):
             password = decrypt(project["auth_password_encrypted"])
             await authenticate(page, session, project, password)
