@@ -266,6 +266,7 @@ async def execute_template(
         try:
             response = anthropic.messages.create(
                 model=OUTER_AGENT_MODEL,
+                max_tokens=128000,
                 system=system_prompt,
                 tools=TOOLS,
                 messages=messages,
