@@ -356,6 +356,7 @@ When the user approves flows and wants to start testing, use the start_test_run 
       }
 
       const createdTemplateIds: string[] = []
+      const templateInsertErrors: string[] = []
       for (const flow of approvedFlows) {
         const { data: template, error } = await serviceClient
           .from('test_templates')
@@ -369,11 +370,21 @@ When the user approves flows and wants to start testing, use the start_test_run 
           .select('id')
           .single()
 
-        if (template) {
-          createdTemplateIds.push(template.id)
-        }
-        if (error) {
+        if (error || !template) {
           console.error('Failed to create template:', error)
+          templateInsertErrors.push(error?.message ?? 'Unknown error saving template')
+          continue
+        }
+        createdTemplateIds.push(template.id)
+      }
+
+      if (createdTemplateIds.length !== approvedFlows.length) {
+        return {
+          success: false,
+          error:
+            templateInsertErrors.length > 0
+              ? `Could not save approved flows to the database, so cloud browsers were not started. ${templateInsertErrors.join(' ')}`
+              : 'Could not save approved flows to the database, so cloud browsers were not started.',
         }
       }
 
@@ -383,6 +394,7 @@ When the user approves flows and wants to start testing, use the start_test_run 
           project_id: projectId,
           trigger: 'chat',
           status: 'pending',
+          trigger_ref: JSON.stringify({ template_ids: createdTemplateIds }),
         })
         .select()
         .single()
