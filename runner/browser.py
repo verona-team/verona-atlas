@@ -4,6 +4,8 @@ Stagehand v3 + Browserbase + Playwright session management.
 The Stagehand Python SDK v3 is a pure API client (BYOB — Bring Your Own Browser).
 We create a Stagehand session to get a Browserbase session ID, then connect
 Playwright to that session over CDP for direct page interaction.
+
+Migration reference: https://docs.stagehand.dev/v3/migrations/python
 """
 import os
 from typing import Any
@@ -30,20 +32,34 @@ async def create_stagehand_session() -> dict[str, Any]:
     bb_project_id = os.environ["BROWSERBASE_PROJECT_ID"]
     model_api_key = os.environ.get("MODEL_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
 
+    if not bb_api_key:
+        raise ValueError("BROWSERBASE_API_KEY environment variable is required")
+    if not bb_project_id:
+        raise ValueError("BROWSERBASE_PROJECT_ID environment variable is required")
+    if not model_api_key:
+        raise ValueError("MODEL_API_KEY or ANTHROPIC_API_KEY environment variable is required for Stagehand")
+
+    print(f"Creating Stagehand client (model: {STAGEHAND_SESSION_MODEL})...")
+
     client = AsyncStagehand(
         browserbase_api_key=bb_api_key,
         browserbase_project_id=bb_project_id,
         model_api_key=model_api_key,
     )
 
+    print("Starting Stagehand session...")
     session = await client.sessions.start(model_name=STAGEHAND_SESSION_MODEL)
     session_id = session.id
+    print(f"Stagehand session started: {session_id}")
+    print(f"Browserbase live view: https://www.browserbase.com/sessions/{session_id}")
 
+    print("Connecting Playwright to Browserbase session via CDP...")
     pw = await async_playwright().start()
     cdp_url = f"wss://connect.browserbase.com?apiKey={bb_api_key}&sessionId={session_id}"
     browser = await pw.chromium.connect_over_cdp(cdp_url)
     context = browser.contexts[0]
     page = context.pages[0] if context.pages else await context.new_page()
+    print("Playwright connected successfully")
 
     return {
         "client": client,

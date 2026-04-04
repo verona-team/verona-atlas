@@ -46,7 +46,7 @@ async def authenticate(page, session, project: dict, password: str):
         instruction="Is there a verification code input, 2FA input, OTP input, or any multi-factor authentication prompt?",
     )
     
-    results = observe_response.data.result if hasattr(observe_response, "data") else []
+    results = observe_response.data.result
     if results and len(results) > 0:
         await handle_2fa(session, project)
 

@@ -9,7 +9,7 @@ app = modal.App("atlas-runner")
 runner_image = (
     modal.Image.debian_slim(python_version="3.13")
     .pip_install(
-        "stagehand",
+        "stagehand>=3.19,<4",
         "supabase",
         "anthropic",
         "agentmail>=0.4",

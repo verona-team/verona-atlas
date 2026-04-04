@@ -60,21 +60,22 @@ async def execute_browser_action(session, page, instruction: str) -> dict:
     agent_output: str | None = None
 
     try:
-        result = await session.execute(
+        response = await session.execute(
             execute_options={
                 "instruction": instruction,
                 "max_steps": 10,
             },
             agent_config={
                 "model": STAGEHAND_AGENT_MODEL,
+                "system_prompt": "You are a QA tester executing test steps on a web application. Be precise and wait for elements to load before interacting.",
             },
             timeout=120.0,
         )
-        if result is not None:
-            if hasattr(result, "data") and hasattr(result.data, "result"):
-                agent_output = result.data.result.message
-            else:
-                agent_output = str(result)
+        result_data = response.data.result
+        agent_output = result_data.message
+        if not result_data.success:
+            success = False
+            error = result_data.message or "Agent execute reported failure"
     except Exception as e:
         success = False
         error = str(e)
@@ -94,11 +95,18 @@ async def execute_observe_dom(session, query: str) -> dict:
     """Run a DOM-level observation via Stagehand v3 observe endpoint."""
     try:
         response = await session.observe(instruction=query)
-        results = response.data.result if hasattr(response, "data") else []
-        found = results is not None and len(results) > 0
+        results = response.data.result
+        found = bool(results and len(results) > 0)
+        if found:
+            observations_str = str([
+                {"description": r.description, "selector": r.selector}
+                for r in results
+            ])
+        else:
+            observations_str = "No matching elements found."
         return {
             "found": found,
-            "observations": str([r.to_dict() for r in results]) if results else "No matching elements found.",
+            "observations": observations_str,
         }
     except Exception as e:
         return {
