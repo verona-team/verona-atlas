@@ -7,8 +7,10 @@ import { DefaultChatTransport } from 'ai'
 import { Send, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { MessageBubble } from './message-bubble'
+import { AgentActionsFeed } from './agent-actions-feed'
 import type { Json, ChatMessage } from '@/lib/supabase/types'
 import { createClient } from '@/lib/supabase/client'
+import type { AgentActionsMessage, AgentActionData } from '@/lib/chat/agent-actions'
 
 function getTextFromParts(parts: Array<{ type: string; text?: string }>): string {
   return parts
@@ -104,6 +106,7 @@ export function ChatInterface({
   const [input, setInput] = useState('')
   const [flowStatesOverride, setFlowStatesOverride] = useState<Record<string, 'pending' | 'approved' | 'rejected'> | null>(null)
   const [dbMessages, setDbMessages] = useState<ChatMessage[]>(initialMessages)
+  const [agentActions, setAgentActions] = useState<AgentActionData[]>([])
   /** Bumps on bootstrap failure so we retry auto-send (see onError). */
   const [bootstrapNonce, setBootstrapNonce] = useState(0)
   const lastBootstrapKeyRef = useRef<string | null>(null)
@@ -165,13 +168,32 @@ export function ChatInterface({
     [projectId, router],
   )
 
-  const { messages: streamMessages, sendMessage, status } = useChat({
+  const { messages: streamMessages, sendMessage, status } = useChat<AgentActionsMessage>({
     id: `project-${projectId}`,
     transport: new DefaultChatTransport({
       api: '/api/chat',
       body: { projectId },
       fetch: chatFetch,
     }),
+    onData: (dataPart) => {
+      if (dataPart.type === 'data-agent-action') {
+        const action = dataPart.data as AgentActionData
+        setAgentActions((prev) => {
+          const idx = prev.findIndex((a) => a.actionId === action.actionId)
+          if (idx >= 0) {
+            const updated = [...prev]
+            updated[idx] = {
+              ...prev[idx],
+              ...action,
+              startedAt: prev[idx].startedAt || action.startedAt,
+              completedAt: action.completedAt ?? prev[idx].completedAt,
+            }
+            return updated
+          }
+          return [...prev, { ...action, startedAt: action.startedAt || Date.now() }]
+        })
+      }
+    },
     onError: (err) => {
       console.error('Chat request failed:', err)
       toast.error('Could not reach Verona. Check your connection and try again.')
@@ -297,6 +319,13 @@ export function ChatInterface({
     }
   }, [sessionId, computeSessionThinking])
 
+  useEffect(() => {
+    if (status === 'ready' && agentActions.length > 0) {
+      const timer = setTimeout(() => setAgentActions([]), 500)
+      return () => clearTimeout(timer)
+    }
+  }, [status, agentActions.length])
+
   // Realtime can miss events (tab backgrounded, reconnect gaps). Re-fetch after a response completes.
   useEffect(() => {
     if (status !== 'ready') return
@@ -356,7 +385,7 @@ export function ChatInterface({
 
   useEffect(() => {
     scrollPaneToBottomIfStuck()
-  }, [streamMessages, dbMessages, scrollPaneToBottomIfStuck])
+  }, [streamMessages, dbMessages, agentActions, scrollPaneToBottomIfStuck])
 
   /** Streamed text / async layout can grow the thread without a new React message row; keep pinned users aligned. */
   useEffect(() => {
@@ -524,7 +553,11 @@ export function ChatInterface({
           )
         })}
 
-        {isProcessing && (displayMessages.length === 0 || displayMessages[displayMessages.length - 1]?.role === 'user') && (
+        {isProcessing && agentActions.length > 0 && (
+          <AgentActionsFeed actions={agentActions} />
+        )}
+
+        {isProcessing && agentActions.length === 0 && (displayMessages.length === 0 || displayMessages[displayMessages.length - 1]?.role === 'user') && (
           <div className="flex items-center gap-3 text-base opacity-50">
             <Loader2 className="w-5 h-5 animate-spin" />
             <span>Verona is thinking...</span>

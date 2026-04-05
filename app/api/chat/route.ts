@@ -1,4 +1,11 @@
-import { convertToModelMessages, tool, stepCountIs, type UIMessage } from 'ai'
+import {
+  convertToModelMessages,
+  tool,
+  stepCountIs,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+  type UIMessage,
+} from 'ai'
 import { after } from 'next/server'
 import { z } from 'zod'
 import { traceable } from 'langsmith/traceable'
@@ -21,6 +28,7 @@ import { normalizeResearchReport } from '@/lib/research-agent/types'
 import { triggerTestRun } from '@/lib/modal'
 import { chatServerLog } from '@/lib/chat/server-log'
 import type { Json } from '@/lib/supabase/types'
+import type { AgentActionsMessage, ProgressCallback } from '@/lib/chat/agent-actions'
 
 export const maxDuration = 800
 
@@ -41,6 +49,7 @@ async function getOrRunResearch(
   projectId: string,
   appUrl: string,
   forceRefresh = false,
+  onProgress?: ProgressCallback,
 ): Promise<ResearchReport> {
   if (!forceRefresh) {
     const { data: session } = await serviceClient
@@ -54,7 +63,7 @@ async function getOrRunResearch(
     }
   }
 
-  const report = await runResearchAgent(serviceClient, projectId, appUrl)
+  const report = await runResearchAgent(serviceClient, projectId, appUrl, onProgress)
 
   await serviceClient
     .from('chat_sessions')
@@ -134,9 +143,6 @@ export async function POST(request: Request) {
       await setSessionStatus(serviceClient, session.id, 'idle')
     })
 
-  /** Set when flow proposal DB insert fails so onFinish can persist a visible error. */
-  let flowProposalInsertError: string | null = null
-
   const lastMessage = uiMessages[uiMessages.length - 1]
   let lastUserText = ''
   if (lastMessage && lastMessage.role === 'user') {
@@ -177,43 +183,115 @@ export async function POST(request: Request) {
     )
   }
 
-  const report = await getOrRunResearch(serviceClient, session.id, projectId, project.app_url)
+  const modelMessages = await convertToModelMessages(uiMessages)
 
-  const { data: recentRuns } = await serviceClient
-    .from('test_runs')
-    .select('id, status, summary, created_at')
-    .eq('project_id', projectId)
-    .order('created_at', { ascending: false })
-    .limit(3)
-
-  const { data: proposalMessages } = await serviceClient
-    .from('chat_messages')
-    .select('metadata')
-    .eq('session_id', session.id)
-    .eq('metadata->>type', 'flow_proposals')
-    .order('created_at', { ascending: false })
-    .limit(1)
-
-  const latestProposals = proposalMessages?.[0]?.metadata as Record<string, Json> | null
-  const flowStates = (latestProposals?.flow_states ?? {}) as Record<string, string>
-
-  let flowStatusSummary = ''
-  if (latestProposals?.type === 'flow_proposals') {
-    const proposals = latestProposals.proposals as { flows: Array<{ id: string; name: string }> }
-    flowStatusSummary =
-      '\n\nCurrent flow states:\n' +
-      proposals.flows.map((f) => `- ${f.name}: ${flowStates[f.id] ?? 'pending'}`).join('\n')
+  const logChatTool = (
+    level: 'error' | 'warn' | 'info',
+    event: string,
+    extra?: Record<string, unknown>,
+  ) => {
+    chatServerLog(level, event, {
+      projectId,
+      sessionId: session.id,
+      userId: user.id,
+      ...extra,
+    })
   }
 
-  const findingsSummary =
-    report.findings.length > 0
-      ? report.findings.map((f) => `- [${f.source}/${f.severity}] ${f.details}`).join('\n')
-      : 'No specific findings from integrations.'
+  /** Set when flow proposal DB insert fails so onFinish can persist a visible error. */
+  let flowProposalInsertError: string | null = null
 
-  const ce = report.codebaseExploration
-  const codebaseBlock =
-    ce && ce.summary
-      ? `## Repository understanding (${ce.confidence} confidence)
+  const langsmithStreamOpts = lsClient
+    ? createLangSmithProviderOptions({
+        name: 'verona_chat_stream',
+        metadata: {
+          projectId,
+          sessionId: session.id,
+          userId: user.id,
+          projectName: project.name,
+        },
+        tags: ['verona', 'chat'],
+      })
+    : undefined
+
+  const stream = createUIMessageStream<AgentActionsMessage>({
+    execute: async ({ writer }) => {
+      const emitAction: ProgressCallback = (action) => {
+        writer.write({
+          type: 'data-agent-action',
+          id: action.actionId,
+          data: {
+            actionId: action.actionId,
+            integration: action.integration,
+            label: action.label,
+            detail: action.detail,
+            status: action.status,
+            startedAt: action.status === 'running' ? Date.now() : 0,
+            completedAt: action.status !== 'running' ? Date.now() : undefined,
+          },
+        })
+      }
+
+      emitAction({
+        actionId: 'research-init',
+        integration: 'system',
+        label: 'Starting project analysis',
+        detail: `Analyzing ${project.name} at ${project.app_url}`,
+        status: 'running',
+      })
+
+      const report = await getOrRunResearch(
+        serviceClient,
+        session.id,
+        projectId,
+        project.app_url,
+        false,
+        emitAction,
+      )
+
+      emitAction({
+        actionId: 'research-init',
+        integration: 'system',
+        label: 'Project analysis complete',
+        detail: `${report.findings.length} findings across ${report.integrationsCovered.length} integrations`,
+        status: 'complete',
+      })
+
+      const { data: recentRuns } = await serviceClient
+        .from('test_runs')
+        .select('id, status, summary, created_at')
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: false })
+        .limit(3)
+
+      const { data: proposalMessages } = await serviceClient
+        .from('chat_messages')
+        .select('metadata')
+        .eq('session_id', session.id)
+        .eq('metadata->>type', 'flow_proposals')
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      const latestProposals = proposalMessages?.[0]?.metadata as Record<string, Json> | null
+      const flowStates = (latestProposals?.flow_states ?? {}) as Record<string, string>
+
+      let flowStatusSummary = ''
+      if (latestProposals?.type === 'flow_proposals') {
+        const proposals = latestProposals.proposals as { flows: Array<{ id: string; name: string }> }
+        flowStatusSummary =
+          '\n\nCurrent flow states:\n' +
+          proposals.flows.map((f) => `- ${f.name}: ${flowStates[f.id] ?? 'pending'}`).join('\n')
+      }
+
+      const findingsSummary =
+        report.findings.length > 0
+          ? report.findings.map((f) => `- [${f.source}/${f.severity}] ${f.details}`).join('\n')
+          : 'No specific findings from integrations.'
+
+      const ce = report.codebaseExploration
+      const codebaseBlock =
+        ce && ce.summary
+          ? `## Repository understanding (${ce.confidence} confidence)
 ${ce.summary}
 
 **Architecture:** ${ce.architecture || '—'}
@@ -225,9 +303,9 @@ ${ce.inferredUserFlows.length ? ce.inferredUserFlows.map((f, i) => `${i + 1}. ${
 
 **Paths examined:** ${ce.keyPathsExamined.length ? ce.keyPathsExamined.slice(0, 40).join(', ') : '—'}
 ${ce.truncationWarnings.length ? `\n**Notes:** ${ce.truncationWarnings.join(' ')}` : ''}`
-      : ''
+          : ''
 
-  const systemPrompt = `You are Verona, an AI QA strategist that helps teams plan and execute UI testing for their web applications. You are assisting with the project "${project.name}" at ${project.app_url}.
+      const systemPrompt = `You are Verona, an AI QA strategist that helps teams plan and execute UI testing for their web applications. You are assisting with the project "${project.name}" at ${project.app_url}.
 
 # Research Report
 A deep analysis agent investigated the user's connected integrations and linked GitHub repository.
@@ -259,292 +337,292 @@ ${recentRuns && recentRuns.length > 0 ? `Recent test runs:\n${JSON.stringify(rec
 When the user wants to generate or refresh test flow proposals, use the generate_flow_proposals tool.
 When the user approves flows and wants to start testing, use the start_test_run tool.`
 
-  const modelMessages = await convertToModelMessages(uiMessages)
+      const executeGenerateFlowProposals = traceable(
+        async (input: { reason: string; refresh?: boolean }) => {
+          try {
+            const { refresh } = input
+            emitAction({
+              actionId: 'generate-flows',
+              integration: 'system',
+              label: 'Generating test flow proposals',
+              detail: refresh ? 'Refreshing research data first...' : 'Creating proposals from research findings',
+              status: 'running',
+            })
 
-  const logChatTool = (
-    level: 'error' | 'warn' | 'info',
-    event: string,
-    extra?: Record<string, unknown>,
-  ) => {
-    chatServerLog(level, event, {
-      projectId,
-      sessionId: session.id,
-      userId: user.id,
-      ...extra,
-    })
-  }
+            const currentReport = refresh
+              ? await getOrRunResearch(serviceClient, session.id, projectId, project.app_url, true, emitAction)
+              : report
 
-  const executeGenerateFlowProposals = traceable(
-    async (input: { reason: string; refresh?: boolean }) => {
-      try {
-        const { refresh } = input
-        const currentReport = refresh
-          ? await getOrRunResearch(serviceClient, session.id, projectId, project.app_url, true)
-          : report
+            const proposals = await generateFlowProposals(project.app_url, currentReport)
+            const { content, metadata, flows: persistedFlows } = serializeFlowsForMessage(proposals)
 
-        const proposals = await generateFlowProposals(project.app_url, currentReport)
-        const { content, metadata, flows: persistedFlows } = serializeFlowsForMessage(proposals)
+            const { error: insertError } = await serviceClient.from('chat_messages').insert({
+              session_id: session.id,
+              role: 'assistant',
+              content,
+              metadata: metadata as unknown as Json,
+            })
 
-        const { error: insertError } = await serviceClient.from('chat_messages').insert({
-          session_id: session.id,
-          role: 'assistant',
-          content,
-          metadata: metadata as unknown as Json,
-        })
+            if (insertError) {
+              flowProposalInsertError = insertError.message
+              logChatTool('error', 'chat_tool_flow_proposals_db_insert_failed', {
+                supabaseMessage: insertError.message,
+                flowCount: persistedFlows.length,
+              })
+              emitAction({
+                actionId: 'generate-flows',
+                integration: 'system',
+                label: 'Failed to save flow proposals',
+                detail: insertError.message,
+                status: 'error',
+              })
+              return {
+                success: false,
+                error: insertError.message,
+                analysis: proposals.analysis,
+                flowCount: persistedFlows.length,
+              }
+            }
 
-        if (insertError) {
-          flowProposalInsertError = insertError.message
-          logChatTool('error', 'chat_tool_flow_proposals_db_insert_failed', {
-            supabaseMessage: insertError.message,
-            flowCount: persistedFlows.length,
-          })
-          return {
-            success: false,
-            error: insertError.message,
-            analysis: proposals.analysis,
-            flowCount: persistedFlows.length,
+            logChatTool('info', 'chat_tool_flow_proposals_ok', { flowCount: persistedFlows.length })
+            emitAction({
+              actionId: 'generate-flows',
+              integration: 'system',
+              label: `Generated ${persistedFlows.length} test flow proposals`,
+              detail: persistedFlows.map(f => f.name).join(', '),
+              status: 'complete',
+            })
+
+            return {
+              success: true,
+              analysis: proposals.analysis,
+              flowCount: persistedFlows.length,
+              flows: persistedFlows.map((f) => ({
+                id: f.id,
+                name: f.name,
+                description: f.description,
+                rationale: f.rationale,
+                priority: f.priority,
+                stepCount: f.steps.length,
+              })),
+            }
+          } catch (err) {
+            logChatTool('error', 'chat_tool_flow_proposals_exception', { err })
+            throw err
           }
-        }
-
-        logChatTool('info', 'chat_tool_flow_proposals_ok', { flowCount: persistedFlows.length })
-
-        return {
-          success: true,
-          analysis: proposals.analysis,
-          flowCount: persistedFlows.length,
-          flows: persistedFlows.map((f) => ({
-            id: f.id,
-            name: f.name,
-            description: f.description,
-            rationale: f.rationale,
-            priority: f.priority,
-            stepCount: f.steps.length,
-          })),
-        }
-      } catch (err) {
-        logChatTool('error', 'chat_tool_flow_proposals_exception', { err })
-        throw err
-      }
-    },
-    {
-      name: 'chat_tool_generate_flow_proposals',
-      run_type: 'tool',
-      ...(lsClient ? { client: lsClient } : {}),
-      processInputs: (i) => ({ reason: i.reason, refresh: i.refresh }),
-      processOutputs: (o) => ({
-        success: o.success,
-        flowCount: o.flowCount,
-        flowNames: 'flows' in o && o.flows ? o.flows.map((f) => f.name) : undefined,
-        error: 'error' in o ? o.error : undefined,
-      }),
-    },
-  )
-
-  const executeStartTestRun = traceable(
-    async (input: { confirmation: string }) => {
-      void input.confirmation
-
-      try {
-      const { data: freshProposalRows } = await serviceClient
-        .from('chat_messages')
-        .select('metadata')
-        .eq('session_id', session.id)
-        .eq('metadata->>type', 'flow_proposals')
-        .order('created_at', { ascending: false })
-        .limit(1)
-
-      const freshMeta = freshProposalRows?.[0]?.metadata as Record<string, Json> | null
-      const flowStatesAtRun = (freshMeta?.flow_states ?? {}) as Record<string, string>
-      const approvedCountAtRun = Object.values(flowStatesAtRun).filter((s) => s === 'approved').length
-
-      if (approvedCountAtRun === 0) {
-        logChatTool('warn', 'chat_tool_start_test_run_no_approved_flows', {})
-        return {
-          success: false,
-          error: 'No approved flows. The user needs to approve at least one flow before starting.',
-        }
-      }
-
-      const proposals = freshMeta?.proposals as
-        | {
-            flows: Array<{
-              id: string
-              name: string
-              description: string
-              steps: Array<{
-                order: number
-                instruction: string
-                type: string
-                url?: string
-                expected?: string
-                timeout?: number
-              }>
-            }>
-          }
-        | undefined
-
-      if (!proposals?.flows?.length) {
-        logChatTool('warn', 'chat_tool_start_test_run_missing_proposals', {})
-        return {
-          success: false,
-          error:
-            'Could not find flow proposals for this session. Ask the user to generate proposals again, then approve flows before starting.',
-        }
-      }
-
-      const approvedFlows = proposals.flows.filter((f) => flowStatesAtRun[f.id] === 'approved')
-
-      if (approvedFlows.length === 0) {
-        logChatTool('warn', 'chat_tool_start_test_run_no_matching_approved', {})
-        return {
-          success: false,
-          error:
-            'No approved flows match the current proposal set. Regenerate flow proposals or approve flows again, then start testing.',
-        }
-      }
-
-      const createdTemplateIds: string[] = []
-      const templateInsertErrors: string[] = []
-      for (const flow of approvedFlows) {
-        const { data: template, error } = await serviceClient
-          .from('test_templates')
-          .insert({
-            project_id: projectId,
-            name: flow.name,
-            description: flow.description,
-            steps: flow.steps as unknown as Json,
-            source: 'chat_generated',
-          })
-          .select('id')
-          .single()
-
-        if (error || !template) {
-          logChatTool('error', 'chat_tool_start_test_run_template_insert_failed', {
-            flowName: flow.name,
-            flowId: flow.id,
-            supabaseMessage: error?.message,
-          })
-          templateInsertErrors.push(error?.message ?? 'Unknown error saving template')
-          continue
-        }
-        createdTemplateIds.push(template.id)
-      }
-
-      if (createdTemplateIds.length !== approvedFlows.length) {
-        logChatTool('error', 'chat_tool_start_test_run_partial_template_save', {
-          approvedCount: approvedFlows.length,
-          savedCount: createdTemplateIds.length,
-          templateInsertErrors,
-        })
-        return {
-          success: false,
-          error:
-            templateInsertErrors.length > 0
-              ? `Could not save approved flows to the database, so cloud browsers were not started. ${templateInsertErrors.join(' ')}`
-              : 'Could not save approved flows to the database, so cloud browsers were not started.',
-        }
-      }
-
-      const { data: testRun, error: runError } = await serviceClient
-        .from('test_runs')
-        .insert({
-          project_id: projectId,
-          trigger: 'chat',
-          status: 'pending',
-          trigger_ref: JSON.stringify({ template_ids: createdTemplateIds }),
-        })
-        .select()
-        .single()
-
-      if (runError || !testRun) {
-        logChatTool('error', 'chat_tool_start_test_run_db_insert_failed', {
-          supabaseMessage: runError?.message,
-        })
-        return { success: false, error: `Failed to create test run: ${runError?.message}` }
-      }
-
-      try {
-        const modalCallId = await triggerTestRun(testRun.id, projectId)
-        await serviceClient.from('test_runs').update({ modal_call_id: modalCallId }).eq('id', testRun.id)
-
-        const { error: startedMsgErr } = await serviceClient.from('chat_messages').insert({
-          session_id: session.id,
-          role: 'assistant',
-          content: `Testing started! I'm executing ${approvedFlows.length} approved flow(s) in cloud browsers. I'll update you on progress as results come in.`,
-          metadata: {
-            type: 'test_run_started',
-            run_id: testRun.id,
-            template_ids: createdTemplateIds,
-            flow_count: approvedFlows.length,
-          } as unknown as Json,
-        })
-        if (startedMsgErr) {
-          logChatTool('warn', 'chat_tool_start_test_run_started_message_failed', {
-            err: startedMsgErr,
-            runId: testRun.id,
-            modalCallId,
-          })
-        }
-
-        logChatTool('info', 'chat_tool_start_test_run_modal_spawned', {
-          runId: testRun.id,
-          modalCallId,
-          flowCount: approvedFlows.length,
-          templateIds: createdTemplateIds,
-        })
-
-        return {
-          success: true,
-          runId: testRun.id,
-          flowCount: approvedFlows.length,
-          templateIds: createdTemplateIds,
-        }
-      } catch (error) {
-        logChatTool('error', 'chat_tool_start_test_run_modal_failed', { err: error, runId: testRun.id })
-        await serviceClient
-          .from('test_runs')
-          .update({
-            status: 'failed',
-            summary: { error: 'Failed to trigger Modal', details: String(error) } as unknown as Json,
-          })
-          .eq('id', testRun.id)
-
-        return { success: false, error: `Failed to trigger test execution: ${String(error)}` }
-      }
-      } catch (err) {
-        logChatTool('error', 'chat_tool_start_test_run_exception', { err })
-        throw err
-      }
-    },
-    {
-      name: 'chat_tool_start_test_run',
-      run_type: 'tool',
-      ...(lsClient ? { client: lsClient } : {}),
-      processInputs: (i) => ({ confirmationPreview: i.confirmation?.slice(0, 200) }),
-      processOutputs: (o) => ({
-        success: o.success,
-        runId: 'runId' in o ? o.runId : undefined,
-        flowCount: 'flowCount' in o ? o.flowCount : undefined,
-        error: 'error' in o ? o.error : undefined,
-      }),
-    },
-  )
-
-  const langsmithStreamOpts = lsClient
-    ? createLangSmithProviderOptions({
-        name: 'verona_chat_stream',
-        metadata: {
-          projectId,
-          sessionId: session.id,
-          userId: user.id,
-          projectName: project.name,
         },
-        tags: ['verona', 'chat'],
-      })
-    : undefined
+        {
+          name: 'chat_tool_generate_flow_proposals',
+          run_type: 'tool',
+          ...(lsClient ? { client: lsClient } : {}),
+          processInputs: (i) => ({ reason: i.reason, refresh: i.refresh }),
+          processOutputs: (o) => ({
+            success: o.success,
+            flowCount: o.flowCount,
+            flowNames: 'flows' in o && o.flows ? o.flows.map((f) => f.name) : undefined,
+            error: 'error' in o ? o.error : undefined,
+          }),
+        },
+      )
 
-  const runChatTurn = traceable(
-    async () => {
+      const executeStartTestRun = traceable(
+        async (input: { confirmation: string }) => {
+          void input.confirmation
+
+          try {
+          const { data: freshProposalRows } = await serviceClient
+            .from('chat_messages')
+            .select('metadata')
+            .eq('session_id', session.id)
+            .eq('metadata->>type', 'flow_proposals')
+            .order('created_at', { ascending: false })
+            .limit(1)
+
+          const freshMeta = freshProposalRows?.[0]?.metadata as Record<string, Json> | null
+          const flowStatesAtRun = (freshMeta?.flow_states ?? {}) as Record<string, string>
+          const approvedCountAtRun = Object.values(flowStatesAtRun).filter((s) => s === 'approved').length
+
+          if (approvedCountAtRun === 0) {
+            logChatTool('warn', 'chat_tool_start_test_run_no_approved_flows', {})
+            return {
+              success: false,
+              error: 'No approved flows. The user needs to approve at least one flow before starting.',
+            }
+          }
+
+          const proposals = freshMeta?.proposals as
+            | {
+                flows: Array<{
+                  id: string
+                  name: string
+                  description: string
+                  steps: Array<{
+                    order: number
+                    instruction: string
+                    type: string
+                    url?: string
+                    expected?: string
+                    timeout?: number
+                  }>
+                }>
+              }
+            | undefined
+
+          if (!proposals?.flows?.length) {
+            logChatTool('warn', 'chat_tool_start_test_run_missing_proposals', {})
+            return {
+              success: false,
+              error:
+                'Could not find flow proposals for this session. Ask the user to generate proposals again, then approve flows before starting.',
+            }
+          }
+
+          const approvedFlows = proposals.flows.filter((f) => flowStatesAtRun[f.id] === 'approved')
+
+          if (approvedFlows.length === 0) {
+            logChatTool('warn', 'chat_tool_start_test_run_no_matching_approved', {})
+            return {
+              success: false,
+              error:
+                'No approved flows match the current proposal set. Regenerate flow proposals or approve flows again, then start testing.',
+            }
+          }
+
+          const createdTemplateIds: string[] = []
+          const templateInsertErrors: string[] = []
+          for (const flow of approvedFlows) {
+            const { data: template, error } = await serviceClient
+              .from('test_templates')
+              .insert({
+                project_id: projectId,
+                name: flow.name,
+                description: flow.description,
+                steps: flow.steps as unknown as Json,
+                source: 'chat_generated',
+              })
+              .select('id')
+              .single()
+
+            if (error || !template) {
+              logChatTool('error', 'chat_tool_start_test_run_template_insert_failed', {
+                flowName: flow.name,
+                flowId: flow.id,
+                supabaseMessage: error?.message,
+              })
+              templateInsertErrors.push(error?.message ?? 'Unknown error saving template')
+              continue
+            }
+            createdTemplateIds.push(template.id)
+          }
+
+          if (createdTemplateIds.length !== approvedFlows.length) {
+            logChatTool('error', 'chat_tool_start_test_run_partial_template_save', {
+              approvedCount: approvedFlows.length,
+              savedCount: createdTemplateIds.length,
+              templateInsertErrors,
+            })
+            return {
+              success: false,
+              error:
+                templateInsertErrors.length > 0
+                  ? `Could not save approved flows to the database, so cloud browsers were not started. ${templateInsertErrors.join(' ')}`
+                  : 'Could not save approved flows to the database, so cloud browsers were not started.',
+            }
+          }
+
+          const { data: testRun, error: runError } = await serviceClient
+            .from('test_runs')
+            .insert({
+              project_id: projectId,
+              trigger: 'chat',
+              status: 'pending',
+              trigger_ref: JSON.stringify({ template_ids: createdTemplateIds }),
+            })
+            .select()
+            .single()
+
+          if (runError || !testRun) {
+            logChatTool('error', 'chat_tool_start_test_run_db_insert_failed', {
+              supabaseMessage: runError?.message,
+            })
+            return { success: false, error: `Failed to create test run: ${runError?.message}` }
+          }
+
+          try {
+            const modalCallId = await triggerTestRun(testRun.id, projectId)
+            await serviceClient.from('test_runs').update({ modal_call_id: modalCallId }).eq('id', testRun.id)
+
+            const { error: startedMsgErr } = await serviceClient.from('chat_messages').insert({
+              session_id: session.id,
+              role: 'assistant',
+              content: `Testing started! I'm executing ${approvedFlows.length} approved flow(s) in cloud browsers. I'll update you on progress as results come in.`,
+              metadata: {
+                type: 'test_run_started',
+                run_id: testRun.id,
+                template_ids: createdTemplateIds,
+                flow_count: approvedFlows.length,
+              } as unknown as Json,
+            })
+            if (startedMsgErr) {
+              logChatTool('warn', 'chat_tool_start_test_run_started_message_failed', {
+                err: startedMsgErr,
+                runId: testRun.id,
+                modalCallId,
+              })
+            }
+
+            logChatTool('info', 'chat_tool_start_test_run_modal_spawned', {
+              runId: testRun.id,
+              modalCallId,
+              flowCount: approvedFlows.length,
+              templateIds: createdTemplateIds,
+            })
+
+            return {
+              success: true,
+              runId: testRun.id,
+              flowCount: approvedFlows.length,
+              templateIds: createdTemplateIds,
+            }
+          } catch (error) {
+            logChatTool('error', 'chat_tool_start_test_run_modal_failed', { err: error, runId: testRun.id })
+            await serviceClient
+              .from('test_runs')
+              .update({
+                status: 'failed',
+                summary: { error: 'Failed to trigger Modal', details: String(error) } as unknown as Json,
+              })
+              .eq('id', testRun.id)
+
+            return { success: false, error: `Failed to trigger test execution: ${String(error)}` }
+          }
+          } catch (err) {
+            logChatTool('error', 'chat_tool_start_test_run_exception', { err })
+            throw err
+          }
+        },
+        {
+          name: 'chat_tool_start_test_run',
+          run_type: 'tool',
+          ...(lsClient ? { client: lsClient } : {}),
+          processInputs: (i) => ({ confirmationPreview: i.confirmation?.slice(0, 200) }),
+          processOutputs: (o) => ({
+            success: o.success,
+            runId: 'runId' in o ? o.runId : undefined,
+            flowCount: 'flowCount' in o ? o.flowCount : undefined,
+            error: 'error' in o ? o.error : undefined,
+          }),
+        },
+      )
+
+      emitAction({
+        actionId: 'llm-response',
+        integration: 'system',
+        label: 'Generating response',
+        detail: 'Verona is analyzing findings and preparing recommendations',
+        status: 'running',
+      })
+
       const result = streamText({
         model,
         system: systemPrompt,
@@ -612,6 +690,13 @@ When the user approves flows and wants to start testing, use the start_test_run 
               }
             }
 
+            emitAction({
+              actionId: 'llm-response',
+              integration: 'system',
+              label: 'Response complete',
+              status: 'complete',
+            })
+
             try {
               await maybeSummarizeOlderMessages(serviceClient, session.id)
             } catch (err) {
@@ -629,29 +714,20 @@ When the user approves flows and wants to start testing, use the start_test_run 
         },
       })
 
-      return result.toUIMessageStreamResponse({
+      writer.merge(result.toUIMessageStream({
         onError: (error) => {
           logChatTool('error', 'chat_ui_message_stream_error', { err: error })
           return error instanceof Error ? error.message : 'Chat stream error'
         },
-      })
+      }))
     },
-    {
-      name: 'verona_chat_turn',
-      ...(lsClient ? { client: lsClient } : {}),
-      processInputs: () => ({
-        projectId,
-        sessionId: session.id,
-        userId: user.id,
-        lastUserMessagePreview: lastUserText.slice(0, 2000),
-        messageCount: uiMessages.length,
-        researchIntegrations: report.integrationsCovered,
-        researchFindingsCount: report.findings.length,
-      }),
+    onError: (error) => {
+      logChatTool('error', 'chat_ui_message_stream_outer_error', { err: error })
+      return error instanceof Error ? error.message : 'Chat stream error'
     },
-  )
+  })
 
-  return runChatTurn()
+  return createUIMessageStreamResponse({ stream })
   } catch (err) {
     chatServerLog('error', 'chat_post_unhandled_exception', {
       err,

@@ -18,6 +18,7 @@ import type {
   IntegrationResearchReport,
 } from './types'
 import { emptyCodebaseExploration } from './types'
+import type { ProgressCallback } from '@/lib/chat/agent-actions'
 
 export type { ResearchReport }
 
@@ -60,8 +61,9 @@ async function runIntegrationResearchTrack(input: {
   supabase: SupabaseClient<Database>
   projectId: string
   appUrl: string
+  onProgress?: ProgressCallback
 }): Promise<IntegrationResearchReport> {
-  const { supabase, projectId, appUrl } = input
+  const { supabase, projectId, appUrl, onProgress } = input
 
   const { data: integrations } = await supabase
     .from('integrations')
@@ -210,6 +212,7 @@ async function runIntegrationResearchTrack(input: {
       integrationDocs,
       integrationEnvVars: envVars,
       sandbox,
+      onProgress,
     })
   } catch (e) {
     console.error('Integration research loop failed:', e)
@@ -226,6 +229,7 @@ async function runResearchAgentCore(
   supabase: SupabaseClient<Database>,
   projectId: string,
   appUrl: string,
+  onProgress?: ProgressCallback,
 ): Promise<ResearchReport> {
   const ghReady = await getGithubIntegrationReady(supabase, projectId)
 
@@ -246,8 +250,16 @@ async function runResearchAgentCore(
     }
   }
 
+  onProgress?.({
+    actionId: 'codebase-exploration',
+    integration: 'codebase',
+    label: 'Exploring repository structure',
+    detail: `Analyzing ${ghReady.repoFullName}`,
+    status: 'running',
+  })
+
   const [integrationOutcome, codebaseOutcome] = await Promise.allSettled([
-    runIntegrationResearchTrack({ supabase, projectId, appUrl }),
+    runIntegrationResearchTrack({ supabase, projectId, appUrl, onProgress }),
     tracedRunCodebaseExplorationAgent({
       installationId: ghReady.installationId,
       repoFullName: ghReady.repoFullName,
@@ -265,6 +277,13 @@ async function runResearchAgentCore(
   let codebase: ReturnType<typeof emptyCodebaseExploration>
   if (codebaseOutcome.status === 'fulfilled') {
     codebase = codebaseOutcome.value
+    onProgress?.({
+      actionId: 'codebase-exploration',
+      integration: 'codebase',
+      label: 'Repository analysis complete',
+      detail: `${codebase.confidence} confidence — found ${codebase.inferredUserFlows.length} user flows`,
+      status: 'complete',
+    })
   } else {
     const err =
       codebaseOutcome.reason instanceof Error
@@ -275,9 +294,34 @@ async function runResearchAgentCore(
       summary: `Repository exploration failed: ${err}`,
       truncationWarnings: [err],
     })
+    onProgress?.({
+      actionId: 'codebase-exploration',
+      integration: 'codebase',
+      label: 'Repository exploration failed',
+      detail: err.slice(0, 120),
+      status: 'error',
+    })
   }
 
-  return mergeIntegrationAndCodebase(integrationReport, codebase)
+  onProgress?.({
+    actionId: 'merge-reports',
+    integration: 'system',
+    label: 'Merging research findings',
+    detail: 'Combining integration data with codebase analysis',
+    status: 'running',
+  })
+
+  const merged = mergeIntegrationAndCodebase(integrationReport, codebase)
+
+  onProgress?.({
+    actionId: 'merge-reports',
+    integration: 'system',
+    label: 'Research complete',
+    detail: `${merged.findings.length} findings, ${merged.recommendedFlows.length} recommended flows`,
+    status: 'complete',
+  })
+
+  return merged
 }
 
 export const runResearchAgent = traceable(runResearchAgentCore, {
@@ -287,7 +331,7 @@ export const runResearchAgent = traceable(runResearchAgentCore, {
     const args = 'args' in inputs && Array.isArray(inputs.args) ? inputs.args : []
     const projectId = typeof args[1] === 'string' ? args[1] : undefined
     const appUrl = typeof args[2] === 'string' ? args[2] : undefined
-    return { projectId, appUrl }
+    return { projectId, appUrl, hasProgressCallback: typeof args[3] === 'function' }
   },
   processOutputs: (out) => ({
     summaryPreview: out.summary?.slice(0, 400),

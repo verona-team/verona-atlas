@@ -6,12 +6,14 @@ import { traceable } from 'langsmith/traceable'
 import { Sandbox } from '@vercel/sandbox'
 import { executeInSandbox } from './sandbox'
 import { integrationResearchReportSchema, type IntegrationResearchReport } from './types'
+import type { ProgressCallback, AgentActionIntegration } from '@/lib/chat/agent-actions'
 
 interface AgentContext {
   appUrl: string
   integrationDocs: Record<string, string>
   integrationEnvVars: Record<string, string>
   sandbox: Sandbox
+  onProgress?: ProgressCallback
 }
 
 function isTransientError(stderr: string): boolean {
@@ -179,6 +181,14 @@ console.log(JSON.stringify(results, null, 2));
 `,
 }
 
+const INTEGRATION_LABELS: Record<string, string> = {
+  github: 'GitHub',
+  posthog: 'PostHog',
+  sentry: 'Sentry',
+  langsmith: 'LangSmith',
+  braintrust: 'Braintrust',
+}
+
 async function runPreflightScripts(
   ctx: AgentContext,
 ): Promise<Record<string, { success: boolean; data: string; error?: string }>> {
@@ -188,6 +198,15 @@ async function runPreflightScripts(
   const tasks = integrationList
     .filter((type) => PREFLIGHT_SCRIPTS[type])
     .map(async (type) => {
+      const actionId = `preflight-${type}`
+      const label = INTEGRATION_LABELS[type] || type
+      ctx.onProgress?.({
+        actionId,
+        integration: type as AgentActionIntegration,
+        label: `Pulling data from ${label}`,
+        detail: `Running preflight queries against ${label} API`,
+        status: 'running',
+      })
       try {
         const script = PREFLIGHT_SCRIPTS[type](ctx.integrationEnvVars)
         const result = await executeInSandbox(ctx.sandbox, script, ctx.integrationEnvVars)
@@ -196,8 +215,24 @@ async function runPreflightScripts(
           data: result.stdout,
           error: result.exitCode !== 0 ? result.stderr : undefined,
         }
+        ctx.onProgress?.({
+          actionId,
+          integration: type as AgentActionIntegration,
+          label: `Pulled data from ${label}`,
+          detail: result.exitCode === 0
+            ? `Received ${Math.round(result.stdout.length / 1024)}KB of data`
+            : `Preflight failed: ${result.stderr?.slice(0, 120)}`,
+          status: result.exitCode === 0 ? 'complete' : 'error',
+        })
       } catch (e) {
         results[type] = { success: false, data: '', error: String(e) }
+        ctx.onProgress?.({
+          actionId,
+          integration: type as AgentActionIntegration,
+          label: `Failed to pull data from ${label}`,
+          detail: String(e).slice(0, 120),
+          status: 'error',
+        })
       }
     })
 
@@ -211,7 +246,23 @@ async function runPreflightScripts(
 async function runResearchLoopCore(ctx: AgentContext): Promise<IntegrationResearchReport> {
   const integrationList = Object.keys(ctx.integrationDocs)
 
+  ctx.onProgress?.({
+    actionId: 'integration-preflight',
+    integration: 'system',
+    label: 'Starting integration research',
+    detail: `Querying ${integrationList.length} integration(s): ${integrationList.map(t => INTEGRATION_LABELS[t] || t).join(', ')}`,
+    status: 'running',
+  })
+
   const preflightResults = await runPreflightScripts(ctx)
+
+  ctx.onProgress?.({
+    actionId: 'integration-preflight',
+    integration: 'system',
+    label: 'Preflight data collection complete',
+    detail: `Collected data from ${Object.values(preflightResults).filter(r => r.success).length}/${integrationList.length} integrations`,
+    status: 'complete',
+  })
 
   const preflightSummary = Object.entries(preflightResults)
     .map(([type, result]) => {
@@ -255,6 +306,16 @@ Investigation priorities:
 
 After gathering data from all available integrations, you will be asked to produce a structured report.`
 
+  ctx.onProgress?.({
+    actionId: 'deep-investigation',
+    integration: 'system',
+    label: 'Running deep investigation',
+    detail: 'AI agent is analyzing data and querying APIs for deeper insights',
+    status: 'running',
+  })
+
+  let executeCodeCounter = 0
+
   const researchGen = await generateText({
     model,
     system: systemPrompt,
@@ -281,6 +342,16 @@ Review the preflight data above. Then use execute_code for DEEPER investigation 
         }),
         execute: traceable(
           async ({ code, purpose }: { code: string; purpose: string }) => {
+            executeCodeCounter++
+            const actionId = `execute-code-${executeCodeCounter}`
+            const detectedIntegration = inferIntegrationFromPurpose(purpose, integrationList)
+            ctx.onProgress?.({
+              actionId,
+              integration: detectedIntegration,
+              label: purpose,
+              detail: `Executing sandbox code (step ${executeCodeCounter})`,
+              status: 'running',
+            })
             const MAX_RETRIES = 2
             for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
               try {
@@ -289,6 +360,15 @@ Review the preflight data above. Then use execute_code for DEEPER investigation 
                   await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)))
                   continue
                 }
+                ctx.onProgress?.({
+                  actionId,
+                  integration: detectedIntegration,
+                  label: purpose,
+                  detail: result.exitCode === 0
+                    ? `Received ${Math.round(result.stdout.length / 1024)}KB`
+                    : `Error: ${result.stderr?.slice(0, 100)}`,
+                  status: result.exitCode === 0 ? 'complete' : 'error',
+                })
                 return {
                   purpose,
                   exitCode: result.exitCode,
@@ -300,6 +380,13 @@ Review the preflight data above. Then use execute_code for DEEPER investigation 
                   await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)))
                   continue
                 }
+                ctx.onProgress?.({
+                  actionId,
+                  integration: detectedIntegration,
+                  label: purpose,
+                  detail: `Execution error: ${String(e).slice(0, 100)}`,
+                  status: 'error',
+                })
                 return {
                   purpose,
                   exitCode: 1,
@@ -339,6 +426,22 @@ Review the preflight data above. Then use execute_code for DEEPER investigation 
 
   const researchNotes = buildResearchNotesFromGeneration(researchGen)
 
+  ctx.onProgress?.({
+    actionId: 'deep-investigation',
+    integration: 'system',
+    label: 'Deep investigation complete',
+    detail: `Executed ${executeCodeCounter} sandbox queries`,
+    status: 'complete',
+  })
+
+  ctx.onProgress?.({
+    actionId: 'synthesize-report',
+    integration: 'system',
+    label: 'Synthesizing research report',
+    detail: 'Analyzing all findings and generating structured report',
+    status: 'running',
+  })
+
   const { output: report } = await generateText({
     model,
     output: Output.object({ schema: integrationResearchReportSchema }),
@@ -362,7 +465,36 @@ Focus the recommended flows on:
 - AI/LLM features with failures (from LangSmith/Braintrust)`,
   })
 
+  ctx.onProgress?.({
+    actionId: 'synthesize-report',
+    integration: 'system',
+    label: 'Research report ready',
+    detail: `${report.findings?.length ?? 0} findings across ${report.integrationsCovered?.length ?? 0} integrations`,
+    status: 'complete',
+  })
+
   return report
+}
+
+function inferIntegrationFromPurpose(
+  purpose: string,
+  availableIntegrations: string[],
+): AgentActionIntegration {
+  const lower = purpose.toLowerCase()
+  for (const type of availableIntegrations) {
+    if (lower.includes(type)) return type as AgentActionIntegration
+  }
+  if (lower.includes('commit') || lower.includes('pull request') || lower.includes('pr') || lower.includes('repo'))
+    return 'github'
+  if (lower.includes('session') || lower.includes('pageview') || lower.includes('rage'))
+    return 'posthog'
+  if (lower.includes('error') || lower.includes('issue') || lower.includes('exception'))
+    return 'sentry'
+  if (lower.includes('trace') || lower.includes('run') || lower.includes('token'))
+    return 'langsmith'
+  if (lower.includes('experiment') || lower.includes('score'))
+    return 'braintrust'
+  return 'system'
 }
 
 export const runResearchLoop = traceable(runResearchLoopCore, {
