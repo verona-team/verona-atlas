@@ -46,7 +46,7 @@ async def authenticate(page, session, project: dict, password: str):
                 ),
                 "max_steps": 10,
             },
-            agent_config={"model": STAGEHAND_AGENT_MODEL},
+            agent_config={"model": STAGEHAND_AGENT_MODEL, "mode": "cua"},
             timeout=60.0,
         )
         print(f"[AUTH]   login form submitted ({time.time() - login_t0:.1f}s)")
@@ -138,7 +138,7 @@ async def handle_2fa(session, project: dict):
                 "instruction": f'Enter the verification code "{code}" in the verification/OTP input field and submit.',
                 "max_steps": 5,
             },
-            agent_config={"model": STAGEHAND_AGENT_MODEL},
+            agent_config={"model": STAGEHAND_AGENT_MODEL, "mode": "cua"},
             timeout=30.0,
         )
         print(f"[AUTH]   2FA code submitted ({time.time() - t0:.1f}s)")

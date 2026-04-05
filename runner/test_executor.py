@@ -70,6 +70,7 @@ async def execute_browser_action(session, page, instruction: str) -> dict:
             },
             agent_config={
                 "model": STAGEHAND_AGENT_MODEL,
+                "mode": "cua",
                 "system_prompt": "You are a QA tester executing test steps on a web application. Be precise and wait for elements to load before interacting.",
             },
             timeout=120.0,
@@ -243,6 +244,7 @@ async def execute_template(
     test_summary = ""
     bugs_found: list[dict] = []
     completed = False
+    llm_error: str | None = None
     iterations_used = 0
 
     if initial_state["screenshot_base64"]:
@@ -266,7 +268,7 @@ async def execute_template(
         try:
             response = anthropic.messages.create(
                 model=OUTER_AGENT_MODEL,
-                max_tokens=128000,
+                max_tokens=21000,
                 system=system_prompt,
                 tools=TOOLS,
                 messages=messages,
@@ -276,11 +278,12 @@ async def execute_template(
                   f"usage=in:{response.usage.input_tokens}/out:{response.usage.output_tokens}")
         except Exception as e:
             llm_elapsed = time.time() - llm_t0
+            llm_error = str(e)
             print(f"[EXECUTOR]   LLM EXCEPTION ({llm_elapsed:.1f}s): {type(e).__name__}: {e}")
             actions.append({
                 "iteration": iteration,
                 "tool": "llm_error",
-                "error": str(e),
+                "error": llm_error,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
             break
@@ -406,7 +409,10 @@ async def execute_template(
 
     loop_elapsed = time.time() - loop_t0
 
-    if not completed:
+    if llm_error is not None:
+        test_summary = f"Outer LLM call failed: {llm_error}"
+        print(f"[EXECUTOR] WARNING: LLM failure — {llm_error}")
+    elif not completed:
         test_summary = f"Test execution hit the iteration limit ({max_iterations}). The test flow may be incomplete."
         print(f"[EXECUTOR] WARNING: Hit iteration limit ({max_iterations})")
 
@@ -427,5 +433,6 @@ async def execute_template(
         "screenshots": screenshots,
         "iterations_used": iterations_used,
         "max_iterations": max_iterations,
-        "hit_iteration_limit": not completed,
+        "hit_iteration_limit": not completed and llm_error is None,
+        "llm_error": llm_error,
     }

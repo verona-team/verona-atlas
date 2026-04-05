@@ -283,8 +283,12 @@ async def execute_single_template(supabase, project, template, test_run_id: str,
         agent_result = await execute_template(session, page, template, project, integrations)
         exec_elapsed = time.time() - exec_t0
         print(f"[TEMPLATE] ReAct loop finished ({exec_elapsed:.1f}s)")
+        llm_err = agent_result.get("llm_error")
+        hit_lim = agent_result.get("hit_iteration_limit")
         print(f"[TEMPLATE]   passed={agent_result.get('passed')}  iterations={agent_result.get('iterations_used')}/{agent_result.get('max_iterations')}  "
-              f"hit_limit={agent_result.get('hit_iteration_limit')}  bugs={len(agent_result.get('bugs_found', []))}  screenshots={len(agent_result.get('screenshots', []))}")
+              f"hit_limit={hit_lim}  llm_error={'yes' if llm_err else 'no'}  bugs={len(agent_result.get('bugs_found', []))}  screenshots={len(agent_result.get('screenshots', []))}")
+        if llm_err:
+            print(f"[TEMPLATE]   llm_error: {llm_err[:500]}{'…' if len(llm_err) > 500 else ''}")
 
         test_passed = agent_result.get("passed", False)
         status = "passed" if test_passed else "failed"
@@ -368,6 +372,7 @@ async def execute_single_template(supabase, project, template, test_run_id: str,
                 "iterations_used": agent_result.get("iterations_used", 0),
                 "max_iterations": agent_result.get("max_iterations", 0),
                 "hit_iteration_limit": agent_result.get("hit_iteration_limit", False),
+                "llm_error": agent_result.get("llm_error"),
                 "observability": observability_errors,
             },
         }

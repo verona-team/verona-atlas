@@ -5,7 +5,10 @@ that drives the agentic test execution loop.
 import json
 from typing import Any
 
-STAGEHAND_AGENT_MODEL = "anthropic/claude-sonnet-4-6"
+# Stagehand session + inner execute agent (Browserbase). Provider/model form per Stagehand API.
+STAGEHAND_AGENT_MODEL = "google/gemini-2.5-computer-use-preview-10-2025"
+STAGEHAND_SESSION_MODEL = STAGEHAND_AGENT_MODEL
+
 OUTER_AGENT_MODEL = "claude-opus-4-6"
 
 TOOLS: list[dict[str, Any]] = [

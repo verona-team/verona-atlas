@@ -15,8 +15,18 @@ from typing import Any
 from stagehand import AsyncStagehand
 from playwright.async_api import async_playwright
 
+from runner.prompts import STAGEHAND_SESSION_MODEL
 
-STAGEHAND_SESSION_MODEL = "anthropic/claude-sonnet-4-6"
+
+def _resolve_model_api_key() -> str:
+    """Key sent as x-model-api-key; prefer explicit MODEL_API_KEY, then Google/Gemini for Gemini models."""
+    return (
+        os.environ.get("MODEL_API_KEY")
+        or os.environ.get("GOOGLE_API_KEY")
+        or os.environ.get("GEMINI_API_KEY")
+        or os.environ.get("ANTHROPIC_API_KEY")
+        or ""
+    )
 
 
 async def create_stagehand_session() -> dict[str, Any]:
@@ -40,7 +50,7 @@ async def create_stagehand_session() -> dict[str, Any]:
 
     bb_api_key = os.environ.get("BROWSERBASE_API_KEY", "")
     bb_project_id = os.environ.get("BROWSERBASE_PROJECT_ID", "")
-    model_api_key = os.environ.get("MODEL_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
+    model_api_key = _resolve_model_api_key()
 
     if not bb_api_key:
         print("[BROWSER] ERROR: BROWSERBASE_API_KEY is missing or empty")
@@ -49,8 +59,10 @@ async def create_stagehand_session() -> dict[str, Any]:
         print("[BROWSER] ERROR: BROWSERBASE_PROJECT_ID is missing or empty")
         raise ValueError("BROWSERBASE_PROJECT_ID environment variable is required")
     if not model_api_key:
-        print("[BROWSER] ERROR: MODEL_API_KEY and ANTHROPIC_API_KEY are both missing or empty")
-        raise ValueError("MODEL_API_KEY or ANTHROPIC_API_KEY environment variable is required for Stagehand")
+        print("[BROWSER] ERROR: no model API key (MODEL_API_KEY, GOOGLE_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY)")
+        raise ValueError(
+            "MODEL_API_KEY, GOOGLE_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY is required for Stagehand"
+        )
 
     print(f"[BROWSER]   BROWSERBASE_PROJECT_ID = {bb_project_id}")
     print(f"[BROWSER]   BROWSERBASE_API_KEY    = {bb_api_key[:8]}...{bb_api_key[-4:]}")
