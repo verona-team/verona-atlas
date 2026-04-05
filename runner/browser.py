@@ -9,7 +9,6 @@ Migration reference: https://docs.stagehand.dev/v3/migrations/python
 """
 import os
 import time
-import traceback
 from typing import Any
 
 from stagehand import AsyncStagehand
@@ -18,13 +17,63 @@ from playwright.async_api import async_playwright
 from runner.prompts import STAGEHAND_SESSION_MODEL
 
 
+def _is_google_gemini_stagehand_model(model_name: str) -> bool:
+    """True when the Stagehand session/agent uses Google Gemini (incl. Computer Use)."""
+    m = (model_name or "").lower()
+    return m.startswith("google/") or "gemini" in m
+
+
+def get_google_api_key_for_stagehand() -> str:
+    """API key for Gemini / Computer Use (Stagehand agentExecute and related calls).
+
+    Google's API rejects unauthenticated calls with PERMISSION_DENIED (403). The inner browser
+    agent must call Gemini with a Google AI Studio key — Anthropic keys are not valid there.
+
+    Resolution order: MODEL_API_KEY (when set for the runner), then GOOGLE_API_KEY, then GEMINI_API_KEY.
+    """
+    key = (
+        (os.environ.get("MODEL_API_KEY") or "").strip()
+        or (os.environ.get("GOOGLE_API_KEY") or "").strip()
+        or (os.environ.get("GEMINI_API_KEY") or "").strip()
+    )
+    if not key:
+        raise ValueError(
+            "Gemini Computer Use requires a Google API key. Set GOOGLE_API_KEY or GEMINI_API_KEY "
+            "(or set MODEL_API_KEY to your Google AI Studio key). "
+            "ANTHROPIC_API_KEY alone is not used for Stagehand browser actions."
+        )
+    return key
+
+
+def stagehand_agent_model_for_api(model_name: str | None = None) -> Any:
+    """Value for Stagehand `agent_config.model` / observe `options.model`.
+
+    Gemini Computer Use must receive the Google API key in the model config; a bare model id
+    string is not enough for agentExecute to authenticate with Google.
+    """
+    name = model_name or STAGEHAND_SESSION_MODEL
+    if _is_google_gemini_stagehand_model(name):
+        return {
+            "model_name": name,
+            "api_key": get_google_api_key_for_stagehand(),
+            "provider": "google",
+        }
+    return name
+
+
 def _resolve_model_api_key() -> str:
-    """Key sent as x-model-api-key; prefer explicit MODEL_API_KEY, then Google/Gemini for Gemini models."""
+    """Key sent as x-model-api-key on AsyncStagehand (Browserbase Stagehand API).
+
+    When the configured model is Google Gemini, only a Google API key is valid — do not fall back
+    to ANTHROPIC_API_KEY or the session may start but agentExecute will fail with Google 403.
+    """
+    if _is_google_gemini_stagehand_model(STAGEHAND_SESSION_MODEL):
+        return get_google_api_key_for_stagehand()
     return (
-        os.environ.get("MODEL_API_KEY")
-        or os.environ.get("GOOGLE_API_KEY")
-        or os.environ.get("GEMINI_API_KEY")
-        or os.environ.get("ANTHROPIC_API_KEY")
+        (os.environ.get("MODEL_API_KEY") or "").strip()
+        or (os.environ.get("GOOGLE_API_KEY") or "").strip()
+        or (os.environ.get("GEMINI_API_KEY") or "").strip()
+        or (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
         or ""
     )
 
@@ -59,6 +108,12 @@ async def create_stagehand_session() -> dict[str, Any]:
         print("[BROWSER] ERROR: BROWSERBASE_PROJECT_ID is missing or empty")
         raise ValueError("BROWSERBASE_PROJECT_ID environment variable is required")
     if not model_api_key:
+        if _is_google_gemini_stagehand_model(STAGEHAND_SESSION_MODEL):
+            print("[BROWSER] ERROR: no Google API key for Gemini Stagehand model")
+            try:
+                get_google_api_key_for_stagehand()
+            except ValueError as e:
+                raise ValueError(str(e)) from None
         print("[BROWSER] ERROR: no model API key (MODEL_API_KEY, GOOGLE_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY)")
         raise ValueError(
             "MODEL_API_KEY, GOOGLE_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY is required for Stagehand"
@@ -66,7 +121,8 @@ async def create_stagehand_session() -> dict[str, Any]:
 
     print(f"[BROWSER]   BROWSERBASE_PROJECT_ID = {bb_project_id}")
     print(f"[BROWSER]   BROWSERBASE_API_KEY    = {bb_api_key[:8]}...{bb_api_key[-4:]}")
-    print(f"[BROWSER]   MODEL_API_KEY present  = True (len={len(model_api_key)})")
+    key_kind = "google" if _is_google_gemini_stagehand_model(STAGEHAND_SESSION_MODEL) else "model"
+    print(f"[BROWSER]   {key_kind} API key for Stagehand = set (len={len(model_api_key)})")
     print(f"[BROWSER]   session model          = {STAGEHAND_SESSION_MODEL}")
 
     client: AsyncStagehand | None = None

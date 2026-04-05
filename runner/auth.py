@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from agentmail import AgentMail
 
-from runner.prompts import STAGEHAND_AGENT_MODEL
+from runner.browser import stagehand_agent_model_for_api
 
 
 async def authenticate(page, session, project: dict, password: str):
@@ -46,7 +46,7 @@ async def authenticate(page, session, project: dict, password: str):
                 ),
                 "max_steps": 10,
             },
-            agent_config={"model": STAGEHAND_AGENT_MODEL, "mode": "cua"},
+            agent_config={"model": stagehand_agent_model_for_api(), "mode": "cua"},
             timeout=60.0,
         )
         print(f"[AUTH]   login form submitted ({time.time() - login_t0:.1f}s)")
@@ -62,6 +62,7 @@ async def authenticate(page, session, project: dict, password: str):
     try:
         observe_response = await session.observe(
             instruction="Is there a verification code input, 2FA input, OTP input, or any multi-factor authentication prompt?",
+            options={"model": stagehand_agent_model_for_api()},
         )
         results = observe_response.data.result
         has_2fa = bool(results and len(results) > 0)
@@ -138,7 +139,7 @@ async def handle_2fa(session, project: dict):
                 "instruction": f'Enter the verification code "{code}" in the verification/OTP input field and submit.',
                 "max_steps": 5,
             },
-            agent_config={"model": STAGEHAND_AGENT_MODEL, "mode": "cua"},
+            agent_config={"model": stagehand_agent_model_for_api(), "mode": "cua"},
             timeout=30.0,
         )
         print(f"[AUTH]   2FA code submitted ({time.time() - t0:.1f}s)")
