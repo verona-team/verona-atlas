@@ -70,6 +70,7 @@ async def execute_browser_action(session, page, instruction: str) -> dict:
             },
             agent_config={
                 "model": STAGEHAND_AGENT_MODEL,
+                "mode": "cua",
                 "system_prompt": "You are a QA tester executing test steps on a web application. Be precise and wait for elements to load before interacting.",
             },
             timeout=120.0,
