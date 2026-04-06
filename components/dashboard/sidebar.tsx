@@ -44,8 +44,8 @@ export function AppSidebar() {
       >
         {/* Top: logo + collapse toggle */}
         <div className="flex h-12 shrink-0 items-center justify-between px-3 border-b border-sidebar-border">
-          <Link href="/" className="flex items-center gap-2 shrink-0">
-            <InteractiveLogo size={28} />
+          <Link href="/" className="flex items-center shrink-0 overflow-hidden rounded-md" style={{ width: 32, height: 32 }}>
+            <InteractiveLogo size={32} />
           </Link>
           <button
             onClick={toggleSidebar}
