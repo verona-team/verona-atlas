@@ -157,9 +157,10 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
 
         agentmail_address = project.get("agentmail_inbox_address")
         agentmail_inbox_id = project.get("agentmail_inbox_id")
-        generated_password = _generate_password() if not agent_creds else None
-        if generated_password:
-            print(f"[PIPELINE]   generated password for signup (len={len(generated_password)})")
+        # Always generate a password — even when credentials exist, the agent
+        # may need to create a new account if the saved credentials fail.
+        generated_password = _generate_password()
+        print(f"[PIPELINE]   generated password for signup (len={len(generated_password)})")
 
         # 4. Update status to planning
         print("[PIPELINE] Step 4: Setting status → planning")

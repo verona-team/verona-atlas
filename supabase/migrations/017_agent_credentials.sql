@@ -19,6 +19,24 @@ CREATE TRIGGER agent_credentials_set_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_updated_at();
 
+-- RLS: agent_credentials are only accessed by the service role (Modal runner).
+-- Enable RLS and add a select policy scoped through the project's org so
+-- dashboard users can view (but not modify) credential status.
+ALTER TABLE public.agent_credentials ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY agent_credentials_select
+  ON public.agent_credentials
+  FOR SELECT
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.projects p
+      WHERE p.id = agent_credentials.project_id
+        AND p.org_id IN (SELECT public.get_user_org_ids())
+    )
+  );
+
 -- Drop user-provided credential columns from projects (agent creates its own now)
 ALTER TABLE public.projects DROP COLUMN IF EXISTS auth_email;
 ALTER TABLE public.projects DROP COLUMN IF EXISTS auth_password_encrypted;
