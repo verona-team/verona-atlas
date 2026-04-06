@@ -1,9 +1,9 @@
-import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { getServerUser } from '@/lib/supabase/server-user'
 import { RunStatusBadge } from '@/components/dashboard/run-status-badge'
-import { TriggerRunButton } from '@/components/dashboard/trigger-run-button'
+import { PanelPage } from '@/components/dashboard/panel-page'
 
 type PageProps = { params: Promise<{ projectId: string }> }
 
@@ -40,21 +40,11 @@ export default async function RunHistoryPage({ params }: PageProps) {
     .limit(50)
 
   return (
-    <div className="max-w-4xl mx-auto space-y-10">
-      <div>
-        <Link href={`/projects/${projectId}`} className="text-xl opacity-50 hover:opacity-80">
-          ← {project.name}
-        </Link>
-        <div className="flex items-center justify-between mt-3">
-          <h1 className="text-5xl">Runs</h1>
-          <TriggerRunButton projectId={projectId} />
-        </div>
-      </div>
-
+    <PanelPage projectId={projectId} title="Runs">
       {(!runs || runs.length === 0) ? (
-        <p className="text-2xl opacity-50 py-8">No runs yet.</p>
+        <p className="text-sm text-muted-foreground py-8">No runs yet.</p>
       ) : (
-        <div className="divide-y text-2xl">
+        <div className="divide-y divide-border">
           {runs.map((run) => {
             const summary = run.summary as Record<string, number> | null
             const duration =
@@ -66,27 +56,27 @@ export default async function RunHistoryPage({ params }: PageProps) {
               <Link
                 key={run.id}
                 href={`/projects/${projectId}/runs/${run.id}`}
-                className="flex items-center justify-between py-4"
+                className="flex items-center justify-between py-3 hover:bg-muted/30 -mx-2 px-2 rounded transition-colors"
               >
-                <div className="flex items-center gap-6">
+                <div className="flex items-center gap-4">
                   <RunStatusBadge status={run.status} />
-                  <span className="text-xl opacity-50">
+                  <span className="text-xs text-muted-foreground">
                     {new Date(run.created_at).toLocaleString()}
                   </span>
-                  <span className="text-xl opacity-40">{duration}</span>
+                  <span className="text-xs text-muted-foreground/60">{duration}</span>
                 </div>
                 {summary && summary.total > 0 ? (
-                  <span className="text-xl opacity-60">
+                  <span className="text-xs text-muted-foreground">
                     {summary.passed}/{summary.total}
                   </span>
                 ) : (
-                  <span className="text-xl opacity-30">—</span>
+                  <span className="text-xs text-muted-foreground/30">—</span>
                 )}
               </Link>
             )
           })}
         </div>
       )}
-    </div>
+    </PanelPage>
   )
 }

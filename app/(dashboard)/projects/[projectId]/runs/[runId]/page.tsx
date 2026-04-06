@@ -1,9 +1,9 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { RunStatusBadge } from '@/components/dashboard/run-status-badge'
+import { PanelPage } from '@/components/dashboard/panel-page'
 import { createClient } from '@/lib/supabase/client'
 
 interface TestResult {
@@ -39,7 +39,6 @@ export default function RunDetailPage() {
 
   const [run, setRun] = useState<TestRun | null>(null)
   const [results, setResults] = useState<TestResult[]>([])
-  const [projectName, setProjectName] = useState('')
   const [loading, setLoading] = useState(true)
   const [expandedResult, setExpandedResult] = useState<string | null>(null)
 
@@ -50,9 +49,8 @@ export default function RunDetailPage() {
         const data = await response.json()
         setRun(data.run)
         setResults(data.results)
-        setProjectName(data.project?.name || '')
       }
-    } catch { /* ignore */ } finally { setLoading(false) }
+    } catch {} finally { setLoading(false) }
   }, [runId])
 
   useEffect(() => { fetchRunData() }, [fetchRunData])
@@ -69,102 +67,109 @@ export default function RunDetailPage() {
     return () => { supabase.removeChannel(channel) }
   }, [runId, fetchRunData])
 
-  if (loading) return <p className="text-2xl opacity-50 py-12 max-w-4xl mx-auto">Loading...</p>
-  if (!run) return <p className="text-2xl opacity-50 py-12 max-w-4xl mx-auto">Run not found</p>
+  if (loading) return (
+    <PanelPage projectId={projectId} title="Run Details">
+      <p className="text-sm text-muted-foreground py-8">Loading...</p>
+    </PanelPage>
+  )
 
-  const summary = run.summary as { total?: number; passed?: number; failed?: number; errors?: number; ai_analysis?: string; [key: string]: unknown } | null
+  if (!run) return (
+    <PanelPage projectId={projectId} title="Run Details">
+      <p className="text-sm text-muted-foreground py-8">Run not found</p>
+    </PanelPage>
+  )
+
+  const summary = run.summary as { total?: number; passed?: number; failed?: number; errors?: number; ai_analysis?: string } | null
   const duration = run.started_at && run.completed_at
     ? `${Math.round((new Date(run.completed_at).getTime() - new Date(run.started_at).getTime()) / 1000)}s`
     : run.started_at ? 'Running...' : '—'
 
   return (
-    <div className="max-w-4xl mx-auto space-y-10">
-      <div>
-        <Link href={`/projects/${projectId}/runs`} className="text-xl opacity-50 hover:opacity-80">
-          ← Runs
-        </Link>
-        <div className="flex items-center gap-4 mt-3">
-          <h1 className="text-5xl">{projectName}</h1>
+    <PanelPage projectId={projectId} title="Run Details">
+      <div className="space-y-6">
+        {/* Run header */}
+        <div className="flex items-center gap-3">
           <RunStatusBadge status={run.status} />
+          <span className="text-xs text-muted-foreground">{run.trigger}</span>
+          <span className="text-xs text-muted-foreground">·</span>
+          <span className="text-xs text-muted-foreground">{duration}</span>
+          <span className="text-xs text-muted-foreground/50 ml-auto">{run.id.slice(0, 8)}</span>
         </div>
-      </div>
 
-      <div className="flex gap-12 text-2xl">
-        <div><span className="opacity-50">Trigger</span> {run.trigger}</div>
-        <div><span className="opacity-50">Duration</span> {duration}</div>
-        <div><span className="opacity-50">ID</span> {run.id.slice(0, 8)}</div>
-      </div>
-
-      {summary && typeof summary.total === 'number' && (
-        <div className="flex gap-12 text-2xl">
-          <div>{summary.total} total</div>
-          <div className="text-green-700">{summary.passed || 0} passed</div>
-          <div className="text-red-700">{summary.failed || 0} failed</div>
-          <div className="text-amber-700">{summary.errors || 0} errors</div>
-        </div>
-      )}
-
-      {summary?.ai_analysis && (
-        <div>
-          <h2 className="text-2xl opacity-50 mb-3">AI Analysis</h2>
-          <pre className="text-xl whitespace-pre-wrap opacity-70">{String(summary.ai_analysis)}</pre>
-        </div>
-      )}
-
-      <div>
-        <h2 className="text-2xl opacity-50 mb-4">Results ({results.length})</h2>
-        {results.length === 0 ? (
-          <p className="text-2xl opacity-50">
-            {['pending', 'planning', 'running'].includes(run.status) ? 'Running...' : 'No results'}
-          </p>
-        ) : (
-          <div className="divide-y text-2xl">
-            {results.map((result) => (
-              <div key={result.id}>
-                <button
-                  className="flex items-center justify-between w-full py-4 text-left"
-                  onClick={() => setExpandedResult(expandedResult === result.id ? null : result.id)}
-                >
-                  <div className="flex items-center gap-4">
-                    <span className={result.status === 'passed' ? 'text-green-700' : result.status === 'failed' ? 'text-red-700' : 'text-amber-700'}>
-                      {result.status === 'passed' ? '✓' : result.status === 'failed' ? '✗' : '!'}
-                    </span>
-                    <span>{result.test_templates?.name || 'Unknown'}</span>
-                  </div>
-                  <span className="text-xl opacity-40">
-                    {result.duration_ms ? `${(result.duration_ms / 1000).toFixed(1)}s` : ''}
-                  </span>
-                </button>
-
-                {expandedResult === result.id && (
-                  <div className="pb-6 pl-8 space-y-4 text-xl">
-                    {result.error_message && (
-                      <pre className="whitespace-pre-wrap text-red-700">{result.error_message}</pre>
-                    )}
-                    {result.ai_analysis && (
-                      <pre className="whitespace-pre-wrap opacity-60">{result.ai_analysis}</pre>
-                    )}
-                    {result.console_logs && (
-                      <pre className="whitespace-pre-wrap opacity-50 max-h-60 overflow-auto">
-                        {JSON.stringify(result.console_logs, null, 2)}
-                      </pre>
-                    )}
-                    {result.screenshots && result.screenshots.length > 0 && (
-                      <div className="flex gap-3">
-                        {result.screenshots.map((url, i) => (
-                          <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="border">
-                            <img src={url} alt={`Screenshot ${i + 1}`} className="w-60 h-auto" />
-                          </a>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
+        {/* Summary stats */}
+        {summary && typeof summary.total === 'number' && (
+          <div className="flex gap-6 text-sm">
+            <span>{summary.total} total</span>
+            <span className="text-green-600">{summary.passed || 0} passed</span>
+            <span className="text-red-600">{summary.failed || 0} failed</span>
+            <span className="text-amber-600">{summary.errors || 0} errors</span>
           </div>
         )}
+
+        {/* AI Analysis */}
+        {summary?.ai_analysis && (
+          <div>
+            <h3 className="text-xs text-muted-foreground mb-2">AI Analysis</h3>
+            <pre className="text-sm whitespace-pre-wrap text-foreground/70">{String(summary.ai_analysis)}</pre>
+          </div>
+        )}
+
+        {/* Results */}
+        <div>
+          <h3 className="text-xs text-muted-foreground mb-3">Results ({results.length})</h3>
+          {results.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {['pending', 'planning', 'running'].includes(run.status) ? 'Running...' : 'No results'}
+            </p>
+          ) : (
+            <div className="divide-y divide-border">
+              {results.map((result) => (
+                <div key={result.id}>
+                  <button
+                    className="flex items-center justify-between w-full py-3 text-left text-sm"
+                    onClick={() => setExpandedResult(expandedResult === result.id ? null : result.id)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className={result.status === 'passed' ? 'text-green-600' : result.status === 'failed' ? 'text-red-600' : 'text-amber-600'}>
+                        {result.status === 'passed' ? '✓' : result.status === 'failed' ? '✗' : '!'}
+                      </span>
+                      <span className="text-foreground/80">{result.test_templates?.name || 'Unknown'}</span>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {result.duration_ms ? `${(result.duration_ms / 1000).toFixed(1)}s` : ''}
+                    </span>
+                  </button>
+
+                  {expandedResult === result.id && (
+                    <div className="pb-4 pl-6 space-y-3 text-sm">
+                      {result.error_message && (
+                        <pre className="whitespace-pre-wrap text-red-600/80">{result.error_message}</pre>
+                      )}
+                      {result.ai_analysis && (
+                        <pre className="whitespace-pre-wrap text-foreground/60">{result.ai_analysis}</pre>
+                      )}
+                      {result.console_logs && (
+                        <pre className="whitespace-pre-wrap text-muted-foreground max-h-40 overflow-auto text-xs">
+                          {JSON.stringify(result.console_logs, null, 2)}
+                        </pre>
+                      )}
+                      {result.screenshots && result.screenshots.length > 0 && (
+                        <div className="flex gap-2 flex-wrap">
+                          {result.screenshots.map((url, i) => (
+                            <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="border border-border rounded">
+                              <img src={url} alt={`Screenshot ${i + 1}`} className="w-48 h-auto" />
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </PanelPage>
   )
 }

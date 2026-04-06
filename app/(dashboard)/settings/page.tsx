@@ -24,31 +24,31 @@ export default async function SettingsPage() {
     .eq('org_id', org.id)
 
   return (
-    <div className="max-w-4xl mx-auto space-y-14">
-      <h1 className="text-5xl">Settings</h1>
+    <div className="max-w-2xl mx-auto p-6 space-y-8">
+      <h1 className="text-lg font-medium">Organization Settings</h1>
 
-      <div className="space-y-4 text-2xl">
-        <div className="flex justify-between py-2">
-          <span className="opacity-50">Organization</span>
+      <div className="space-y-3">
+        <div className="flex justify-between py-1.5 text-sm">
+          <span className="text-muted-foreground">Organization</span>
           <span>{org.name}</span>
         </div>
-        <div className="flex justify-between py-2">
-          <span className="opacity-50">Slug</span>
-          <span>{org.slug}</span>
+        <div className="flex justify-between py-1.5 text-sm">
+          <span className="text-muted-foreground">Slug</span>
+          <span className="font-mono text-xs">{org.slug}</span>
         </div>
-        <div className="flex justify-between py-2">
-          <span className="opacity-50">Plan</span>
+        <div className="flex justify-between py-1.5 text-sm">
+          <span className="text-muted-foreground">Plan</span>
           <span>{org.plan}</span>
         </div>
       </div>
 
       <div>
-        <h2 className="text-2xl opacity-50 mb-4">Members</h2>
-        <div className="divide-y text-2xl">
+        <h2 className="text-xs text-muted-foreground uppercase tracking-wider mb-3">Members</h2>
+        <div className="divide-y divide-border">
           {members?.map((member) => (
-            <div key={member.user_id} className="flex items-center justify-between py-4">
-              <span className="text-xl truncate max-w-md">{member.user_id}</span>
-              <span className="text-xl opacity-50">{member.role}</span>
+            <div key={member.user_id} className="flex items-center justify-between py-2.5 text-sm">
+              <span className="truncate max-w-md text-foreground/80 font-mono text-xs">{member.user_id}</span>
+              <span className="text-muted-foreground text-xs">{member.role}</span>
             </div>
           ))}
         </div>

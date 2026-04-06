@@ -2,9 +2,9 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
-import Link from 'next/link'
 import { toast } from 'sonner'
 import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
+import { PanelPage } from '@/components/dashboard/panel-page'
 
 type IntegrationData = {
   id: string
@@ -24,7 +24,6 @@ export default function ProjectSettingsPage() {
   const params = useParams<{ projectId: string }>()
   const searchParams = useSearchParams()
   const projectId = params.projectId
-  const router = useRouter()
   const toastShown = useRef(false)
 
   const [project, setProject] = useState<ProjectData | null>(null)
@@ -47,7 +46,6 @@ export default function ProjectSettingsPage() {
         setIntegrations(intData.integrations || [])
       }
     } catch {
-      // ignore
     } finally {
       setLoading(false)
     }
@@ -105,111 +103,100 @@ export default function ProjectSettingsPage() {
 
   if (loading) {
     return (
-      <div className="max-w-4xl mx-auto">
-        <p className="text-2xl opacity-40">Loading...</p>
-      </div>
+      <PanelPage projectId={projectId} title="Settings">
+        <p className="text-sm text-muted-foreground">Loading...</p>
+      </PanelPage>
     )
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-10">
-      <div>
-        <Link href={`/projects/${projectId}/chat`} className="text-xl opacity-50 hover:opacity-80">
-          ← {project?.name || 'Project'}
-        </Link>
-        <h1 className="text-5xl mt-3">Settings</h1>
-      </div>
+    <PanelPage projectId={projectId} title="Settings">
+      <div className="space-y-8">
+        {/* Integrations */}
+        <div>
+          <h3 className="text-xs text-muted-foreground uppercase tracking-wider mb-4">Integrations</h3>
+          <div className="space-y-3">
+            <SettingsIntegrationCard
+              type="github"
+              title="GitHub"
+              integration={getIntegration('github')}
+              onDisconnect={disconnect}
+              connectUrl={`/api/integrations/github/install?project_id=${projectId}&return_to=${encodeURIComponent(`/projects/${projectId}/settings`)}`}
+              openInNewTab
+              onRefresh={loadData}
+            >
+              <GitHubDetails integration={getIntegration('github')} projectId={projectId} onRefresh={loadData} />
+            </SettingsIntegrationCard>
 
-      <div>
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-3xl">Integrations</h2>
-          <Link
-            href={`/projects/new?projectId=${projectId}`}
-            className="text-lg underline opacity-60 hover:opacity-100"
-          >
-            Add integration →
-          </Link>
+            <SettingsIntegrationCard
+              type="posthog"
+              title="PostHog"
+              integration={getIntegration('posthog')}
+              onDisconnect={disconnect}
+              connectUrl={`/projects/new?projectId=${projectId}`}
+            >
+              <MetaDetail label="Project" value={getIntegration('posthog')?.meta?.posthog_project_id} />
+              <MetaDetail label="Host" value={getIntegration('posthog')?.meta?.api_host} />
+            </SettingsIntegrationCard>
+
+            <SettingsIntegrationCard
+              type="sentry"
+              title="Sentry"
+              integration={getIntegration('sentry')}
+              onDisconnect={disconnect}
+              connectUrl={`/projects/new?projectId=${projectId}`}
+            >
+              <MetaDetail
+                label="Project"
+                value={
+                  getIntegration('sentry')?.meta
+                    ? `${getIntegration('sentry')!.meta.organization_slug}/${getIntegration('sentry')!.meta.project_slug}`
+                    : undefined
+                }
+              />
+            </SettingsIntegrationCard>
+
+            <SettingsIntegrationCard
+              type="langsmith"
+              title="LangSmith"
+              integration={getIntegration('langsmith')}
+              onDisconnect={disconnect}
+              connectUrl={`/projects/new?projectId=${projectId}`}
+            >
+              <MetaDetail label="Project" value={getIntegration('langsmith')?.meta?.project_name} />
+            </SettingsIntegrationCard>
+
+            <SettingsIntegrationCard
+              type="braintrust"
+              title="Braintrust"
+              integration={getIntegration('braintrust')}
+              onDisconnect={disconnect}
+              connectUrl={`/projects/new?projectId=${projectId}`}
+            >
+              <MetaDetail label="Project" value={getIntegration('braintrust')?.meta?.project_name} />
+            </SettingsIntegrationCard>
+
+            <SettingsIntegrationCard
+              type="slack"
+              title="Slack"
+              integration={getIntegration('slack')}
+              onDisconnect={disconnect}
+              connectUrl={`/api/integrations/slack/authorize?project_id=${projectId}&return_to=${encodeURIComponent(`/projects/${projectId}/settings`)}`}
+              openInNewTab
+              onRefresh={loadData}
+            >
+              <SlackDetails integration={getIntegration('slack')} projectId={projectId} onRefresh={loadData} />
+            </SettingsIntegrationCard>
+          </div>
         </div>
 
-        <div className="space-y-4">
-          <SettingsIntegrationCard
-            type="github"
-            title="GitHub"
-            integration={getIntegration('github')}
-            onDisconnect={disconnect}
-            connectUrl={`/api/integrations/github/install?project_id=${projectId}&return_to=${encodeURIComponent(`/projects/${projectId}/settings`)}`}
-            openInNewTab
-            onRefresh={loadData}
-          >
-            <GitHubDetails integration={getIntegration('github')} projectId={projectId} onRefresh={loadData} />
-          </SettingsIntegrationCard>
+        {/* Schedule */}
+        <ScheduleSection projectId={projectId} />
 
-          <SettingsIntegrationCard
-            type="posthog"
-            title="PostHog"
-            integration={getIntegration('posthog')}
-            onDisconnect={disconnect}
-            connectUrl={`/projects/new?projectId=${projectId}`}
-          >
-            <MetaDetail label="Project" value={getIntegration('posthog')?.meta?.posthog_project_id} />
-            <MetaDetail label="Host" value={getIntegration('posthog')?.meta?.api_host} />
-          </SettingsIntegrationCard>
-
-          <SettingsIntegrationCard
-            type="sentry"
-            title="Sentry"
-            integration={getIntegration('sentry')}
-            onDisconnect={disconnect}
-            connectUrl={`/projects/new?projectId=${projectId}`}
-          >
-            <MetaDetail
-              label="Project"
-              value={
-                getIntegration('sentry')?.meta
-                  ? `${getIntegration('sentry')!.meta.organization_slug}/${getIntegration('sentry')!.meta.project_slug}`
-                  : undefined
-              }
-            />
-          </SettingsIntegrationCard>
-
-          <SettingsIntegrationCard
-            type="langsmith"
-            title="LangSmith"
-            integration={getIntegration('langsmith')}
-            onDisconnect={disconnect}
-            connectUrl={`/projects/new?projectId=${projectId}`}
-          >
-            <MetaDetail label="Project" value={getIntegration('langsmith')?.meta?.project_name} />
-          </SettingsIntegrationCard>
-
-          <SettingsIntegrationCard
-            type="braintrust"
-            title="Braintrust"
-            integration={getIntegration('braintrust')}
-            onDisconnect={disconnect}
-            connectUrl={`/projects/new?projectId=${projectId}`}
-          >
-            <MetaDetail label="Project" value={getIntegration('braintrust')?.meta?.project_name} />
-          </SettingsIntegrationCard>
-
-          <SettingsIntegrationCard
-            type="slack"
-            title="Slack"
-            integration={getIntegration('slack')}
-            onDisconnect={disconnect}
-            connectUrl={`/api/integrations/slack/authorize?project_id=${projectId}&return_to=${encodeURIComponent(`/projects/${projectId}/settings`)}`}
-            openInNewTab
-            onRefresh={loadData}
-          >
-            <SlackDetails integration={getIntegration('slack')} projectId={projectId} onRefresh={loadData} />
-          </SettingsIntegrationCard>
-        </div>
+        {/* Danger Zone */}
+        <DeleteProjectSection projectId={projectId} projectName={project?.name || ''} />
       </div>
-
-      <ScheduleSection projectId={projectId} />
-
-      <DeleteProjectSection projectId={projectId} projectName={project?.name || ''} />
-    </div>
+    </PanelPage>
   )
 }
 
@@ -241,9 +228,7 @@ function ScheduleSection({ projectId }: { projectId: string }) {
         setDays(data.schedule_days ?? ['mon', 'tue', 'wed', 'thu', 'fri'])
         setTimezone(data.timezone || detectedTz)
       })
-      .catch(() => {
-        setTimezone(detectedTz)
-      })
+      .catch(() => { setTimezone(detectedTz) })
       .finally(() => setLoading(false))
   }, [projectId])
 
@@ -253,108 +238,60 @@ function ScheduleSection({ projectId }: { projectId: string }) {
       const res = await fetch(`/api/projects/${projectId}/schedule`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          schedule_enabled: enabled,
-          schedule_time: time,
-          schedule_days: days,
-          timezone,
-        }),
+        body: JSON.stringify({ schedule_enabled: enabled, schedule_time: time, schedule_days: days, timezone }),
       })
-      if (res.ok) {
-        toast.success('Schedule updated')
-      } else {
-        toast.error('Failed to update schedule')
-      }
-    } catch {
-      toast.error('Failed to update schedule')
-    } finally {
-      setSaving(false)
-    }
+      if (res.ok) toast.success('Schedule updated')
+      else toast.error('Failed to update schedule')
+    } catch { toast.error('Failed to update schedule') } finally { setSaving(false) }
   }
 
   function toggleDay(day: string) {
-    setDays((prev) =>
-      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day],
-    )
+    setDays((prev) => prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day])
   }
 
   if (loading) return null
 
   return (
     <div>
-      <h2 className="text-2xl mb-6">Nightly Testing Schedule</h2>
-      <div className="border rounded-lg p-6 space-y-6">
+      <h3 className="text-xs text-muted-foreground uppercase tracking-wider mb-4">Schedule</h3>
+      <div className="border border-border rounded-lg p-4 space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-lg">Automatic test suggestions</p>
-            <p className="text-sm opacity-40">
-              Verona will analyze your project and suggest test flows on a schedule
-            </p>
+            <p className="text-sm">Automatic test suggestions</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Analyze and suggest test flows on a schedule</p>
           </div>
           <button
             onClick={() => setEnabled(!enabled)}
-            className={`w-12 h-7 rounded-full transition-colors relative ${
-              enabled ? 'bg-green-500' : 'bg-muted'
-            }`}
+            className={`w-10 h-6 rounded-full transition-colors relative ${enabled ? 'bg-green-500' : 'bg-muted'}`}
           >
-            <span
-              className={`absolute top-0.5 w-6 h-6 rounded-full bg-white transition-transform ${
-                enabled ? 'left-[22px]' : 'left-0.5'
-              }`}
-            />
+            <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${enabled ? 'left-[18px]' : 'left-0.5'}`} />
           </button>
         </div>
 
         {enabled && (
           <>
             <div>
-              <label className="text-sm opacity-60 block mb-2">Time</label>
-              <input
-                type="time"
-                value={time}
-                onChange={(e) => setTime(e.target.value)}
-                className="bg-transparent border rounded px-3 py-2 text-base outline-none"
-              />
+              <label className="text-xs text-muted-foreground block mb-1.5">Time</label>
+              <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="bg-transparent border border-border rounded px-2.5 py-1.5 text-sm outline-none" />
             </div>
-
             <div>
-              <label className="text-sm opacity-60 block mb-2">Days</label>
-              <div className="flex gap-2">
+              <label className="text-xs text-muted-foreground block mb-1.5">Days</label>
+              <div className="flex gap-1.5">
                 {DAYS.map((d) => (
-                  <button
-                    key={d.value}
-                    onClick={() => toggleDay(d.value)}
-                    className={`px-3 py-1.5 text-sm rounded border transition-colors ${
-                      days.includes(d.value)
-                        ? 'bg-primary text-primary-foreground border-primary'
-                        : 'opacity-40 hover:opacity-60'
-                    }`}
-                  >
+                  <button key={d.value} onClick={() => toggleDay(d.value)} className={`px-2.5 py-1 text-xs rounded border transition-colors ${days.includes(d.value) ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
                     {d.label}
                   </button>
                 ))}
               </div>
             </div>
-
             <div>
-              <label className="text-sm opacity-60 block mb-2">Timezone</label>
-              <input
-                value={timezone}
-                onChange={(e) => setTimezone(e.target.value)}
-                placeholder="America/New_York"
-                className="w-full max-w-sm bg-transparent border-b py-2 text-base outline-none placeholder:opacity-30"
-              />
+              <label className="text-xs text-muted-foreground block mb-1.5">Timezone</label>
+              <input value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="America/New_York" className="w-full max-w-xs bg-transparent border-b border-border py-1.5 text-sm outline-none placeholder:text-muted-foreground/50" />
             </div>
           </>
         )}
 
-        <button
-          onClick={save}
-          disabled={saving}
-          className="text-base underline disabled:opacity-30"
-        >
-          {saving ? 'Saving...' : 'Save schedule'}
-        </button>
+        <button onClick={save} disabled={saving} className="text-sm underline disabled:opacity-30">{saving ? 'Saving...' : 'Save schedule'}</button>
       </div>
     </div>
   )
@@ -430,60 +367,37 @@ function SettingsIntegrationCard({
   }, [waiting, connected, title, type])
 
   return (
-    <div className="border rounded-lg p-5">
+    <div className="border border-border rounded-lg p-4">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h3 className="text-xl font-medium">{title}</h3>
-          <span className={`text-sm px-2 py-0.5 rounded-full ${connected ? 'bg-green-500/10 text-green-600' : waiting ? 'bg-yellow-500/10 text-yellow-600' : 'opacity-40 border'}`}>
+        <div className="flex items-center gap-2">
+          <h4 className="text-sm font-medium">{title}</h4>
+          <span className={`text-xs px-1.5 py-0.5 rounded-full ${connected ? 'bg-green-500/10 text-green-500' : waiting ? 'bg-yellow-500/10 text-yellow-500' : 'text-muted-foreground/50'}`}>
             {connected ? 'Active' : waiting ? 'Waiting...' : 'Not connected'}
           </span>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           {connected ? (
-            <button
-              onClick={() => onDisconnect(integration.id, title)}
-              className="text-base opacity-40 hover:opacity-70 underline"
-            >
-              Disconnect
-            </button>
+            <button onClick={() => onDisconnect(integration.id, title)} className="text-xs text-muted-foreground hover:text-foreground underline">Disconnect</button>
           ) : waiting ? (
-            <span className="text-base opacity-40">Complete setup in the opened tab</span>
+            <span className="text-xs text-muted-foreground">Complete setup in the opened tab</span>
           ) : openInNewTab ? (
-            <button onClick={handleConnect} className="text-base underline opacity-60 hover:opacity-100">
-              Connect →
-            </button>
+            <button onClick={handleConnect} className="text-xs underline text-foreground/60 hover:text-foreground">Connect →</button>
           ) : (
-            <a href={connectUrl} className="text-base underline opacity-60 hover:opacity-100">
-              Connect →
-            </a>
+            <a href={connectUrl} className="text-xs underline text-foreground/60 hover:text-foreground">Connect →</a>
           )}
         </div>
       </div>
-      {connected && children && (
-        <div className="mt-3 text-base opacity-60">{children}</div>
-      )}
+      {connected && children && <div className="mt-2 text-xs text-muted-foreground">{children}</div>}
     </div>
   )
 }
 
 function MetaDetail({ label, value }: { label: string; value?: unknown }) {
   if (!value) return null
-  return (
-    <p>
-      {label}: <span className="opacity-80">{String(value)}</span>
-    </p>
-  )
+  return <p>{label}: <span className="text-foreground/70">{String(value)}</span></p>
 }
 
-function GitHubDetails({
-  integration,
-  projectId,
-  onRefresh,
-}: {
-  integration?: IntegrationData
-  projectId: string
-  onRefresh: () => void
-}) {
+function GitHubDetails({ integration, projectId, onRefresh }: { integration?: IntegrationData; projectId: string; onRefresh: () => void }) {
   if (!integration) return null
   const repos = (integration.meta?.repos as Array<{ full_name: string; private: boolean }>) || []
   const linked = repos[0]?.full_name
@@ -491,30 +405,16 @@ function GitHubDetails({
   return (
     <div className="space-y-2">
       {linked ? (
-        <p className="text-base">
-          Linked repository:{' '}
-          <span className="opacity-90">
-            {linked}
-            {repos[0]?.private && <span className="ml-2 text-sm opacity-50">private</span>}
-          </span>
-        </p>
+        <p className="text-xs">Linked repository: <span className="text-foreground/80">{linked}{repos[0]?.private && <span className="ml-1 text-muted-foreground">(private)</span>}</span></p>
       ) : (
-        <p className="text-base text-amber-600/90">Choose a repository below so the QA agent knows which codebase to use.</p>
+        <p className="text-xs text-amber-500/80">Choose a repository below.</p>
       )}
       <GitHubRepoPicker projectId={projectId} onSaved={onRefresh} />
     </div>
   )
 }
 
-function SlackDetails({
-  integration,
-  projectId,
-  onRefresh,
-}: {
-  integration?: IntegrationData
-  projectId: string
-  onRefresh: () => void
-}) {
+function SlackDetails({ integration, projectId, onRefresh }: { integration?: IntegrationData; projectId: string; onRefresh: () => void }) {
   const [channels, setChannels] = useState<Array<{ id: string; name: string }>>([])
   const [showPicker, setShowPicker] = useState(false)
   const [loadingChannels, setLoadingChannels] = useState(false)
@@ -534,11 +434,7 @@ function SlackDetails({
         setChannels(data.channels || [])
         setShowPicker(true)
       }
-    } catch {
-      toast.error('Failed to load channels')
-    } finally {
-      setLoadingChannels(false)
-    }
+    } catch { toast.error('Failed to load channels') } finally { setLoadingChannels(false) }
   }
 
   async function selectChannel(channelId: string, name: string) {
@@ -554,11 +450,7 @@ function SlackDetails({
         setShowPicker(false)
         onRefresh()
       }
-    } catch {
-      toast.error('Failed to set channel')
-    } finally {
-      setSaving(false)
-    }
+    } catch { toast.error('Failed to set channel') } finally { setSaving(false) }
   }
 
   return (
@@ -567,26 +459,17 @@ function SlackDetails({
       {channelName ? (
         <div className="flex items-center gap-2">
           <p>Channel: #{channelName}</p>
-          <button onClick={loadChannels} disabled={loadingChannels} className="text-sm underline opacity-50">
-            Change
-          </button>
+          <button onClick={loadChannels} disabled={loadingChannels} className="text-xs underline text-muted-foreground">Change</button>
         </div>
       ) : (
-        <button onClick={loadChannels} disabled={loadingChannels} className="text-sm underline mt-1">
+        <button onClick={loadChannels} disabled={loadingChannels} className="text-xs underline mt-1">
           {loadingChannels ? 'Loading...' : 'Select a channel'}
         </button>
       )}
       {showPicker && (
-        <div className="mt-2 max-h-48 overflow-y-auto border rounded p-2 space-y-1">
+        <div className="mt-2 max-h-36 overflow-y-auto border border-border rounded p-2 space-y-0.5">
           {channels.map((ch) => (
-            <button
-              key={ch.id}
-              onClick={() => selectChannel(ch.id, ch.name)}
-              disabled={saving}
-              className="block w-full text-left px-2 py-1 rounded text-base hover:bg-white/5"
-            >
-              #{ch.name}
-            </button>
+            <button key={ch.id} onClick={() => selectChannel(ch.id, ch.name)} disabled={saving} className="block w-full text-left px-2 py-1 rounded text-sm hover:bg-muted/50">#{ch.name}</button>
           ))}
         </div>
       )}
@@ -594,13 +477,7 @@ function SlackDetails({
   )
 }
 
-function DeleteProjectSection({
-  projectId,
-  projectName,
-}: {
-  projectId: string
-  projectName: string
-}) {
+function DeleteProjectSection({ projectId, projectName }: { projectId: string; projectName: string }) {
   const router = useRouter()
   const [confirmText, setConfirmText] = useState('')
   const [showConfirm, setShowConfirm] = useState(false)
@@ -618,56 +495,27 @@ function DeleteProjectSection({
         const data = await res.json().catch(() => ({}))
         toast.error(data.error || 'Failed to delete project')
       }
-    } catch {
-      toast.error('Failed to delete project')
-    } finally {
-      setDeleting(false)
-    }
+    } catch { toast.error('Failed to delete project') } finally { setDeleting(false) }
   }
 
   const nameMatches = confirmText === projectName
 
   return (
-    <div className="border border-red-500/20 rounded-lg p-6 mt-4">
-      <h2 className="text-3xl text-red-500/80 mb-2">Danger Zone</h2>
-      <p className="text-lg opacity-50 mb-6">
-        Deleting a project permanently removes all test templates, run history, results, and connected integrations. This cannot be undone.
+    <div className="border border-red-500/20 rounded-lg p-4">
+      <h3 className="text-sm text-red-500/80 font-medium mb-1">Danger Zone</h3>
+      <p className="text-xs text-muted-foreground mb-4">
+        Deleting a project permanently removes all data. This cannot be undone.
       </p>
 
       {!showConfirm ? (
-        <button
-          onClick={() => setShowConfirm(true)}
-          className="text-lg text-red-500/80 underline hover:text-red-500"
-        >
-          Delete this project
-        </button>
+        <button onClick={() => setShowConfirm(true)} className="text-xs text-red-500/80 underline hover:text-red-500">Delete this project</button>
       ) : (
-        <div className="space-y-4">
-          <p className="text-lg">
-            Type <span className="font-mono font-medium">{projectName}</span> to confirm:
-          </p>
-          <input
-            value={confirmText}
-            onChange={(e) => setConfirmText(e.target.value)}
-            placeholder={projectName}
-            autoComplete="off"
-            autoFocus
-            className="w-full max-w-sm border-b bg-transparent py-2 text-lg outline-none placeholder:opacity-60"
-          />
-          <div className="flex gap-4">
-            <button
-              onClick={handleDelete}
-              disabled={!nameMatches || deleting}
-              className="text-lg text-red-500 underline disabled:opacity-30 disabled:no-underline"
-            >
-              {deleting ? 'Deleting...' : 'Permanently delete project'}
-            </button>
-            <button
-              onClick={() => { setShowConfirm(false); setConfirmText('') }}
-              className="text-lg opacity-50 underline"
-            >
-              Cancel
-            </button>
+        <div className="space-y-3">
+          <p className="text-xs">Type <span className="font-mono font-medium">{projectName}</span> to confirm:</p>
+          <input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder={projectName} autoComplete="off" autoFocus className="w-full max-w-xs border-b border-border bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground/50" />
+          <div className="flex gap-3">
+            <button onClick={handleDelete} disabled={!nameMatches || deleting} className="text-xs text-red-500 underline disabled:opacity-30">{deleting ? 'Deleting...' : 'Permanently delete'}</button>
+            <button onClick={() => { setShowConfirm(false); setConfirmText('') }} className="text-xs text-muted-foreground underline">Cancel</button>
           </div>
         </div>
       )}
