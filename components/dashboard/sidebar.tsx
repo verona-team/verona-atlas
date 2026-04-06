@@ -6,7 +6,15 @@ import { Plus, PanelLeftClose, PanelLeft } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useWorkspace } from '@/lib/workspace-context'
 import { SignOutLink } from '@/components/dashboard/sign-out-link'
-import { InteractiveLogo } from '@/components/landing/interactive-logo'
+
+function OrgOrb({ name }: { name: string }) {
+  const letter = (name || 'V').charAt(0).toUpperCase()
+  return (
+    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 shadow-sm">
+      <span className="text-[10px] font-bold text-white leading-none">{letter}</span>
+    </div>
+  )
+}
 
 export function AppSidebar() {
   const {
@@ -15,6 +23,7 @@ export function AppSidebar() {
     sidebarCollapsed,
     toggleSidebar,
     setShowNewProjectModal,
+    orgName,
     userEmail,
   } = useWorkspace()
   const pathname = usePathname()
@@ -42,14 +51,15 @@ export function AppSidebar() {
             : 'fixed inset-y-0 left-0 z-50 w-64 lg:relative lg:z-auto',
         )}
       >
-        {/* Top: logo + collapse toggle */}
+        {/* Top: orb + org name + collapse toggle */}
         <div className="flex h-12 shrink-0 items-center justify-between px-3 border-b border-sidebar-border">
-          <Link href="/" className="flex items-center shrink-0 overflow-hidden rounded-md" style={{ width: 32, height: 32 }}>
-            <InteractiveLogo size={32} />
-          </Link>
+          <div className="flex items-center gap-2 min-w-0">
+            <OrgOrb name={orgName} />
+            <span className="text-sm font-semibold truncate">{orgName || 'Verona'}</span>
+          </div>
           <button
             onClick={toggleSidebar}
-            className="rounded-md p-1 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors"
+            className="rounded-md p-1 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors shrink-0 ml-2"
           >
             <PanelLeftClose className="h-4 w-4" />
           </button>

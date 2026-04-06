@@ -103,7 +103,7 @@ export function InteractiveLogo({
     points.map((_, i) => i % DOT_COLORS.length)
   ).current
 
-  const PAD = size >= 80 ? 2.2 : 1.35
+  const PAD = 2.2
   const canvasSize = Math.ceil(size * PAD)
 
   const render = useCallback(() => {
@@ -124,7 +124,7 @@ export function InteractiveLogo({
     ctx.clearRect(0, 0, w, h)
 
     const s = stateRef.current
-    const fov = Math.min(250, 250 * (size / 120))
+    const fov = 250
     const viewDist = 4.5
 
     const projected: (ProjectedPoint & { origIdx: number })[] = points.map((p, i) => {
@@ -216,7 +216,7 @@ export function InteractiveLogo({
   return (
     <div
       className={className}
-      style={{ width: size, height: size, position: 'relative', overflow: size >= 80 ? 'visible' : 'hidden' }}
+      style={{ width: size, height: size, position: 'relative', overflow: 'visible' }}
     >
       <canvas
         ref={canvasRef}
