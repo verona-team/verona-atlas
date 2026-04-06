@@ -100,9 +100,9 @@ export default function RunDetailPage() {
         {summary && typeof summary.total === 'number' && (
           <div className="flex gap-6 text-sm">
             <span>{summary.total} total</span>
-            <span className="text-green-500">{summary.passed || 0} passed</span>
-            <span className="text-red-500">{summary.failed || 0} failed</span>
-            <span className="text-amber-500">{summary.errors || 0} errors</span>
+            <span className="text-green-600">{summary.passed || 0} passed</span>
+            <span className="text-red-600">{summary.failed || 0} failed</span>
+            <span className="text-amber-600">{summary.errors || 0} errors</span>
           </div>
         )}
 
@@ -130,7 +130,7 @@ export default function RunDetailPage() {
                     onClick={() => setExpandedResult(expandedResult === result.id ? null : result.id)}
                   >
                     <div className="flex items-center gap-3">
-                      <span className={result.status === 'passed' ? 'text-green-500' : result.status === 'failed' ? 'text-red-500' : 'text-amber-500'}>
+                      <span className={result.status === 'passed' ? 'text-green-600' : result.status === 'failed' ? 'text-red-600' : 'text-amber-600'}>
                         {result.status === 'passed' ? '✓' : result.status === 'failed' ? '✗' : '!'}
                       </span>
                       <span className="text-foreground/80">{result.test_templates?.name || 'Unknown'}</span>
@@ -143,7 +143,7 @@ export default function RunDetailPage() {
                   {expandedResult === result.id && (
                     <div className="pb-4 pl-6 space-y-3 text-sm">
                       {result.error_message && (
-                        <pre className="whitespace-pre-wrap text-red-500/80">{result.error_message}</pre>
+                        <pre className="whitespace-pre-wrap text-red-600/80">{result.error_message}</pre>
                       )}
                       {result.ai_analysis && (
                         <pre className="whitespace-pre-wrap text-foreground/60">{result.ai_analysis}</pre>

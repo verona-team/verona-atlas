@@ -265,14 +265,11 @@ When "Runs" or "Settings" is clicked from the header, content renders in the mai
 
 ---
 
-### Step 10: Dark Theme as Default
+### Step 10: Light Theme (Matching Landing Page)
 
-**Why:** Claude Code uses a dark theme. The platform already has dark theme variables in `globals.css` but defaults to light.
+**Decision:** Keep the product in light mode to match the existing landing page/auth pages.
 
-**File to modify:**
-- `app/layout.tsx` — add `dark` class to `<html>` element (or use system preference detection)
-
-**Alternatively:** Apply `class="dark"` to the `<html>` tag and let users toggle. For the initial redesign, defaulting to dark matches the Claude Code aesthetic.
+**No file changes needed** — the default theme is already light. All dashboard components use semantic CSS variable tokens (`bg-background`, `text-foreground`, `border-border`, etc.) that adapt to the light theme automatically.
 
 ---
 

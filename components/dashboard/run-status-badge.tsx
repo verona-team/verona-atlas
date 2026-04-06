@@ -2,10 +2,10 @@
 
 const statusConfig = {
   pending: { label: 'pending', color: 'text-muted-foreground' },
-  planning: { label: 'planning', color: 'text-blue-400' },
-  running: { label: 'running', color: 'text-amber-400' },
-  completed: { label: 'done', color: 'text-green-400' },
-  failed: { label: 'failed', color: 'text-red-400' },
+  planning: { label: 'planning', color: 'text-blue-600' },
+  running: { label: 'running', color: 'text-amber-600' },
+  completed: { label: 'done', color: 'text-green-600' },
+  failed: { label: 'failed', color: 'text-red-600' },
 } as const
 
 interface RunStatusBadgeProps {

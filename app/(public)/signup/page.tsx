@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { signUp } from '@/app/actions/auth'
+import { MetisLogo } from '@/components/landing/metis-logo'
+import { HalftoneBackground } from '@/components/landing/halftone-background'
 import { toast } from 'sonner'
 
 export default function SignupPage() {
@@ -22,35 +24,40 @@ export default function SignupPage() {
 
   if (confirmEmail) {
     return (
-      <div className="flex min-h-screen flex-col bg-background">
-        <header className="flex items-center px-6 py-5 sm:px-10">
-          <Link href="/" className="text-sm font-semibold text-foreground">
-            Verona
+      <div className="relative flex min-h-screen flex-col overflow-hidden bg-white">
+        <HalftoneBackground />
+
+        <header className="relative z-10 flex items-center justify-between px-6 py-5 sm:px-10">
+          <Link href="/" className="flex items-center gap-2">
+            <MetisLogo size={20} className="text-[#1a1a1a]" />
           </Link>
         </header>
 
-        <main className="flex flex-1 items-center justify-center px-4">
-          <div className="w-full max-w-sm text-center">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-foreground/60">
+        <main className="relative z-10 flex flex-1 items-center justify-center px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white/90 px-10 py-12 shadow-sm backdrop-blur-sm ring-1 ring-[#1a1a1a]/[0.04] text-center">
+            <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-full bg-[#1a1a1a]/5">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#1a1a1a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="2" y="4" width="20" height="16" rx="2" />
                 <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
               </svg>
             </div>
-            <h1 className="text-lg font-medium text-foreground">
+            <h1 className="text-2xl font-semibold tracking-tight text-[#1a1a1a] sm:text-3xl">
               Check your email
             </h1>
-            <p className="mt-2 text-sm text-muted-foreground">
+            <p className="mt-3 text-sm text-[#1a1a1a]/50 leading-relaxed">
               We sent a confirmation link to
             </p>
-            <p className="mt-1 text-sm font-medium text-foreground">
+            <p className="mt-1 text-sm font-medium text-[#1a1a1a]">
               {confirmEmail}
             </p>
-            <p className="mt-3 text-xs text-muted-foreground leading-relaxed">
-              Click the link in the email to verify your account.
+            <p className="mt-4 text-sm text-[#1a1a1a]/50 leading-relaxed">
+              Click the link in the email to verify your account. If you don&apos;t see it, check your spam folder.
             </p>
-            <div className="mt-6 pt-4 border-t border-border">
-              <Link href="/login" className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+            <div className="mt-8 pt-6 border-t border-[#1a1a1a]/5">
+              <Link
+                href="/login"
+                className="text-[13px] text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors"
+              >
                 Back to sign in
               </Link>
             </div>
@@ -61,33 +68,37 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
-      <header className="flex items-center justify-between px-6 py-5 sm:px-10">
-        <Link href="/" className="text-sm font-semibold text-foreground">
-          Verona
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-white">
+      <HalftoneBackground />
+
+      <header className="relative z-10 flex items-center justify-between px-6 py-5 sm:px-10">
+        <Link href="/" className="flex items-center gap-2">
+          <MetisLogo size={20} className="text-[#1a1a1a]" />
         </Link>
         <Link
           href="/login"
-          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          className="text-[13px] font-medium text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors"
         >
           Sign in
         </Link>
       </header>
 
-      <main className="flex flex-1 items-center justify-center px-4">
-        <div className="w-full max-w-sm">
-          <div className="mb-8 text-center">
-            <h1 className="text-xl font-medium text-foreground">
+      <main className="relative z-10 flex flex-1 items-center justify-center px-4">
+        <div className="w-full max-w-md rounded-2xl bg-white/90 px-10 py-12 shadow-sm backdrop-blur-sm ring-1 ring-[#1a1a1a]/[0.04]">
+          <div className="mb-10 text-center">
+            <h1
+              className="text-3xl font-semibold tracking-tight text-[#1a1a1a] sm:text-4xl"
+            >
               Create your account
             </h1>
-            <p className="mt-1.5 text-sm text-muted-foreground">
+            <p className="mt-2 text-sm text-[#1a1a1a]/50">
               Get started with autonomous QA testing
             </p>
           </div>
 
-          <form action={handleSubmit} className="space-y-4">
+          <form action={handleSubmit} className="space-y-5">
             <div className="space-y-1.5">
-              <label htmlFor="orgName" className="block text-xs text-muted-foreground">
+              <label htmlFor="orgName" className="block text-[13px] font-medium text-[#1a1a1a]/70">
                 Organization Name
               </label>
               <input
@@ -96,11 +107,11 @@ export default function SignupPage() {
                 type="text"
                 placeholder="Acme Inc."
                 required
-                className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-foreground/30 focus:ring-1 focus:ring-ring"
+                className="h-10 w-full rounded-lg border border-[#1a1a1a]/10 bg-white px-3 text-sm text-[#1a1a1a] outline-none transition-colors placeholder:text-[#1a1a1a]/30 focus:border-[#1a1a1a]/30 focus:ring-2 focus:ring-[#1a1a1a]/5"
               />
             </div>
             <div className="space-y-1.5">
-              <label htmlFor="email" className="block text-xs text-muted-foreground">
+              <label htmlFor="email" className="block text-[13px] font-medium text-[#1a1a1a]/70">
                 Email
               </label>
               <input
@@ -110,11 +121,11 @@ export default function SignupPage() {
                 placeholder="you@company.com"
                 required
                 autoComplete="email"
-                className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-foreground/30 focus:ring-1 focus:ring-ring"
+                className="h-10 w-full rounded-lg border border-[#1a1a1a]/10 bg-white px-3 text-sm text-[#1a1a1a] outline-none transition-colors placeholder:text-[#1a1a1a]/30 focus:border-[#1a1a1a]/30 focus:ring-2 focus:ring-[#1a1a1a]/5"
               />
             </div>
             <div className="space-y-1.5">
-              <label htmlFor="password" className="block text-xs text-muted-foreground">
+              <label htmlFor="password" className="block text-[13px] font-medium text-[#1a1a1a]/70">
                 Password
               </label>
               <input
@@ -125,22 +136,22 @@ export default function SignupPage() {
                 required
                 autoComplete="new-password"
                 minLength={8}
-                className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-foreground/30 focus:ring-1 focus:ring-ring"
+                className="h-10 w-full rounded-lg border border-[#1a1a1a]/10 bg-white px-3 text-sm text-[#1a1a1a] outline-none transition-colors placeholder:text-[#1a1a1a]/30 focus:border-[#1a1a1a]/30 focus:ring-2 focus:ring-[#1a1a1a]/5"
               />
             </div>
 
             <button
               type="submit"
               disabled={loading}
-              className="mt-2 h-9 w-full rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+              className="mt-2 h-10 w-full rounded-lg bg-[#1a1a1a] text-sm font-medium text-white transition-colors hover:bg-[#333] disabled:opacity-50"
             >
               {loading ? 'Creating account...' : 'Create Account'}
             </button>
           </form>
 
-          <p className="mt-6 text-center text-xs text-muted-foreground">
+          <p className="mt-8 text-center text-[13px] text-[#1a1a1a]/40">
             Already have an account?{' '}
-            <Link href="/login" className="text-foreground/70 hover:text-foreground transition-colors">
+            <Link href="/login" className="text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors">
               Sign in
             </Link>
           </p>
