@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 # Stagehand session + inner execute agent (Browserbase). Provider/model form per Stagehand API.
-STAGEHAND_AGENT_MODEL = "google/gemini-2.5-computer-use-preview-10-2025"
+STAGEHAND_AGENT_MODEL = "anthropic/claude-opus-4-6"
 STAGEHAND_SESSION_MODEL = STAGEHAND_AGENT_MODEL
 
 OUTER_AGENT_MODEL = "claude-opus-4-6"
