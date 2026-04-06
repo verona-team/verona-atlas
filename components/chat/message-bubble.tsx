@@ -2,6 +2,7 @@
 
 import type { ProposedFlow } from './flow-proposal-card'
 import { FlowProposalCard } from './flow-proposal-card'
+import { MarkdownContent } from './markdown-content'
 import type { Json } from '@/lib/supabase/types'
 
 interface MessageBubbleProps {
@@ -45,8 +46,8 @@ export function MessageBubble({
         ) : (
           <>
             {!isFlowProposal && !isRunStarted && (
-              <div className="text-lg opacity-90 whitespace-pre-wrap leading-relaxed">
-                {content}
+              <div className="text-base opacity-90">
+                <MarkdownContent content={content} />
                 {isStreaming && (
                   <span className="inline-block w-2 h-5 ml-1 bg-foreground/60 animate-pulse" />
                 )}

@@ -6,6 +6,7 @@ import { Plus, PanelLeftClose, PanelLeft } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useWorkspace } from '@/lib/workspace-context'
 import { SignOutLink } from '@/components/dashboard/sign-out-link'
+import { InteractiveLogo } from '@/components/landing/interactive-logo'
 
 export function AppSidebar() {
   const {
@@ -42,10 +43,10 @@ export function AppSidebar() {
         )}
       >
         {/* Top: logo + collapse toggle */}
-        <div className="flex h-12 shrink-0 items-center justify-between px-4 border-b border-sidebar-border">
-          <span className="text-sm font-semibold tracking-tight truncate">
-            Verona
-          </span>
+        <div className="flex h-12 shrink-0 items-center justify-between px-3 border-b border-sidebar-border">
+          <Link href="/" className="flex items-center gap-2 shrink-0">
+            <InteractiveLogo size={28} />
+          </Link>
           <button
             onClick={toggleSidebar}
             className="rounded-md p-1 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors"
