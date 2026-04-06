@@ -17,19 +17,37 @@ from playwright.async_api import async_playwright
 from runner.prompts import STAGEHAND_SESSION_MODEL
 
 
+def _strip_provider_prefix(model: str) -> tuple[str, str]:
+    """Split ``'provider/model-id'`` → ``(provider, model-id)``.
+
+    If no ``/`` is present, defaults to ``("anthropic", model)``.
+    """
+    if "/" in model:
+        provider, _, bare = model.partition("/")
+        return provider, bare
+    return "anthropic", model
+
+
 def stagehand_agent_model_config(model_name: str | None = None) -> dict[str, str]:
     """Model config for Stagehand ``agent_config.model`` and ``observe`` ``options.model`` (ModelConfigParam).
 
-    Uses snake_case keys per the Stagehand Python SDK; they serialize to ``modelName`` / ``apiKey`` in JSON.
-    Embeds ``api_key`` so Anthropic auth resolves inside agentExecute/CUA (header alone is not always applied).
+    Uses snake_case keys per the Stagehand Python SDK; they serialize to
+    ``modelName`` / ``apiKey`` / ``provider`` in the JSON body.
+
+    The ``model_name`` value is the **bare** model id (e.g. ``claude-opus-4-6``)
+    with the provider supplied separately.  Passing the prefixed form
+    ``anthropic/claude-opus-4-6`` as ``modelName`` caused a 404 on the
+    agentExecute endpoint because the server forwarded it verbatim to
+    Anthropic's API, which does not recognise the prefix.
     """
     key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
     if not key:
         raise ValueError("ANTHROPIC_API_KEY is required for Stagehand agent/observe model config")
-    name = model_name or STAGEHAND_SESSION_MODEL
+    raw = model_name or STAGEHAND_SESSION_MODEL
+    provider, bare_model = _strip_provider_prefix(raw)
     return {
-        "provider": "anthropic",
-        "model_name": name,
+        "provider": provider,
+        "model_name": bare_model,
         "api_key": key,
     }
 
