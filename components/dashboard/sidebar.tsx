@@ -7,12 +7,9 @@ import { cn } from '@/lib/utils'
 import { useWorkspace } from '@/lib/workspace-context'
 import { SignOutLink } from '@/components/dashboard/sign-out-link'
 
-function OrgOrb({ name }: { name: string }) {
-  const letter = (name || 'V').charAt(0).toUpperCase()
+function OrgOrb() {
   return (
-    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 shadow-sm">
-      <span className="text-[10px] font-bold text-white leading-none">{letter}</span>
-    </div>
+    <div className="h-6 w-6 shrink-0 rounded-full bg-gradient-to-br from-cyan-400 via-violet-500 to-fuchsia-600 shadow-[0_0_8px_rgba(139,92,246,0.4)]" />
   )
 }
 
@@ -54,7 +51,7 @@ export function AppSidebar() {
         {/* Top: orb + org name + collapse toggle */}
         <div className="flex h-12 shrink-0 items-center justify-between px-3 border-b border-sidebar-border">
           <div className="flex items-center gap-2 min-w-0">
-            <OrgOrb name={orgName} />
+            <OrgOrb />
             <span className="text-sm font-semibold truncate">{orgName || 'Verona'}</span>
           </div>
           <button
