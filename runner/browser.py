@@ -17,9 +17,21 @@ from playwright.async_api import async_playwright
 from runner.prompts import STAGEHAND_SESSION_MODEL
 
 
-def stagehand_agent_model_for_api(model_name: str | None = None) -> str:
-    """Value for Stagehand `agent_config.model` / observe `options.model` (same as `STAGEHAND_SESSION_MODEL`)."""
-    return model_name or STAGEHAND_SESSION_MODEL
+def stagehand_agent_model_config(model_name: str | None = None) -> dict[str, str]:
+    """Model config for Stagehand ``agent_config.model`` and ``observe`` ``options.model`` (ModelConfigParam).
+
+    Uses snake_case keys per the Stagehand Python SDK; they serialize to ``modelName`` / ``apiKey`` in JSON.
+    Embeds ``api_key`` so Anthropic auth resolves inside agentExecute/CUA (header alone is not always applied).
+    """
+    key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    if not key:
+        raise ValueError("ANTHROPIC_API_KEY is required for Stagehand agent/observe model config")
+    name = model_name or STAGEHAND_SESSION_MODEL
+    return {
+        "provider": "anthropic",
+        "model_name": name,
+        "api_key": key,
+    }
 
 
 def _resolve_anthropic_key_for_stagehand_client() -> tuple[str, str]:
