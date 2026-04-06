@@ -1,14 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getServerUser } from '@/lib/supabase/server-user'
-import { encrypt } from '@/lib/encryption'
 import { z } from 'zod'
 
 const UpdateProjectSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   app_url: z.string().url().optional(),
-  auth_email: z.union([z.string().email(), z.literal('')]).optional(),
-  auth_password: z.string().optional(),
 })
 
 type RouteContext = { params: Promise<{ projectId: string }> }
@@ -64,15 +61,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   const { project } = await getProjectForUser(supabase, user.id, projectId)
   if (!project) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const { name, app_url, auth_email, auth_password } = parsed.data
+  const { name, app_url } = parsed.data
   const update: Record<string, unknown> = {}
 
   if (name !== undefined) update.name = name
   if (app_url !== undefined) update.app_url = app_url
-  if (auth_email !== undefined) update.auth_email = auth_email === '' ? null : auth_email
-  if (auth_password !== undefined) {
-    update.auth_password_encrypted = auth_password ? encrypt(auth_password) : null
-  }
 
   if (Object.keys(update).length === 0) {
     return NextResponse.json(project)

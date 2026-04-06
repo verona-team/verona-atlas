@@ -64,6 +64,54 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "save_credentials",
+        "description": (
+            "Save the credentials you used to create an account on the target "
+            "platform. Call this immediately after you have successfully signed up "
+            "and confirmed that the account works (e.g. you are logged in and can "
+            "see the authenticated UI). These credentials will be stored and "
+            "provided to you on future test runs so you can log in directly "
+            "without creating a new account."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "description": "The email address used to create the account.",
+                },
+                "password": {
+                    "type": "string",
+                    "description": "The password used to create the account.",
+                },
+            },
+            "required": ["email", "password"],
+        },
+    },
+    {
+        "name": "check_email",
+        "description": (
+            "Check your email inbox for recent messages. Use this to retrieve "
+            "verification codes, confirmation links, or other emails sent during "
+            "account signup or 2FA. Returns the most recent messages received "
+            "since the test started, including subject lines and body text."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "timeout_seconds": {
+                    "type": "integer",
+                    "description": (
+                        "How long to wait (in seconds) for new messages before "
+                        "giving up. Defaults to 30. Use a longer timeout if you "
+                        "just triggered an email and expect a short delay."
+                    ),
+                }
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "complete_test",
         "description": (
             "Signal that the test flow execution is complete. Call this when you "
@@ -128,12 +176,96 @@ TOOLS: list[dict[str, Any]] = [
 ]
 
 
+def _build_auth_section(
+    agentmail_address: str | None,
+    existing_credentials: dict | None,
+    generated_password: str | None,
+) -> str:
+    """Build the authentication instructions for the system prompt."""
+    if not agentmail_address:
+        return (
+            "\n\n## Authentication\n\n"
+            "No email inbox is configured for this project, so you cannot create "
+            "accounts or handle email-based verification. If the application "
+            "requires authentication, do your best to test any publicly accessible "
+            "pages, and report that authentication was required but unavailable."
+        )
+
+    if existing_credentials:
+        email = existing_credentials.get("email", "")
+        password = existing_credentials.get("password", "")
+        return (
+            "\n\n## Authentication\n\n"
+            "You have previously created an account on this platform. Use the "
+            "credentials below to log in before executing the test plan.\n\n"
+            f"- **Email:** `{email}`\n"
+            f"- **Password:** `{password}`\n\n"
+            "**Login instructions:**\n"
+            "1. Look for a login/sign-in page or link on the application.\n"
+            "2. Enter the email and password above.\n"
+            "3. If the platform sends a verification code to your email, use the "
+            "`check_email` tool to retrieve it, then enter the code.\n"
+            "4. Once you are logged in and can see the authenticated UI, proceed "
+            "with the test plan.\n\n"
+            "**If login fails** (e.g. invalid credentials, account locked/deleted), "
+            "create a new account instead using the signup instructions below, then "
+            "call `save_credentials` with the new credentials.\n\n"
+            "**Fallback — creating a new account:**\n"
+            f"- Use your email address: `{agentmail_address}`\n"
+            f"- Use this password: `{generated_password}`\n"
+            "- Navigate to the signup/register page and create the account.\n"
+            "- If the platform sends a verification email, use `check_email` to "
+            "retrieve the code or confirmation link.\n"
+            "- After successfully signing up and confirming you are logged in, "
+            "call `save_credentials` with the email and password you used."
+        )
+
+    return (
+        "\n\n## Authentication\n\n"
+        "This is the **first time** you are testing this platform. If the "
+        "application requires authentication (login/signup) to access the pages "
+        "you need to test, you must **create a new account**.\n\n"
+        "**Your email address and password for signup:**\n"
+        f"- **Email:** `{agentmail_address}`\n"
+        f"- **Password:** `{generated_password}`\n\n"
+        "**Signup instructions:**\n"
+        "1. Look for a signup/register page or link on the application.\n"
+        "2. Fill out the registration form using the email and password above. "
+        "For any other required fields (name, etc.), use reasonable test data.\n"
+        "3. If the platform sends a verification email (confirmation code or "
+        "link), use the `check_email` tool to retrieve it, then complete "
+        "verification.\n"
+        "4. Once you have successfully signed up and can see the authenticated "
+        "UI, **immediately call `save_credentials`** with the email and password "
+        "you used. This saves your credentials so you can reuse them on future "
+        "test runs.\n"
+        "5. Then proceed with the test plan.\n\n"
+        "**Important:** If the platform does NOT require authentication (all "
+        "pages are publicly accessible), skip signup and go straight to the "
+        "test plan."
+    )
+
+
 def build_system_prompt(
     template: dict,
     project: dict,
     integrations: dict[str, dict] | None = None,
+    agentmail_address: str | None = None,
+    existing_credentials: dict | None = None,
+    generated_password: str | None = None,
 ) -> str:
-    """Build the system prompt for the outer QA ReAct agent."""
+    """Build the system prompt for the outer QA ReAct agent.
+
+    Args:
+        template: Test template dict with steps.
+        project: Project dict from DB.
+        integrations: Connected observability integrations.
+        agentmail_address: The AgentMail address this agent can use for signup/2FA.
+        existing_credentials: Dict with 'email' and 'password' if the agent has
+            previously created an account for this project. None on first run.
+        generated_password: A pre-generated strong password the agent should use
+            when creating a new account. Provided when existing_credentials is None.
+    """
     steps = template.get("steps", [])
     if isinstance(steps, str):
         steps = json.loads(steps)
@@ -176,11 +308,16 @@ def build_system_prompt(
                 "Focus on the UI behavior you can observe directly."
             )
 
+    auth_section = _build_auth_section(
+        agentmail_address, existing_credentials, generated_password,
+    )
+
     return f"""You are an expert QA testing agent. Your job is to execute a UI test flow on a web application by interacting with the browser and verifying that the application behaves correctly.
 
 ## Application Under Test
 - **Name:** {project_name}
 - **URL:** {app_url}
+{auth_section}
 
 ## Test Plan
 
@@ -202,10 +339,13 @@ Repeat this observe → reason → act cycle until the entire test flow is compl
 
 - **browser_action** — Execute a browser interaction (click, type, navigate, scroll, etc.) via the Stagehand AI browser agent. After each action you will receive a screenshot showing the resulting page state.
 - **observe_dom** — Perform a precise DOM-level check to verify element presence, text content, or other DOM state. Use this when you need programmatic confirmation beyond what you can see in the screenshot.
+- **save_credentials** — Save the email and password you used to create an account on the target platform. Call this immediately after successful signup so you can reuse the credentials on future runs. Only call this after you have confirmed the account works.
+- **check_email** — Check your email inbox for recent messages (verification codes, confirmation links, etc.). Use this when the platform sends a verification email during signup or login.
 - **complete_test** — Signal that the test is finished. Call this once all steps are done and verified, or when you encounter an unrecoverable blocking issue.
 
 ## Guidelines
 
+- **Authenticate first.** If the application requires login/signup, handle authentication before starting the test plan. Follow the authentication instructions above.
 - **Be thorough.** Complete every step in the test plan. Do not skip steps unless genuinely blocked.
 - **Be observant.** After each action, carefully examine the screenshot. Look for error messages, unexpected UI states, loading indicators, pop-ups, modals, or anything that suggests the action did not work as expected.
 - **Be adaptive.** If the UI does not match what you expect (different layout, extra confirmation dialogs, changed button labels, new onboarding modals), adapt and find the correct way forward instead of failing.
