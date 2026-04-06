@@ -24,7 +24,6 @@ export default function ProjectSettingsPage() {
   const params = useParams<{ projectId: string }>()
   const searchParams = useSearchParams()
   const projectId = params.projectId
-  const router = useRouter()
   const toastShown = useRef(false)
 
   const [project, setProject] = useState<ProjectData | null>(null)
