@@ -45,20 +45,14 @@ def get_google_api_key_for_stagehand() -> str:
     return key
 
 
-def stagehand_agent_model_for_api(model_name: str | None = None) -> Any:
+def stagehand_agent_model_for_api(model_name: str | None = None) -> str:
     """Value for Stagehand `agent_config.model` / observe `options.model`.
 
-    Gemini Computer Use must receive the Google API key in the model config; a bare model id
-    string is not enough for agentExecute to authenticate with Google.
+    Returns the provider-prefixed model string (e.g. "google/gemini-…").
+    The Google API key is already set at the client level via model_api_key
+    in create_stagehand_session(), so per-call ModelConfig is not needed.
     """
-    name = model_name or STAGEHAND_SESSION_MODEL
-    if _is_google_gemini_stagehand_model(name):
-        return {
-            "model_name": name,
-            "api_key": get_google_api_key_for_stagehand(),
-            "provider": "google",
-        }
-    return name
+    return model_name or STAGEHAND_SESSION_MODEL
 
 
 def _resolve_model_api_key() -> str:

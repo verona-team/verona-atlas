@@ -277,6 +277,13 @@ async def execute_single_template(supabase, project, template, test_run_id: str,
         else:
             print("[TEMPLATE] No auth configured — skipping authentication")
 
+        # Navigate to the app URL before starting the test loop
+        app_url = project.get("app_url", "")
+        if app_url:
+            print(f"[TEMPLATE] Navigating to app URL: {app_url}")
+            await page.goto(app_url, wait_until="domcontentloaded", timeout=30000)
+            print(f"[TEMPLATE] Navigation complete — url={page.url}")
+
         # Execute the test template
         print(f"[TEMPLATE] Executing test template (ReAct loop)...")
         exec_t0 = time.time()
