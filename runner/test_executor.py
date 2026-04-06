@@ -18,6 +18,7 @@ from typing import Any
 
 from anthropic import Anthropic
 
+from runner.browser import stagehand_agent_model_for_api
 from runner.prompts import (
     OUTER_AGENT_MODEL,
     STAGEHAND_AGENT_MODEL,
@@ -69,7 +70,7 @@ async def execute_browser_action(session, page, instruction: str) -> dict:
                 "max_steps": 10,
             },
             agent_config={
-                "model": STAGEHAND_AGENT_MODEL,
+                "model": stagehand_agent_model_for_api(),
                 "mode": "cua",
                 "system_prompt": "You are a QA tester executing test steps on a web application. Be precise and wait for elements to load before interacting.",
             },
@@ -105,7 +106,10 @@ async def execute_observe_dom(session, query: str) -> dict:
     """Run a DOM-level observation via Stagehand v3 observe endpoint."""
     t0 = time.time()
     try:
-        response = await session.observe(instruction=query)
+        response = await session.observe(
+            instruction=query,
+            options={"model": stagehand_agent_model_for_api()},
+        )
         elapsed = time.time() - t0
         results = response.data.result
         found = bool(results and len(results) > 0)
