@@ -17,80 +17,15 @@ from playwright.async_api import async_playwright
 from runner.prompts import STAGEHAND_SESSION_MODEL
 
 
-def _is_google_gemini_stagehand_model(model_name: str) -> bool:
-    """True when the Stagehand session/agent uses Google Gemini (incl. Computer Use)."""
-    m = (model_name or "").lower()
-    return m.startswith("google/") or "gemini" in m
-
-
-def _is_anthropic_stagehand_model(model_name: str) -> bool:
-    """True when Stagehand session/agent uses Anthropic Claude (provider prefix or id)."""
-    m = (model_name or "").lower()
-    return m.startswith("anthropic/") or m.startswith("claude-")
-
-
-def get_google_api_key_for_stagehand() -> str:
-    """API key for Gemini / Computer Use (Stagehand agentExecute and related calls).
-
-    Google's API rejects unauthenticated calls with PERMISSION_DENIED (403). The inner browser
-    agent must call Gemini with a Google AI Studio key — Anthropic keys are not valid there.
-
-    Resolution order: MODEL_API_KEY (when set for the runner), then GOOGLE_API_KEY, then GEMINI_API_KEY.
-    """
-    key = (
-        (os.environ.get("MODEL_API_KEY") or "").strip()
-        or (os.environ.get("GOOGLE_API_KEY") or "").strip()
-        or (os.environ.get("GEMINI_API_KEY") or "").strip()
-    )
-    if not key:
-        raise ValueError(
-            "Gemini Computer Use requires a Google API key. Set GOOGLE_API_KEY or GEMINI_API_KEY "
-            "(or set MODEL_API_KEY to your Google AI Studio key). "
-            "ANTHROPIC_API_KEY alone is not used for Stagehand browser actions."
-        )
-    return key
-
-
 def stagehand_agent_model_for_api(model_name: str | None = None) -> str:
-    """Value for Stagehand `agent_config.model` / observe `options.model`.
-
-    Returns the provider-prefixed model string (e.g. "google/gemini-…").
-    The Google API key is already set at the client level via model_api_key
-    in create_stagehand_session(), so per-call ModelConfig is not needed.
-    """
+    """Value for Stagehand `agent_config.model` / observe `options.model` (same as `STAGEHAND_SESSION_MODEL`)."""
     return model_name or STAGEHAND_SESSION_MODEL
 
 
 def _resolve_model_api_key() -> tuple[str, str]:
-    """Return (key, env_label) for x-model-api-key on AsyncStagehand (Browserbase Stagehand API).
-
-    Provider-specific order matters: a generic MODEL_API_KEY (e.g. for another product) must not
-    shadow ANTHROPIC_API_KEY when the session uses anthropic/… models — that yields "invalid
-    x-api-key" on observe and Anthropic auth errors on execute.
-
-    When the configured model is Google Gemini, only a Google API key is valid — do not fall back
-    to ANTHROPIC_API_KEY or agentExecute will fail with Google 403.
-    """
-    model = STAGEHAND_SESSION_MODEL
-    if _is_google_gemini_stagehand_model(model):
-        return get_google_api_key_for_stagehand(), "GOOGLE/GEMINI (MODEL_API_KEY or GOOGLE_API_KEY or GEMINI_API_KEY)"
-
-    if _is_anthropic_stagehand_model(model):
-        for label, var in (
-            ("ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
-            ("MODEL_API_KEY", "MODEL_API_KEY"),
-        ):
-            v = (os.environ.get(var) or "").strip()
-            if v:
-                return v, label
-        return "", "none"
-
-    # OpenAI or other providers: keep MODEL_API_KEY first for explicit overrides
-    for var in ("MODEL_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY"):
-        v = (os.environ.get(var) or "").strip()
-        if v:
-            return v, var
-    return "", "none"
+    """Anthropic secret for AsyncStagehand `model_api_key` — same `ANTHROPIC_API_KEY` as the outer QA agent."""
+    v = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    return (v, "ANTHROPIC_API_KEY") if v else ("", "none")
 
 
 async def create_stagehand_session() -> dict[str, Any]:
@@ -123,22 +58,8 @@ async def create_stagehand_session() -> dict[str, Any]:
         print("[BROWSER] ERROR: BROWSERBASE_PROJECT_ID is missing or empty")
         raise ValueError("BROWSERBASE_PROJECT_ID environment variable is required")
     if not model_api_key:
-        if _is_google_gemini_stagehand_model(STAGEHAND_SESSION_MODEL):
-            print("[BROWSER] ERROR: no Google API key for Gemini Stagehand model")
-            try:
-                get_google_api_key_for_stagehand()
-            except ValueError as e:
-                raise ValueError(str(e)) from None
-        if _is_anthropic_stagehand_model(STAGEHAND_SESSION_MODEL):
-            print("[BROWSER] ERROR: no Anthropic API key for Claude Stagehand model")
-            raise ValueError(
-                "ANTHROPIC_API_KEY (or MODEL_API_KEY set to your Anthropic secret) is required for Stagehand "
-                "when STAGEHAND_SESSION_MODEL is an Anthropic/Claude model"
-            )
-        print("[BROWSER] ERROR: no model API key (MODEL_API_KEY, GOOGLE_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY)")
-        raise ValueError(
-            "MODEL_API_KEY, GOOGLE_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY is required for Stagehand"
-        )
+        print("[BROWSER] ERROR: ANTHROPIC_API_KEY missing or empty (required for Stagehand and the outer QA agent)")
+        raise ValueError("ANTHROPIC_API_KEY is required for Stagehand")
 
     print(f"[BROWSER]   BROWSERBASE_PROJECT_ID = {bb_project_id}")
     print(f"[BROWSER]   BROWSERBASE_API_KEY    = {bb_api_key[:8]}...{bb_api_key[-4:]}")
