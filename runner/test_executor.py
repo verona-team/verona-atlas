@@ -136,6 +136,37 @@ async def execute_observe_dom(session, query: str) -> dict:
         }
 
 
+_EMAIL_TEXT_MAX_CHARS = 4000
+
+_URL_RE = re.compile(r"https?://[^\s<>\"')\]]+", re.IGNORECASE)
+
+_VERIFICATION_URL_KEYWORDS = re.compile(
+    r"verif|confirm|activate|validate|auth|token|callback|register|signup|sign-up|magic.link|otp",
+    re.IGNORECASE,
+)
+
+
+def _extract_urls(text: str) -> tuple[list[str], list[str]]:
+    """Extract URLs from *text*.
+
+    Returns ``(all_urls, verification_urls)`` where *verification_urls* is the
+    subset whose path/query contains keywords typical of email-verification or
+    confirmation links.
+    """
+    all_urls: list[str] = []
+    verification_urls: list[str] = []
+    seen: set[str] = set()
+    for m in _URL_RE.finditer(text):
+        url = m.group(0).rstrip(".,;:!?")
+        if url in seen:
+            continue
+        seen.add(url)
+        all_urls.append(url)
+        if _VERIFICATION_URL_KEYWORDS.search(url):
+            verification_urls.append(url)
+    return all_urls, verification_urls
+
+
 async def execute_check_email(
     agentmail_inbox_id: str | None,
     since: datetime,
@@ -182,11 +213,14 @@ async def execute_check_email(
             text = (msg.text or msg.subject or msg.preview or "") or ""
             subject = msg.subject or ""
             code_match = re.search(r"\b(\d{4,8})\b", text)
+            all_urls, verification_urls = _extract_urls(text)
 
             found_messages.append({
                 "subject": subject,
-                "text": text[:1000],
+                "text": text[:_EMAIL_TEXT_MAX_CHARS],
                 "code": code_match.group(1) if code_match else None,
+                "urls": all_urls,
+                "verification_urls": verification_urls,
                 "received_at": msg_date.isoformat(),
             })
 
@@ -528,6 +562,14 @@ async def execute_template(
                         line = f"Subject: {m['subject']}\n"
                         if m["code"]:
                             line += f"Verification code found: {m['code']}\n"
+                        if m.get("verification_urls"):
+                            line += "Verification/confirmation links found:\n"
+                            for vu in m["verification_urls"]:
+                                line += f"  - {vu}\n"
+                        elif m.get("urls"):
+                            line += "Links found:\n"
+                            for u in m["urls"][:10]:
+                                line += f"  - {u}\n"
                         line += f"Body: {m['text']}"
                         msg_lines.append(line)
                     response_text = f"{result['summary']}\n\n" + "\n---\n".join(msg_lines)

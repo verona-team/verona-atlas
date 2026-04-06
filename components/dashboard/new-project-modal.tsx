@@ -35,9 +35,6 @@ export function NewProjectModal() {
   // Phase 1: project details
   const [name, setName] = useState('')
   const [appUrl, setAppUrl] = useState('')
-  const [authEmail, setAuthEmail] = useState('')
-  const [authPassword, setAuthPassword] = useState('')
-
   // Phase 2: integrations
   const [projectId, setProjectId] = useState<string | null>(null)
   const [integrations, setIntegrations] = useState<IntegrationStatus[]>([])
@@ -83,8 +80,6 @@ export function NewProjectModal() {
     setStep('details')
     setName('')
     setAppUrl('')
-    setAuthEmail('')
-    setAuthPassword('')
     setProjectId(null)
     setIntegrations([])
   }
@@ -94,8 +89,6 @@ export function NewProjectModal() {
     setSubmitting(true)
     try {
       const body: Record<string, string> = { name, app_url: appUrl }
-      if (authEmail.trim()) body.auth_email = authEmail.trim()
-      if (authPassword) body.auth_password = authPassword
 
       const res = await fetch('/api/projects', {
         method: 'POST',
@@ -113,6 +106,9 @@ export function NewProjectModal() {
         return
       }
       if (data?.id) {
+        if (data.warning) {
+          toast.warning(data.warning, { duration: 8000 })
+        }
         setProjectId(data.id)
         setStep('integrations')
         return
@@ -201,39 +197,6 @@ export function NewProjectModal() {
                   className="w-full border-b border-border bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/50 focus:border-foreground/30 transition-colors"
                 />
               </div>
-
-              <details className="group">
-                <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground transition-colors">
-                  Test account credentials (optional)
-                </summary>
-                <div className="space-y-3 mt-3">
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">
-                      Auth email
-                    </label>
-                    <input
-                      type="email"
-                      value={authEmail}
-                      onChange={(e) => setAuthEmail(e.target.value)}
-                      placeholder="tester@example.com"
-                      autoComplete="off"
-                      className="w-full border-b border-border bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/50"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">
-                      Auth password
-                    </label>
-                    <input
-                      type="password"
-                      value={authPassword}
-                      onChange={(e) => setAuthPassword(e.target.value)}
-                      autoComplete="new-password"
-                      className="w-full border-b border-border bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/50"
-                    />
-                  </div>
-                </div>
-              </details>
 
               <div className="flex justify-end gap-3 pt-2">
                 <button
