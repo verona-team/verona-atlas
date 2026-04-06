@@ -22,8 +22,8 @@ def stagehand_agent_model_for_api(model_name: str | None = None) -> str:
     return model_name or STAGEHAND_SESSION_MODEL
 
 
-def _resolve_model_api_key() -> tuple[str, str]:
-    """Anthropic secret for AsyncStagehand `model_api_key` — same `ANTHROPIC_API_KEY` as the outer QA agent."""
+def _resolve_anthropic_key_for_stagehand_client() -> tuple[str, str]:
+    """Read ANTHROPIC_API_KEY for Stagehand (same secret as the outer QA agent)."""
     v = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
     return (v, "ANTHROPIC_API_KEY") if v else ("", "none")
 
@@ -49,7 +49,7 @@ async def create_stagehand_session() -> dict[str, Any]:
 
     bb_api_key = os.environ.get("BROWSERBASE_API_KEY", "")
     bb_project_id = os.environ.get("BROWSERBASE_PROJECT_ID", "")
-    model_api_key, model_key_source = _resolve_model_api_key()
+    anthropic_api_key, anthropic_key_source = _resolve_anthropic_key_for_stagehand_client()
 
     if not bb_api_key:
         print("[BROWSER] ERROR: BROWSERBASE_API_KEY is missing or empty")
@@ -57,13 +57,13 @@ async def create_stagehand_session() -> dict[str, Any]:
     if not bb_project_id:
         print("[BROWSER] ERROR: BROWSERBASE_PROJECT_ID is missing or empty")
         raise ValueError("BROWSERBASE_PROJECT_ID environment variable is required")
-    if not model_api_key:
+    if not anthropic_api_key:
         print("[BROWSER] ERROR: ANTHROPIC_API_KEY missing or empty (required for Stagehand and the outer QA agent)")
         raise ValueError("ANTHROPIC_API_KEY is required for Stagehand")
 
     print(f"[BROWSER]   BROWSERBASE_PROJECT_ID = {bb_project_id}")
     print(f"[BROWSER]   BROWSERBASE_API_KEY    = {bb_api_key[:8]}...{bb_api_key[-4:]}")
-    print(f"[BROWSER]   model API key for Stagehand = set from {model_key_source} (len={len(model_api_key)})")
+    print(f"[BROWSER]   Anthropic key for Stagehand = from {anthropic_key_source} (len={len(anthropic_api_key)})")
     print(f"[BROWSER]   session model          = {STAGEHAND_SESSION_MODEL}")
 
     client: AsyncStagehand | None = None
@@ -75,10 +75,11 @@ async def create_stagehand_session() -> dict[str, Any]:
         # Step 1: Create API client
         print("[BROWSER] Step 1/4: Creating AsyncStagehand client...")
         t1 = time.time()
+        # Stagehand SDK names this argument `model_api_key`; value is ANTHROPIC_API_KEY only.
         client = AsyncStagehand(
             browserbase_api_key=bb_api_key,
             browserbase_project_id=bb_project_id,
-            model_api_key=model_api_key,
+            model_api_key=anthropic_api_key,
         )
         print(f"[BROWSER] Step 1/4: Client created ({time.time() - t1:.2f}s)")
 
