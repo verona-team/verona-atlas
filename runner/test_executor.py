@@ -11,12 +11,13 @@ import asyncio
 import base64
 import json
 import os
+import re
 import time
-import traceback
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable, Awaitable
 
 from anthropic import Anthropic
+from agentmail import AgentMail
 
 from runner.browser import stagehand_agent_model_config
 from runner.prompts import (
@@ -135,6 +136,82 @@ async def execute_observe_dom(session, query: str) -> dict:
         }
 
 
+async def execute_check_email(
+    agentmail_inbox_id: str | None,
+    since: datetime,
+    timeout_seconds: int = 30,
+) -> dict:
+    """Poll AgentMail inbox for recent messages and return them."""
+    if not agentmail_inbox_id:
+        return {
+            "success": False,
+            "messages": [],
+            "summary": "No email inbox configured for this project.",
+        }
+
+    api_key = os.environ.get("AGENTMAIL_API_KEY", "")
+    if not api_key:
+        return {
+            "success": False,
+            "messages": [],
+            "summary": "AgentMail API key not configured.",
+        }
+
+    agentmail = AgentMail(api_key=api_key)
+    poll_start = time.time()
+    found_messages: list[dict] = []
+    poll_count = 0
+
+    while (time.time() - poll_start) < timeout_seconds:
+        poll_count += 1
+        try:
+            list_resp = agentmail.inboxes.messages.list(inbox_id=agentmail_inbox_id, limit=10)
+            rows = list_resp.messages or []
+        except Exception as e:
+            print(f"[EXECUTOR]     check_email poll #{poll_count}: list failed: {type(e).__name__}: {e}")
+            await asyncio.sleep(2)
+            continue
+
+        for msg in rows:
+            msg_date = msg.created_at
+            if msg_date.tzinfo is None:
+                msg_date = msg_date.replace(tzinfo=timezone.utc)
+            if msg_date < since:
+                continue
+
+            text = (msg.text or msg.subject or msg.preview or "") or ""
+            subject = msg.subject or ""
+            code_match = re.search(r"\b(\d{4,8})\b", text)
+
+            found_messages.append({
+                "subject": subject,
+                "text": text[:1000],
+                "code": code_match.group(1) if code_match else None,
+                "received_at": msg_date.isoformat(),
+            })
+
+        if found_messages:
+            break
+
+        elapsed = time.time() - poll_start
+        print(f"[EXECUTOR]     check_email poll #{poll_count}: no messages yet ({elapsed:.0f}s / {timeout_seconds}s)")
+        await asyncio.sleep(2)
+
+    if not found_messages:
+        return {
+            "success": True,
+            "messages": [],
+            "summary": f"No new messages received within {timeout_seconds}s ({poll_count} polls).",
+        }
+
+    print(f"[EXECUTOR]     check_email: found {len(found_messages)} message(s) after {poll_count} poll(s)")
+    return {
+        "success": True,
+        "messages": found_messages,
+        "summary": f"Found {len(found_messages)} message(s).",
+    }
+
+
 def _strip_images_from_message(msg: dict) -> dict:
     """Return a copy of *msg* with image blocks replaced by text placeholders."""
     content = msg.get("content")
@@ -189,6 +266,11 @@ async def execute_template(
     template: dict,
     project: dict,
     integrations: dict[str, dict] | None = None,
+    agentmail_address: str | None = None,
+    agentmail_inbox_id: str | None = None,
+    existing_credentials: dict | None = None,
+    generated_password: str | None = None,
+    on_credentials_saved: Callable[[str, str], Awaitable[None]] | None = None,
 ) -> dict:
     """Execute a test template using the agentic ReAct loop.
 
@@ -198,6 +280,11 @@ async def execute_template(
         template: Test template dict from DB
         project: Project dict from DB
         integrations: Integration configs
+        agentmail_address: The AgentMail email address for signup/2FA
+        agentmail_inbox_id: The AgentMail inbox ID for polling emails
+        existing_credentials: Dict with 'email' and 'password' if previously created
+        generated_password: Pre-generated password for first-run signup
+        on_credentials_saved: Async callback invoked when the agent calls save_credentials
     """
     tpl_name = template.get("name", "unnamed")
     app_url = project.get("app_url", "?")
@@ -206,7 +293,8 @@ async def execute_template(
         steps = json.loads(steps)
     steps = sorted(steps, key=lambda s: s.get("order", 0))
 
-    max_iterations = max(len(steps) * 10, 10)
+    auth_extra = 15 if not existing_credentials and agentmail_address else 8
+    max_iterations = max(len(steps) * 10, 10) + auth_extra
 
     print(f"[EXECUTOR] execute_template — {tpl_name!r}")
     print(f"[EXECUTOR]   app_url        = {app_url}")
@@ -214,9 +302,20 @@ async def execute_template(
     print(f"[EXECUTOR]   max_iterations = {max_iterations}")
     print(f"[EXECUTOR]   outer model    = {OUTER_AGENT_MODEL}")
     print(f"[EXECUTOR]   inner model    = {STAGEHAND_AGENT_MODEL}")
+    print(f"[EXECUTOR]   has_credentials = {existing_credentials is not None}")
+    print(f"[EXECUTOR]   agentmail      = {agentmail_address or 'none'}")
 
     anthropic = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-    system_prompt = build_system_prompt(template, project, integrations)
+    system_prompt = build_system_prompt(
+        template,
+        project,
+        integrations,
+        agentmail_address=agentmail_address,
+        existing_credentials=existing_credentials,
+        generated_password=generated_password,
+    )
+
+    test_start_time = datetime.now(timezone.utc)
 
     print("[EXECUTOR] Capturing initial page state...")
     initial_state = await capture_page_state(page)
@@ -227,7 +326,7 @@ async def execute_template(
         {"type": "text", "text": (
             f"The browser is open at {initial_state['url']}.\n"
             "Here is a screenshot of the current page state. "
-            "Review the test plan in your system prompt and begin executing the test flow."
+            "Review the authentication instructions and test plan in your system prompt, then begin."
         )},
     ]
     if initial_state["screenshot_base64"]:
@@ -250,6 +349,7 @@ async def execute_template(
     completed = False
     llm_error: str | None = None
     iterations_used = 0
+    credentials_saved = False
 
     if initial_state["screenshot_base64"]:
         screenshots.append({
@@ -374,6 +474,72 @@ async def execute_template(
                     "content": result["observations"],
                 })
 
+            elif tool_name == "save_credentials":
+                cred_email = tool_input.get("email", "")
+                cred_password = tool_input.get("password", "")
+                print(f"[EXECUTOR]   tool: save_credentials — email={cred_email}")
+
+                if on_credentials_saved and cred_email and cred_password:
+                    try:
+                        await on_credentials_saved(cred_email, cred_password)
+                        credentials_saved = True
+                        action_record["success"] = True
+                        print("[EXECUTOR]     credentials saved successfully")
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": tool_id,
+                            "content": "Credentials saved successfully. They will be available on future test runs.",
+                        })
+                    except Exception as e:
+                        action_record["success"] = False
+                        action_record["error"] = str(e)
+                        print(f"[EXECUTOR]     save_credentials FAILED: {type(e).__name__}: {e}")
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": tool_id,
+                            "content": f"Failed to save credentials: {e}. Proceed with testing anyway.",
+                            "is_error": True,
+                        })
+                else:
+                    msg = "Missing email or password." if not (cred_email and cred_password) else "No credential storage handler configured."
+                    action_record["success"] = False
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": f"Could not save credentials: {msg}",
+                        "is_error": True,
+                    })
+
+            elif tool_name == "check_email":
+                timeout_secs = tool_input.get("timeout_seconds", 30)
+                print(f"[EXECUTOR]   tool: check_email — timeout={timeout_secs}s")
+
+                result = await execute_check_email(
+                    agentmail_inbox_id,
+                    since=test_start_time,
+                    timeout_seconds=timeout_secs,
+                )
+                action_record["success"] = result["success"]
+                action_record["message_count"] = len(result["messages"])
+
+                if result["messages"]:
+                    msg_lines = []
+                    for m in result["messages"]:
+                        line = f"Subject: {m['subject']}\n"
+                        if m["code"]:
+                            line += f"Verification code found: {m['code']}\n"
+                        line += f"Body: {m['text']}"
+                        msg_lines.append(line)
+                    response_text = f"{result['summary']}\n\n" + "\n---\n".join(msg_lines)
+                else:
+                    response_text = result["summary"]
+
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": response_text,
+                })
+
             elif tool_name == "complete_test":
                 test_passed = tool_input.get("passed", False)
                 test_summary = tool_input.get("summary", "")
@@ -428,6 +594,7 @@ async def execute_template(
     print(f"[EXECUTOR]   actions      = {len(actions)}")
     print(f"[EXECUTOR]   screenshots  = {len(screenshots)}")
     print(f"[EXECUTOR]   bugs         = {len(bugs_found)}")
+    print(f"[EXECUTOR]   creds_saved  = {credentials_saved}")
 
     return {
         "passed": test_passed,
@@ -439,4 +606,5 @@ async def execute_template(
         "max_iterations": max_iterations,
         "hit_iteration_limit": not completed and llm_error is None,
         "llm_error": llm_error,
+        "credentials_saved": credentials_saved,
     }

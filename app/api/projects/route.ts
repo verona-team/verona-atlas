@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getServerUser } from '@/lib/supabase/server-user'
-import { encrypt } from '@/lib/encryption'
 import { createProjectInbox } from '@/lib/agentmail'
 import { z } from 'zod'
 
 const CreateProjectSchema = z.object({
   name: z.string().min(1).max(100),
   app_url: z.string().url(),
-  auth_email: z.string().email().optional(),
-  auth_password: z.string().optional(),
 })
 
 export async function GET() {
@@ -47,7 +44,7 @@ export async function POST(request: NextRequest) {
   if (!parsed.success)
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
 
-  const { name, app_url, auth_email, auth_password } = parsed.data
+  const { name, app_url } = parsed.data
 
   const { data: membership } = await supabase
     .from('org_members')
@@ -79,8 +76,6 @@ export async function POST(request: NextRequest) {
       org_id: membership.org_id,
       name,
       app_url,
-      auth_email: auth_email || null,
-      auth_password_encrypted: auth_password ? encrypt(auth_password) : null,
       agentmail_inbox_id: agentmailInboxId,
       agentmail_inbox_address: agentmailInboxAddress,
     })

@@ -5,6 +5,8 @@ Loads project → executes templates (DB order) → reports results
 import json
 import os
 import asyncio
+import secrets
+import string
 import time
 import traceback
 from datetime import datetime, timezone
@@ -12,9 +14,8 @@ from datetime import datetime, timezone
 from supabase import create_client as create_supabase_client
 
 from runner.test_executor import execute_template
-from runner.auth import authenticate
 from runner.reporter import send_report
-from runner.encryption import decrypt
+from runner.encryption import decrypt, encrypt
 from runner.observability import collect_observability_data, diff_observability_snapshots
 from runner.recordings import save_session_recording
 from runner.browser import create_stagehand_session, cleanup_session
@@ -37,6 +38,77 @@ def _template_ids_from_trigger_ref(trigger_ref: str | None) -> list[str] | None:
     return ids or None
 
 
+def _generate_password(length: int = 24) -> str:
+    """Generate a strong random password for agent signup."""
+    alphabet = string.ascii_letters + string.digits + "!@#$%&*"
+    while True:
+        pw = "".join(secrets.choice(alphabet) for _ in range(length))
+        has_upper = any(c.isupper() for c in pw)
+        has_lower = any(c.islower() for c in pw)
+        has_digit = any(c.isdigit() for c in pw)
+        has_special = any(c in "!@#$%&*" for c in pw)
+        if has_upper and has_lower and has_digit and has_special:
+            return pw
+
+
+def _load_agent_credentials(supabase, project_id: str) -> dict | None:
+    """Load active agent credentials for a project, if any exist."""
+    resp = (
+        supabase.table("agent_credentials")
+        .select("*")
+        .eq("project_id", project_id)
+        .eq("status", "active")
+        .limit(1)
+        .execute()
+    )
+    rows = resp.data or []
+    if not rows:
+        return None
+    row = rows[0]
+    try:
+        password = decrypt(row["password_encrypted"])
+    except Exception as e:
+        print(f"[PIPELINE] WARNING: failed to decrypt agent credentials: {type(e).__name__}: {e}")
+        return None
+    return {
+        "id": row["id"],
+        "email": row["email"],
+        "password": password,
+    }
+
+
+async def _save_agent_credentials(supabase, project_id: str, email: str, password: str) -> None:
+    """Upsert agent credentials for a project (encrypt password at rest)."""
+    encrypted = encrypt(password)
+    now = datetime.now(timezone.utc).isoformat()
+
+    existing = (
+        supabase.table("agent_credentials")
+        .select("id")
+        .eq("project_id", project_id)
+        .limit(1)
+        .execute()
+    )
+    if existing.data:
+        supabase.table("agent_credentials").update({
+            "email": email,
+            "password_encrypted": encrypted,
+            "status": "active",
+            "updated_at": now,
+            "last_used_at": now,
+        }).eq("id", existing.data[0]["id"]).execute()
+        print(f"[CREDENTIALS] Updated existing credentials for project {project_id[:12]}...")
+    else:
+        supabase.table("agent_credentials").insert({
+            "project_id": project_id,
+            "email": email,
+            "password_encrypted": encrypted,
+            "status": "active",
+            "last_used_at": now,
+        }).execute()
+        print(f"[CREDENTIALS] Inserted new credentials for project {project_id[:12]}...")
+
+
 async def run_test_pipeline(test_run_id: str, project_id: str):
     """Full test execution pipeline."""
     pipeline_t0 = time.time()
@@ -55,9 +127,9 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
         project = supabase.table("projects").select("*").eq("id", project_id).single().execute().data
         if not project:
             raise ValueError(f"Project {project_id} not found")
-        print(f"[PIPELINE]   project name = {project.get('name', '?')}")
-        print(f"[PIPELINE]   app_url      = {project.get('app_url', '?')}")
-        print(f"[PIPELINE]   has auth     = {bool(project.get('auth_email'))}")
+        print(f"[PIPELINE]   project name     = {project.get('name', '?')}")
+        print(f"[PIPELINE]   app_url          = {project.get('app_url', '?')}")
+        print(f"[PIPELINE]   agentmail_inbox  = {project.get('agentmail_inbox_address', 'none')}")
 
         # 2. Load test run
         print("[PIPELINE] Step 2: Loading test run row...")
@@ -74,6 +146,21 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
         integrations_resp = supabase.table("integrations").select("*").eq("project_id", project_id).execute()
         integrations = {i["type"]: i for i in (integrations_resp.data or [])}
         print(f"[PIPELINE]   integrations loaded = {list(integrations.keys())}")
+
+        # 3b. Load agent credentials (if any from previous runs)
+        print("[PIPELINE] Step 3b: Loading agent credentials...")
+        agent_creds = _load_agent_credentials(supabase, project_id)
+        if agent_creds:
+            print(f"[PIPELINE]   agent credentials found — email={agent_creds['email']}")
+        else:
+            print("[PIPELINE]   no agent credentials — agent will create its own account if needed")
+
+        agentmail_address = project.get("agentmail_inbox_address")
+        agentmail_inbox_id = project.get("agentmail_inbox_id")
+        # Always generate a password — even when credentials exist, the agent
+        # may need to create a new account if the saved credentials fail.
+        generated_password = _generate_password()
+        print(f"[PIPELINE]   generated password for signup (len={len(generated_password)})")
 
         # 4. Update status to planning
         print("[PIPELINE] Step 4: Setting status → planning")
@@ -119,10 +206,30 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
             print(f"[PIPELINE] Template {idx + 1}/{len(templates)}: {tpl_name!r} (id={template['id'][:12]}...)")
             tpl_t0 = time.time()
             try:
-                result = await execute_single_template(supabase, project, template, test_run_id, integrations)
+                # Re-check credentials before each template (a previous template
+                # in this run may have created them via save_credentials)
+                if not agent_creds:
+                    agent_creds = _load_agent_credentials(supabase, project_id)
+                    if agent_creds:
+                        print(f"[PIPELINE]   credentials now available from earlier template — email={agent_creds['email']}")
+
+                result = await execute_single_template(
+                    supabase, project, template, test_run_id, integrations,
+                    agentmail_address=agentmail_address,
+                    agentmail_inbox_id=agentmail_inbox_id,
+                    existing_credentials=agent_creds,
+                    generated_password=generated_password,
+                )
                 tpl_elapsed = time.time() - tpl_t0
                 print(f"[PIPELINE] Template {idx + 1}/{len(templates)} finished: status={result.get('status')} "
                       f"duration={result.get('duration_ms', 0)}ms wall={tpl_elapsed:.1f}s")
+
+                # If the agent saved credentials during this template, reload them
+                if result.get("console_logs", {}).get("credentials_saved"):
+                    agent_creds = _load_agent_credentials(supabase, project_id)
+                    if agent_creds:
+                        print(f"[PIPELINE]   credentials saved during this template — email={agent_creds['email']}")
+
                 results.append(result)
             except Exception as e:
                 tpl_elapsed = time.time() - tpl_t0
@@ -224,10 +331,21 @@ async def upload_screenshots(supabase, screenshots: list[dict], test_run_id: str
     return urls
 
 
-async def execute_single_template(supabase, project, template, test_run_id: str, integrations: dict | None = None) -> dict:
+async def execute_single_template(
+    supabase,
+    project,
+    template,
+    test_run_id: str,
+    integrations: dict | None = None,
+    agentmail_address: str | None = None,
+    agentmail_inbox_id: str | None = None,
+    existing_credentials: dict | None = None,
+    generated_password: str | None = None,
+) -> dict:
     """Execute a single test template in an isolated browser session."""
     tpl_name = template.get("name", "unnamed")
     tpl_id = template["id"]
+    project_id = project["id"]
     start_time = datetime.now(timezone.utc)
     t0 = time.time()
     integrations = integrations or {}
@@ -250,6 +368,10 @@ async def execute_single_template(supabase, project, template, test_run_id: str,
     playwright_inst = None
     browser = None
 
+    async def on_credentials_saved(email: str, password: str) -> None:
+        """Callback invoked when the agent calls save_credentials."""
+        await _save_agent_credentials(supabase, project_id, email, password)
+
     try:
         # Create Stagehand + Browserbase + Playwright session
         print("[TEMPLATE] Creating browser session...")
@@ -263,20 +385,6 @@ async def execute_single_template(supabase, project, template, test_run_id: str,
 
         print(f"[TEMPLATE] Browser session ready — browserbase_session_id={browserbase_session_id}")
 
-        # Authentication
-        if project.get("auth_email") and project.get("auth_password_encrypted"):
-            print(f"[TEMPLATE] Authenticating as {project['auth_email']}...")
-            auth_t0 = time.time()
-            try:
-                password = decrypt(project["auth_password_encrypted"])
-                await authenticate(page, session, project, password)
-                print(f"[TEMPLATE] Authentication completed ({time.time() - auth_t0:.1f}s)")
-            except Exception as e:
-                print(f"[TEMPLATE] Authentication FAILED ({time.time() - auth_t0:.1f}s): {type(e).__name__}: {e}")
-                raise
-        else:
-            print("[TEMPLATE] No auth configured — skipping authentication")
-
         # Navigate to the app URL before starting the test loop
         app_url = project.get("app_url", "")
         if app_url:
@@ -284,10 +392,17 @@ async def execute_single_template(supabase, project, template, test_run_id: str,
             await page.goto(app_url, wait_until="domcontentloaded", timeout=30000)
             print(f"[TEMPLATE] Navigation complete — url={page.url}")
 
-        # Execute the test template
+        # Execute the test template (auth is now handled inside the ReAct loop)
         print(f"[TEMPLATE] Executing test template (ReAct loop)...")
         exec_t0 = time.time()
-        agent_result = await execute_template(session, page, template, project, integrations)
+        agent_result = await execute_template(
+            session, page, template, project, integrations,
+            agentmail_address=agentmail_address,
+            agentmail_inbox_id=agentmail_inbox_id,
+            existing_credentials=existing_credentials,
+            generated_password=generated_password,
+            on_credentials_saved=on_credentials_saved,
+        )
         exec_elapsed = time.time() - exec_t0
         print(f"[TEMPLATE] ReAct loop finished ({exec_elapsed:.1f}s)")
         llm_err = agent_result.get("llm_error")
@@ -381,6 +496,7 @@ async def execute_single_template(supabase, project, template, test_run_id: str,
                 "hit_iteration_limit": agent_result.get("hit_iteration_limit", False),
                 "llm_error": agent_result.get("llm_error"),
                 "observability": observability_errors,
+                "credentials_saved": agent_result.get("credentials_saved", False),
             },
         }
 
