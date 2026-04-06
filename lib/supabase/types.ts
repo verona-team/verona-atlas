@@ -39,6 +39,47 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_credentials: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          last_used_at: string | null
+          password_encrypted: string
+          project_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          last_used_at?: string | null
+          password_encrypted: string
+          project_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          last_used_at?: string | null
+          password_encrypted?: string
+          project_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_credentials_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       chat_messages: {
         Row: {
           content: string
@@ -220,8 +261,6 @@ export type Database = {
           agentmail_inbox_address: string | null
           agentmail_inbox_id: string | null
           app_url: string
-          auth_email: string | null
-          auth_password_encrypted: string | null
           created_at: string
           id: string
           name: string
@@ -236,8 +275,6 @@ export type Database = {
           agentmail_inbox_address?: string | null
           agentmail_inbox_id?: string | null
           app_url: string
-          auth_email?: string | null
-          auth_password_encrypted?: string | null
           created_at?: string
           id?: string
           name: string
@@ -252,8 +289,6 @@ export type Database = {
           agentmail_inbox_address?: string | null
           agentmail_inbox_id?: string | null
           app_url?: string
-          auth_email?: string | null
-          auth_password_encrypted?: string | null
           created_at?: string
           id?: string
           name?: string
@@ -605,3 +640,4 @@ export type TestRun = Database['public']['Tables']['test_runs']['Row']
 export type TestResult = Database['public']['Tables']['test_results']['Row']
 export type ChatSession = Database['public']['Tables']['chat_sessions']['Row']
 export type ChatMessage = Database['public']['Tables']['chat_messages']['Row']
+export type AgentCredential = Database['public']['Tables']['agent_credentials']['Row']

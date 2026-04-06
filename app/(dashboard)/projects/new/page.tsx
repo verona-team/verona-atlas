@@ -22,8 +22,6 @@ export default function NewProjectPage() {
   const [submitting, setSubmitting] = useState(false)
   const [name, setName] = useState('')
   const [appUrl, setAppUrl] = useState('')
-  const [authEmail, setAuthEmail] = useState('')
-  const [authPassword, setAuthPassword] = useState('')
 
   // Phase 2 state
   const [projectId, setProjectId] = useState<string | null>(existingProjectId)
@@ -91,8 +89,6 @@ export default function NewProjectPage() {
         name,
         app_url: appUrl,
       }
-      if (authEmail.trim()) body.auth_email = authEmail.trim()
-      if (authPassword) body.auth_password = authPassword
 
       const res = await fetch('/api/projects', {
         method: 'POST',
@@ -168,35 +164,19 @@ export default function NewProjectPage() {
             />
           </div>
 
-          <div className="pt-4">
-            <h2 className="text-3xl mb-3">Test Account Credentials</h2>
-            <p className="text-lg opacity-50 mb-8">
-              Optional: provide credentials so the QA agent can test authenticated flows.
+          <div className="pt-4 border rounded-lg p-6 space-y-4">
+            <h2 className="text-2xl font-medium">How Authentication Works</h2>
+            <p className="text-lg opacity-60 leading-relaxed">
+              When testing your platform, Verona&apos;s QA agent will <strong>automatically create its own test account</strong> by signing up on your website. It will save those credentials and reuse them on future test runs.
             </p>
-
-            <div className="space-y-8">
-              <div>
-                <label className="block text-xl opacity-60 mb-2">Auth email</label>
-                <input
-                  type="email"
-                  value={authEmail}
-                  onChange={(e) => setAuthEmail(e.target.value)}
-                  placeholder="tester@example.com"
-                  autoComplete="off"
-                  className="w-full border-b bg-transparent py-3 text-2xl outline-none placeholder:opacity-60"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xl opacity-60 mb-2">Auth password</label>
-                <input
-                  type="password"
-                  value={authPassword}
-                  onChange={(e) => setAuthPassword(e.target.value)}
-                  autoComplete="new-password"
-                  className="w-full border-b bg-transparent py-3 text-2xl outline-none placeholder:opacity-60"
-                />
-              </div>
+            <p className="text-lg opacity-60 leading-relaxed">
+              The agent has access to a dedicated email inbox, so it can handle email-based verification and 2FA during signup and login.
+            </p>
+            <div className="flex items-start gap-3 p-4 rounded-md bg-amber-500/5 border border-amber-500/20">
+              <span className="text-amber-500 text-xl shrink-0 mt-0.5">⚠</span>
+              <p className="text-base text-amber-600 dark:text-amber-400">
+                Verona currently only supports testing platforms that use <strong>email-based authentication</strong> (email + password, email verification, email 2FA). SSO, OAuth, phone-based, and passwordless login flows are not yet supported.
+              </p>
             </div>
           </div>
 
