@@ -225,7 +225,7 @@ async def execute_template(
 
     initial_content: list[dict] = [
         {"type": "text", "text": (
-            f"The browser is open and ready. Current URL: {initial_state['url']}\n"
+            f"The browser is open at {initial_state['url']}.\n"
             "Here is a screenshot of the current page state. "
             "Review the test plan in your system prompt and begin executing the test flow."
         )},
