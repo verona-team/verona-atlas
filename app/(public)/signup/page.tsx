@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { signUp } from '@/app/actions/auth'
-import { MetisLogo } from '@/components/landing/metis-logo'
 import { HalftoneBackground } from '@/components/landing/halftone-background'
 import { toast } from 'sonner'
 
@@ -26,12 +25,6 @@ export default function SignupPage() {
     return (
       <div className="relative flex min-h-screen flex-col overflow-hidden bg-white">
         <HalftoneBackground />
-
-        <header className="relative z-10 flex items-center justify-between px-6 py-5 sm:px-10">
-          <Link href="/" className="flex items-center gap-2">
-            <MetisLogo size={20} className="text-[#1a1a1a]" />
-          </Link>
-        </header>
 
         <main className="relative z-10 flex flex-1 items-center justify-center px-4">
           <div className="w-full max-w-md rounded-2xl bg-white/90 px-10 py-12 shadow-sm backdrop-blur-sm ring-1 ring-[#1a1a1a]/[0.04] text-center">
@@ -70,18 +63,6 @@ export default function SignupPage() {
   return (
     <div className="relative flex min-h-screen flex-col overflow-hidden bg-white">
       <HalftoneBackground />
-
-      <header className="relative z-10 flex items-center justify-between px-6 py-5 sm:px-10">
-        <Link href="/" className="flex items-center gap-2">
-          <MetisLogo size={20} className="text-[#1a1a1a]" />
-        </Link>
-        <Link
-          href="/login"
-          className="text-[13px] font-medium text-[#1a1a1a]/70 hover:text-[#1a1a1a] transition-colors"
-        >
-          Sign in
-        </Link>
-      </header>
 
       <main className="relative z-10 flex flex-1 items-center justify-center px-4">
         <div className="w-full max-w-md rounded-2xl bg-white/90 px-10 py-12 shadow-sm backdrop-blur-sm ring-1 ring-[#1a1a1a]/[0.04]">
