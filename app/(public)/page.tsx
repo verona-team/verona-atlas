@@ -23,7 +23,7 @@ export default function LandingPage() {
       </header>
 
       <main className="relative z-10 flex flex-1 flex-col items-center justify-center px-6" style={{ minHeight: 'calc(100vh - 68px)' }}>
-        <div className="flex flex-col items-center gap-20 -mt-16">
+        <div className="flex flex-col items-center gap-[68px] -mt-16">
           <InteractiveLogo size={180} />
           <h1
             className="max-w-2xl text-center text-5xl font-normal leading-[1.1] tracking-tight text-[#1a1a1a] sm:text-6xl"
