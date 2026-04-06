@@ -124,7 +124,7 @@ export function InteractiveLogo({
     ctx.clearRect(0, 0, w, h)
 
     const s = stateRef.current
-    const fov = 250 * (size / 120)
+    const fov = Math.min(250, 250 * (size / 120))
     const viewDist = 4.5
 
     const projected: (ProjectedPoint & { origIdx: number })[] = points.map((p, i) => {
