@@ -58,6 +58,7 @@ export async function POST(request: NextRequest) {
 
   let agentmailInboxId: string | null = null
   let agentmailInboxAddress: string | null = null
+  let agentmailWarning: string | null = null
   try {
     const slug = name
       .toLowerCase()
@@ -68,6 +69,8 @@ export async function POST(request: NextRequest) {
     agentmailInboxAddress = inbox.address
   } catch (e) {
     console.warn('Failed to provision AgentMail inbox:', e)
+    agentmailWarning =
+      'Could not set up an email inbox for this project. The agent will not be able to create accounts or handle email verification on sites that require it. You can retry by deleting and re-creating the project.'
   }
 
   const { data: project, error } = await supabase
@@ -83,5 +86,10 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(project, { status: 201 })
+
+  const responseBody: Record<string, unknown> = { ...project }
+  if (agentmailWarning) {
+    responseBody.warning = agentmailWarning
+  }
+  return NextResponse.json(responseBody, { status: 201 })
 }

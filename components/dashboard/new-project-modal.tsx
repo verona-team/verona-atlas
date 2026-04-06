@@ -106,6 +106,9 @@ export function NewProjectModal() {
         return
       }
       if (data?.id) {
+        if (data.warning) {
+          toast.warning(data.warning, { duration: 8000 })
+        }
         setProjectId(data.id)
         setStep('integrations')
         return
