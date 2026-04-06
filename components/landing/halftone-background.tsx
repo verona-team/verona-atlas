@@ -2,6 +2,32 @@
 
 import { useEffect, useRef } from 'react'
 
+const DOT_COLORS = [
+  '#E53E3E', // red
+  '#3B82F6', // blue
+  '#1a1a1a', // black
+  '#8B5CF6', // purple
+  '#10B981', // green
+  '#F59E0B', // amber
+  '#EC4899', // pink
+  '#6366F1', // indigo
+  '#14B8A6', // teal
+  '#F97316', // orange
+  '#64748B', // slate/gray
+  '#EF4444', // red variant
+  '#2563EB', // blue variant
+  '#A855F7', // purple variant
+  '#059669', // emerald
+  '#D946EF', // fuchsia
+]
+
+function hexToRgb(hex: string): [number, number, number] {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return [r, g, b]
+}
+
 class SimplexNoise {
   private perm: Uint8Array
   private grad3: number[][]
@@ -82,6 +108,13 @@ function marbleNoise(simplex: SimplexNoise, x: number, y: number): number {
   return fbm(simplex, x + warpStrength * wx2, y + warpStrength * wy2, 4)
 }
 
+const DOT_RGBS = DOT_COLORS.map(hexToRgb)
+
+function deterministicColorIndex(x: number, y: number): number {
+  const hash = ((x * 73856093) ^ (y * 19349663)) >>> 0
+  return hash % DOT_RGBS.length
+}
+
 export function HalftoneBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -109,8 +142,6 @@ export function HalftoneBackground() {
       const maxRadius = 3.0
       const noiseScale = 0.0025
 
-      const r = 185, g = 180, b = 70
-
       for (let x = 0; x < width; x += dotSpacing) {
         for (let y = 0; y < height; y += dotSpacing) {
           const nx = x * noiseScale
@@ -124,6 +155,8 @@ export function HalftoneBackground() {
           if (intensity > 0.03) {
             const radius = Math.min(maxRadius, intensity * maxRadius * 1.4)
             const alpha = Math.min(0.8, intensity * 0.85)
+
+            const [r, g, b] = DOT_RGBS[deterministicColorIndex(x, y)]
 
             ctx.beginPath()
             ctx.arc(x, y, radius, 0, Math.PI * 2)
