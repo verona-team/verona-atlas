@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { MessageSquare, History, Settings } from 'lucide-react'
+import { SignOutLink } from '@/components/dashboard/sign-out-link'
 
 interface ChatNavProps {
   projectId: string
@@ -40,6 +41,8 @@ export function ChatNav({ projectId }: ChatNavProps) {
           </Link>
         )
       })}
+      <span className="mx-1 h-4 w-px shrink-0 bg-border/80" aria-hidden />
+      <SignOutLink className="rounded-full px-3 py-1.5 text-muted-foreground hover:bg-foreground/5 hover:text-foreground/80" />
     </nav>
   )
 }

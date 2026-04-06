@@ -29,7 +29,7 @@ export default async function ProjectPage({ params }: PageProps) {
       if (project) {
         const gh = await getGithubIntegrationReady(supabase, projectId)
         if (!gh.ok) {
-          redirect(`/projects/${projectId}/setup`)
+          redirect(`/projects/new?projectId=${projectId}`)
         }
       }
     }

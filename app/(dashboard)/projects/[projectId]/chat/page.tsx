@@ -35,7 +35,7 @@ export default async function ChatPage({ params }: PageProps) {
 
   const gh = await getGithubIntegrationReady(supabase, projectId)
   if (!gh.ok) {
-    redirect(`/projects/${projectId}/setup`)
+    redirect(`/projects/new?projectId=${projectId}`)
   }
 
   const session = await getOrCreateSession(supabase, projectId)
@@ -47,7 +47,7 @@ export default async function ChatPage({ params }: PageProps) {
     .order('created_at', { ascending: true })
 
   return (
-    <div className="fixed inset-0 top-12 flex flex-col">
+    <div className="fixed inset-0 top-0 flex flex-col">
       <div className="shrink-0 px-6 pb-3 pt-3 md:px-12 lg:px-16">
         <div className="flex flex-col gap-4 rounded-xl border border-border/50 bg-muted/25 px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:gap-6">
           <div className="min-w-0">
