@@ -45,14 +45,52 @@ def get_google_api_key_for_stagehand() -> str:
     return key
 
 
+def _split_provider_model(model: str) -> tuple[str | None, str]:
+    """Split 'provider/model-name' into (provider, model-name).
+
+    Returns (None, model) when no '/' is present.
+    """
+    if "/" in model:
+        provider, _, bare = model.partition("/")
+        return provider, bare
+    return None, model
+
+
 def stagehand_agent_model_for_api(model_name: str | None = None) -> str:
-    """Value for Stagehand `agent_config.model` / observe `options.model`.
+    """Value for Stagehand observe `options.model`.
 
     Returns the provider-prefixed model string (e.g. "google/gemini-…").
     The Google API key is already set at the client level via model_api_key
     in create_stagehand_session(), so per-call ModelConfig is not needed.
     """
     return model_name or STAGEHAND_SESSION_MODEL
+
+
+def build_execute_agent_config(
+    model_name: str | None = None,
+    *,
+    mode: str = "cua",
+    system_prompt: str | None = None,
+) -> dict[str, Any]:
+    """Build ``agent_config`` for ``session.execute()`` (agentExecute).
+
+    The Stagehand agentExecute endpoint forwards the ``model`` value
+    directly to the AI provider API.  When a provider-prefixed string
+    like ``"anthropic/claude-opus-4-6"`` is used, the prefix is *not*
+    stripped, causing Anthropic to return 404 "model not found".
+
+    This helper splits the prefix into an explicit ``provider`` field
+    and a bare model name so the server routes the request correctly.
+    """
+    full_model = model_name or STAGEHAND_SESSION_MODEL
+    provider, bare_model = _split_provider_model(full_model)
+
+    config: dict[str, Any] = {"model": bare_model, "mode": mode}
+    if provider:
+        config["provider"] = provider
+    if system_prompt:
+        config["system_prompt"] = system_prompt
+    return config
 
 
 def _resolve_model_api_key() -> str:

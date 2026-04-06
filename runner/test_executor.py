@@ -18,7 +18,7 @@ from typing import Any
 
 from anthropic import Anthropic
 
-from runner.browser import stagehand_agent_model_for_api
+from runner.browser import build_execute_agent_config, stagehand_agent_model_for_api
 from runner.prompts import (
     OUTER_AGENT_MODEL,
     STAGEHAND_AGENT_MODEL,
@@ -69,11 +69,9 @@ async def execute_browser_action(session, page, instruction: str) -> dict:
                 "instruction": instruction,
                 "max_steps": 10,
             },
-            agent_config={
-                "model": stagehand_agent_model_for_api(),
-                "mode": "cua",
-                "system_prompt": "You are a QA tester executing test steps on a web application. Be precise and wait for elements to load before interacting.",
-            },
+            agent_config=build_execute_agent_config(
+                system_prompt="You are a QA tester executing test steps on a web application. Be precise and wait for elements to load before interacting.",
+            ),
             timeout=120.0,
         )
         elapsed = time.time() - t0
