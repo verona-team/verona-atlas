@@ -41,9 +41,7 @@ export function AppHeader() {
           </a>
         </div>
       ) : (
-        <div className="flex-1">
-          <span className="text-sm text-muted-foreground">Verona</span>
-        </div>
+        <div className="flex-1" />
       )}
 
       {activeProjectId && (

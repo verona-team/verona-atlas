@@ -34,13 +34,13 @@ export default function SignupPage() {
                 <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
               </svg>
             </div>
-            <h1 className="text-2xl font-semibold tracking-tight text-[#1a1a1a] sm:text-3xl">
+            <h1 className="text-2xl font-normal tracking-tight text-[#1a1a1a] sm:text-3xl">
               Check your email
             </h1>
             <p className="mt-3 text-sm text-[#1a1a1a]/50 leading-relaxed">
               We sent a confirmation link to
             </p>
-            <p className="mt-1 text-sm font-medium text-[#1a1a1a]">
+            <p className="mt-1 text-sm font-normal text-[#1a1a1a]">
               {confirmEmail}
             </p>
             <p className="mt-4 text-sm text-[#1a1a1a]/50 leading-relaxed">
@@ -68,7 +68,7 @@ export default function SignupPage() {
         <div className="w-full max-w-md rounded-2xl bg-white/90 px-10 py-12 shadow-sm backdrop-blur-sm ring-1 ring-[#1a1a1a]/[0.04]">
           <div className="mb-10 text-center">
             <h1
-              className="text-3xl font-semibold tracking-tight text-[#1a1a1a] sm:text-4xl"
+              className="text-3xl font-normal tracking-tight text-[#1a1a1a] sm:text-4xl"
             >
               Create your account
             </h1>
@@ -79,7 +79,7 @@ export default function SignupPage() {
 
           <form action={handleSubmit} className="space-y-5">
             <div className="space-y-1.5">
-              <label htmlFor="orgName" className="block text-[13px] font-medium text-[#1a1a1a]/70">
+              <label htmlFor="orgName" className="block text-[13px] font-normal text-[#1a1a1a]/70">
                 Organization Name
               </label>
               <input
@@ -92,7 +92,7 @@ export default function SignupPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <label htmlFor="email" className="block text-[13px] font-medium text-[#1a1a1a]/70">
+              <label htmlFor="email" className="block text-[13px] font-normal text-[#1a1a1a]/70">
                 Email
               </label>
               <input
@@ -106,7 +106,7 @@ export default function SignupPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <label htmlFor="password" className="block text-[13px] font-medium text-[#1a1a1a]/70">
+              <label htmlFor="password" className="block text-[13px] font-normal text-[#1a1a1a]/70">
                 Password
               </label>
               <input
@@ -124,7 +124,7 @@ export default function SignupPage() {
             <button
               type="submit"
               disabled={loading}
-              className="mt-2 h-10 w-full rounded-lg bg-[#1a1a1a] text-sm font-medium text-white transition-colors hover:bg-[#333] disabled:opacity-50"
+              className="mt-2 h-10 w-full rounded-lg bg-[#1a1a1a] text-sm font-normal text-white transition-colors hover:bg-[#333] disabled:opacity-50"
             >
               {loading ? 'Creating account...' : 'Create Account'}
             </button>

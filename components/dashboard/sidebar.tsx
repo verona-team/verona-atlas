@@ -9,7 +9,7 @@ import { SignOutLink } from '@/components/dashboard/sign-out-link'
 
 function OrgOrb() {
   return (
-    <div className="h-6 w-6 shrink-0 rounded-full bg-gradient-to-br from-cyan-400 via-violet-500 to-fuchsia-600 shadow-[0_0_8px_rgba(139,92,246,0.4)]" />
+    <div className="h-4 w-4 shrink-0 rounded-full bg-gradient-to-br from-cyan-400 via-violet-500 to-fuchsia-600 shadow-[0_0_6px_rgba(139,92,246,0.35)]" />
   )
 }
 
@@ -33,26 +33,27 @@ export function AppSidebar() {
   return (
     <>
       {/* Mobile overlay backdrop */}
-      {!sidebarCollapsed && (
-        <div
-          className="fixed inset-0 z-40 bg-black/60 lg:hidden"
-          onClick={toggleSidebar}
-        />
-      )}
+      <div
+        className={cn(
+          'fixed inset-0 z-40 bg-black/60 lg:hidden transition-opacity duration-300 ease-in-out',
+          sidebarCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100',
+        )}
+        onClick={toggleSidebar}
+      />
 
       <aside
         className={cn(
-          'flex h-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-200 ease-in-out',
+          'flex h-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-300 ease-in-out',
           sidebarCollapsed
-            ? 'w-0 overflow-hidden lg:w-0'
-            : 'fixed inset-y-0 left-0 z-50 w-64 lg:relative lg:z-auto',
+            ? 'w-0 overflow-hidden opacity-0 lg:w-0'
+            : 'fixed inset-y-0 left-0 z-50 w-64 opacity-100 lg:relative lg:z-auto',
         )}
       >
         {/* Top: orb + org name + collapse toggle */}
         <div className="flex h-12 shrink-0 items-center justify-between px-3 border-b border-sidebar-border">
           <div className="flex items-center gap-2 min-w-0">
             <OrgOrb />
-            <span className="text-sm font-semibold truncate">{orgName || 'Verona'}</span>
+            <span className="text-sm font-normal truncate">{orgName || 'Verona'}</span>
           </div>
           <button
             onClick={toggleSidebar}

@@ -26,7 +26,7 @@ export default function LoginPage() {
         <div className="w-full max-w-md rounded-2xl bg-white/90 px-10 py-12 shadow-sm backdrop-blur-sm ring-1 ring-[#1a1a1a]/[0.04]">
           <div className="mb-10 text-center">
             <h1
-              className="text-3xl font-semibold tracking-tight text-[#1a1a1a] sm:text-4xl"
+              className="text-3xl font-normal tracking-tight text-[#1a1a1a] sm:text-4xl"
             >
               Welcome back
             </h1>
@@ -37,7 +37,7 @@ export default function LoginPage() {
 
           <form action={handleSubmit} className="space-y-5">
             <div className="space-y-1.5">
-              <label htmlFor="email" className="block text-[13px] font-medium text-[#1a1a1a]/70">
+              <label htmlFor="email" className="block text-[13px] font-normal text-[#1a1a1a]/70">
                 Email
               </label>
               <input
@@ -51,7 +51,7 @@ export default function LoginPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <label htmlFor="password" className="block text-[13px] font-medium text-[#1a1a1a]/70">
+              <label htmlFor="password" className="block text-[13px] font-normal text-[#1a1a1a]/70">
                 Password
               </label>
               <input
@@ -68,7 +68,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="mt-2 h-10 w-full rounded-lg bg-[#1a1a1a] text-sm font-medium text-white transition-colors hover:bg-[#333] disabled:opacity-50"
+              className="mt-2 h-10 w-full rounded-lg bg-[#1a1a1a] text-sm font-normal text-white transition-colors hover:bg-[#333] disabled:opacity-50"
             >
               {loading ? 'Signing in...' : 'Sign In'}
             </button>
