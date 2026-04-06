@@ -12,7 +12,6 @@ from agentmail import AgentMail
 
 from runner.browser import stagehand_agent_model_config
 
-
 async def authenticate(page, session, project: dict, password: str):
     """Authenticate into the target application with optional 2FA.
 
