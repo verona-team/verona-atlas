@@ -124,7 +124,7 @@ export default function ProjectSettingsPage() {
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-3xl">Integrations</h2>
           <Link
-            href={`/projects/${projectId}/setup`}
+            href={`/projects/new?projectId=${projectId}`}
             className="text-lg underline opacity-60 hover:opacity-100"
           >
             Add integration →
@@ -149,7 +149,7 @@ export default function ProjectSettingsPage() {
             title="PostHog"
             integration={getIntegration('posthog')}
             onDisconnect={disconnect}
-            connectUrl={`/projects/${projectId}/setup`}
+            connectUrl={`/projects/new?projectId=${projectId}`}
           >
             <MetaDetail label="Project" value={getIntegration('posthog')?.meta?.posthog_project_id} />
             <MetaDetail label="Host" value={getIntegration('posthog')?.meta?.api_host} />
@@ -160,7 +160,7 @@ export default function ProjectSettingsPage() {
             title="Sentry"
             integration={getIntegration('sentry')}
             onDisconnect={disconnect}
-            connectUrl={`/projects/${projectId}/setup`}
+            connectUrl={`/projects/new?projectId=${projectId}`}
           >
             <MetaDetail
               label="Project"
@@ -177,7 +177,7 @@ export default function ProjectSettingsPage() {
             title="LangSmith"
             integration={getIntegration('langsmith')}
             onDisconnect={disconnect}
-            connectUrl={`/projects/${projectId}/setup`}
+            connectUrl={`/projects/new?projectId=${projectId}`}
           >
             <MetaDetail label="Project" value={getIntegration('langsmith')?.meta?.project_name} />
           </SettingsIntegrationCard>
@@ -187,7 +187,7 @@ export default function ProjectSettingsPage() {
             title="Braintrust"
             integration={getIntegration('braintrust')}
             onDisconnect={disconnect}
-            connectUrl={`/projects/${projectId}/setup`}
+            connectUrl={`/projects/new?projectId=${projectId}`}
           >
             <MetaDetail label="Project" value={getIntegration('braintrust')?.meta?.project_name} />
           </SettingsIntegrationCard>

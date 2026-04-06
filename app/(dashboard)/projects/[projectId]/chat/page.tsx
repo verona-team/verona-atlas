@@ -35,7 +35,7 @@ export default async function ChatPage({ params }: PageProps) {
 
   const gh = await getGithubIntegrationReady(supabase, projectId)
   if (!gh.ok) {
-    redirect(`/projects/${projectId}/setup`)
+    redirect(`/projects/new?projectId=${projectId}`)
   }
 
   const session = await getOrCreateSession(supabase, projectId)

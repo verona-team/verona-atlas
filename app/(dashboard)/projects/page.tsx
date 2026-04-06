@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { getServerUser } from '@/lib/supabase/server-user'
 
@@ -35,10 +36,7 @@ export default async function ProjectsPage() {
       </div>
 
       {(!projects || projects.length === 0) ? (
-        <p className="text-2xl opacity-60 py-12">
-          No projects yet.{' '}
-          <Link href="/projects/new" className="underline">Create one</Link> to get started.
-        </p>
+        redirect('/projects/new')
       ) : (
         <div className="divide-y">
           {projects.map((project) => (

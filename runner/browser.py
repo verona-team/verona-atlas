@@ -23,6 +23,12 @@ def _is_google_gemini_stagehand_model(model_name: str) -> bool:
     return m.startswith("google/") or "gemini" in m
 
 
+def _is_anthropic_stagehand_model(model_name: str) -> bool:
+    """True when Stagehand session/agent uses Anthropic Claude (provider prefix or id)."""
+    m = (model_name or "").lower()
+    return m.startswith("anthropic/") or m.startswith("claude-")
+
+
 def get_google_api_key_for_stagehand() -> str:
     """API key for Gemini / Computer Use (Stagehand agentExecute and related calls).
 
@@ -55,21 +61,36 @@ def stagehand_agent_model_for_api(model_name: str | None = None) -> str:
     return model_name or STAGEHAND_SESSION_MODEL
 
 
-def _resolve_model_api_key() -> str:
-    """Key sent as x-model-api-key on AsyncStagehand (Browserbase Stagehand API).
+def _resolve_model_api_key() -> tuple[str, str]:
+    """Return (key, env_label) for x-model-api-key on AsyncStagehand (Browserbase Stagehand API).
+
+    Provider-specific order matters: a generic MODEL_API_KEY (e.g. for another product) must not
+    shadow ANTHROPIC_API_KEY when the session uses anthropic/… models — that yields "invalid
+    x-api-key" on observe and Anthropic auth errors on execute.
 
     When the configured model is Google Gemini, only a Google API key is valid — do not fall back
-    to ANTHROPIC_API_KEY or the session may start but agentExecute will fail with Google 403.
+    to ANTHROPIC_API_KEY or agentExecute will fail with Google 403.
     """
-    if _is_google_gemini_stagehand_model(STAGEHAND_SESSION_MODEL):
-        return get_google_api_key_for_stagehand()
-    return (
-        (os.environ.get("MODEL_API_KEY") or "").strip()
-        or (os.environ.get("GOOGLE_API_KEY") or "").strip()
-        or (os.environ.get("GEMINI_API_KEY") or "").strip()
-        or (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
-        or ""
-    )
+    model = STAGEHAND_SESSION_MODEL
+    if _is_google_gemini_stagehand_model(model):
+        return get_google_api_key_for_stagehand(), "GOOGLE/GEMINI (MODEL_API_KEY or GOOGLE_API_KEY or GEMINI_API_KEY)"
+
+    if _is_anthropic_stagehand_model(model):
+        for label, var in (
+            ("ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
+            ("MODEL_API_KEY", "MODEL_API_KEY"),
+        ):
+            v = (os.environ.get(var) or "").strip()
+            if v:
+                return v, label
+        return "", "none"
+
+    # OpenAI or other providers: keep MODEL_API_KEY first for explicit overrides
+    for var in ("MODEL_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY"):
+        v = (os.environ.get(var) or "").strip()
+        if v:
+            return v, var
+    return "", "none"
 
 
 async def create_stagehand_session() -> dict[str, Any]:
@@ -93,7 +114,7 @@ async def create_stagehand_session() -> dict[str, Any]:
 
     bb_api_key = os.environ.get("BROWSERBASE_API_KEY", "")
     bb_project_id = os.environ.get("BROWSERBASE_PROJECT_ID", "")
-    model_api_key = _resolve_model_api_key()
+    model_api_key, model_key_source = _resolve_model_api_key()
 
     if not bb_api_key:
         print("[BROWSER] ERROR: BROWSERBASE_API_KEY is missing or empty")
@@ -108,6 +129,12 @@ async def create_stagehand_session() -> dict[str, Any]:
                 get_google_api_key_for_stagehand()
             except ValueError as e:
                 raise ValueError(str(e)) from None
+        if _is_anthropic_stagehand_model(STAGEHAND_SESSION_MODEL):
+            print("[BROWSER] ERROR: no Anthropic API key for Claude Stagehand model")
+            raise ValueError(
+                "ANTHROPIC_API_KEY (or MODEL_API_KEY set to your Anthropic secret) is required for Stagehand "
+                "when STAGEHAND_SESSION_MODEL is an Anthropic/Claude model"
+            )
         print("[BROWSER] ERROR: no model API key (MODEL_API_KEY, GOOGLE_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY)")
         raise ValueError(
             "MODEL_API_KEY, GOOGLE_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY is required for Stagehand"
@@ -115,8 +142,7 @@ async def create_stagehand_session() -> dict[str, Any]:
 
     print(f"[BROWSER]   BROWSERBASE_PROJECT_ID = {bb_project_id}")
     print(f"[BROWSER]   BROWSERBASE_API_KEY    = {bb_api_key[:8]}...{bb_api_key[-4:]}")
-    key_kind = "google" if _is_google_gemini_stagehand_model(STAGEHAND_SESSION_MODEL) else "model"
-    print(f"[BROWSER]   {key_kind} API key for Stagehand = set (len={len(model_api_key)})")
+    print(f"[BROWSER]   model API key for Stagehand = set from {model_key_source} (len={len(model_api_key)})")
     print(f"[BROWSER]   session model          = {STAGEHAND_SESSION_MODEL}")
 
     client: AsyncStagehand | None = None
