@@ -228,7 +228,9 @@ async def execute_check_email(
             # Some emails are HTML-only (no text/plain part). Extract URLs
             # from the HTML body as a fallback so confirmation links aren't missed.
             if html:
-                html_urls, html_verif_urls = _extract_urls(html)
+                import html as html_mod
+                decoded_html = html_mod.unescape(html)
+                html_urls, html_verif_urls = _extract_urls(decoded_html)
                 seen = set(all_urls)
                 for u in html_urls:
                     if u not in seen:
