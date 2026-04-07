@@ -437,13 +437,15 @@ export function SlackCard({
   const [channels, setChannels] = useState<Array<{ id: string; name: string }>>([])
   const [loadingChannels, setLoadingChannels] = useState(false)
   const [saving, setSaving] = useState(false)
+  const authPopupRef = useRef<Window | null>(null)
 
   const channelName = integration?.meta?.channel_name as string | undefined
 
   function openSlackAuth() {
     setWaiting(true)
     const rt = encodeURIComponent(returnTo || `/projects/${projectId}/settings`)
-    window.open(`/api/integrations/slack/authorize?project_id=${projectId}&return_to=${rt}`, '_blank')
+    authPopupRef.current =
+      window.open(`/api/integrations/slack/authorize?project_id=${projectId}&return_to=${rt}`, '_blank') ?? null
   }
 
   useEffect(() => {
@@ -456,6 +458,9 @@ export function SlackCard({
     if (waiting && integration) {
       setWaiting(false)
       toast.success('Slack connected')
+      authPopupRef.current?.close()
+      authPopupRef.current = null
+      window.focus()
     }
   }, [waiting, integration])
 

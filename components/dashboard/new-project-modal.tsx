@@ -233,7 +233,7 @@ export function NewProjectModal() {
                   projectId={projectId!}
                   integration={getStatus('github')}
                   onRefresh={handleRefresh}
-                  returnTo={`/projects/${projectId}`}
+                  returnTo={`/projects/${projectId}/settings`}
                 />
                 <PostHogCard
                   projectId={projectId!}
@@ -259,7 +259,7 @@ export function NewProjectModal() {
                   projectId={projectId!}
                   integration={getStatus('slack')}
                   onRefresh={handleRefresh}
-                  returnTo={`/projects/${projectId}`}
+                  returnTo={`/projects/${projectId}/settings`}
                 />
               </div>
             )}
