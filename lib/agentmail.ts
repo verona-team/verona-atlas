@@ -40,18 +40,25 @@ export async function poll2FACode(
   const start = Date.now()
 
   while (Date.now() - start < timeoutMs) {
-    const messages = await client.inboxes.messages.list(inboxId, {
+    const response = await client.inboxes.messages.list(inboxId, {
       limit: 5,
     })
 
-    if (messages && Array.isArray(messages)) {
-      for (const msg of messages) {
-        // Check if message is recent enough
-        const msgDate = new Date(msg.createdAt)
+    const items = response?.messages
+    if (items && Array.isArray(items)) {
+      for (const item of items) {
+        const msgDate = new Date(item.createdAt)
         if (msgDate < since) continue
 
-        // Look for OTP code in the message text
-        const text = msg.text || msg.subject || ''
+        // MessageItem from list() lacks .text — fetch the full Message
+        let text = item.subject || ''
+        try {
+          const full = await client.inboxes.messages.get(inboxId, item.messageId)
+          text = full.text || full.extractedText || full.subject || full.preview || ''
+        } catch {
+          text = item.subject || item.preview || ''
+        }
+
         const match = text.match(/\b(\d{4,8})\b/)
         if (match) {
           return match[1]
@@ -59,7 +66,6 @@ export async function poll2FACode(
       }
     }
 
-    // Wait before polling again
     await new Promise((resolve) => setTimeout(resolve, 2000))
   }
 

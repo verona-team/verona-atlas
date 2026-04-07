@@ -210,7 +210,15 @@ async def execute_check_email(
             if msg_date < since:
                 continue
 
-            text = (msg.text or msg.subject or msg.preview or "") or ""
+            # MessageItem (from list) lacks .text — fetch the full Message
+            try:
+                full_msg = agentmail.inboxes.messages.get(
+                    inbox_id=agentmail_inbox_id, message_id=msg.message_id
+                )
+                text = (full_msg.text or full_msg.extracted_text or full_msg.subject or full_msg.preview or "")
+            except Exception:
+                text = (msg.subject or msg.preview or "")
+
             subject = msg.subject or ""
             code_match = re.search(r"\b(\d{4,8})\b", text)
             all_urls, verification_urls = _extract_urls(text)
