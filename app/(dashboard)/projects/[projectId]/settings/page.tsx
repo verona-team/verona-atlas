@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
+import { useWorkspace } from '@/lib/workspace-context'
 import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
 import { PanelPage } from '@/components/dashboard/panel-page'
 import { Card, CardContent } from '@/components/ui/card'
@@ -42,6 +43,7 @@ export default function ProjectSettingsPage() {
   const searchParams = useSearchParams()
   const projectId = params.projectId
   const toastShown = useRef(false)
+  const { refreshProjects } = useWorkspace()
 
   const [project, setProject] = useState<ProjectData | null>(null)
   const [integrations, setIntegrations] = useState<IntegrationData[]>([])
@@ -206,7 +208,7 @@ export default function ProjectSettingsPage() {
         </div>
 
         <ScheduleSection projectId={projectId} />
-        <DeleteProjectSection projectId={projectId} projectName={project?.name || ''} />
+        <DeleteProjectSection projectId={projectId} projectName={project?.name || ''} onDeleted={refreshProjects} />
       </div>
     </PanelPage>
   )
@@ -518,7 +520,7 @@ function SlackDetails({ integration, projectId, onRefresh }: { integration?: Int
   )
 }
 
-function DeleteProjectSection({ projectId, projectName }: { projectId: string; projectName: string }) {
+function DeleteProjectSection({ projectId, projectName, onDeleted }: { projectId: string; projectName: string; onDeleted?: () => Promise<void> }) {
   const router = useRouter()
   const [confirmText, setConfirmText] = useState('')
   const [deleting, setDeleting] = useState(false)
@@ -529,6 +531,7 @@ function DeleteProjectSection({ projectId, projectName }: { projectId: string; p
       const res = await fetch(`/api/projects/${projectId}`, { method: 'DELETE' })
       if (res.ok || res.status === 204) {
         toast.success('Project deleted')
+        await onDeleted?.()
         router.push('/projects')
         router.refresh()
       } else {
