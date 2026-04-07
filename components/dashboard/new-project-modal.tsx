@@ -3,7 +3,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { ChevronRight } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -15,11 +14,6 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Collapsible,
-  CollapsibleTrigger,
-  CollapsibleContent,
-} from '@/components/ui/collapsible'
 import {
   GitHubCard,
   PostHogCard,
@@ -41,13 +35,11 @@ export function NewProjectModal() {
 
   const [step, setStep] = useState<Step>('details')
   const [submitting, setSubmitting] = useState(false)
-  const [credentialsOpen, setCredentialsOpen] = useState(false)
 
   const [name, setName] = useState('')
   const [appUrl, setAppUrl] = useState('')
-  const [authEmail, setAuthEmail] = useState('')
-  const [authPassword, setAuthPassword] = useState('')
 
+  // Phase 2: integrations
   const [projectId, setProjectId] = useState<string | null>(null)
   const [integrations, setIntegrations] = useState<IntegrationStatus[]>([])
   const [loadingIntegrations, setLoadingIntegrations] = useState(false)
@@ -92,11 +84,8 @@ export function NewProjectModal() {
     setStep('details')
     setName('')
     setAppUrl('')
-    setAuthEmail('')
-    setAuthPassword('')
     setProjectId(null)
     setIntegrations([])
-    setCredentialsOpen(false)
   }
 
   async function onCreateProject(e: React.FormEvent) {
@@ -104,8 +93,6 @@ export function NewProjectModal() {
     setSubmitting(true)
     try {
       const body: Record<string, string> = { name, app_url: appUrl }
-      if (authEmail.trim()) body.auth_email = authEmail.trim()
-      if (authPassword) body.auth_password = authPassword
 
       const res = await fetch('/api/projects', {
         method: 'POST',
@@ -123,6 +110,9 @@ export function NewProjectModal() {
         return
       }
       if (data?.id) {
+        if (data.warning) {
+          toast.warning(data.warning, { duration: 8000 })
+        }
         setProjectId(data.id)
         setStep('integrations')
         return
@@ -207,38 +197,6 @@ export function NewProjectModal() {
                   autoComplete="off"
                 />
               </div>
-
-              <Collapsible open={credentialsOpen} onOpenChange={setCredentialsOpen}>
-                <CollapsibleTrigger className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
-                  <ChevronRight className={`h-3.5 w-3.5 transition-transform ${credentialsOpen ? 'rotate-90' : ''}`} />
-                  Test account credentials (optional)
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="space-y-3 mt-3">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="auth-email">Auth email</Label>
-                      <Input
-                        id="auth-email"
-                        type="email"
-                        value={authEmail}
-                        onChange={(e) => setAuthEmail(e.target.value)}
-                        placeholder="tester@example.com"
-                        autoComplete="off"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="auth-password">Auth password</Label>
-                      <Input
-                        id="auth-password"
-                        type="password"
-                        value={authPassword}
-                        onChange={(e) => setAuthPassword(e.target.value)}
-                        autoComplete="new-password"
-                      />
-                    </div>
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
 
               <DialogFooter>
                 <Button
