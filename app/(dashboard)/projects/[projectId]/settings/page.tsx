@@ -5,6 +5,23 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
 import { PanelPage } from '@/components/dashboard/panel-page'
+import { Card, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 
 type IntegrationData = {
   id: string
@@ -87,7 +104,6 @@ export default function ProjectSettingsPage() {
     integrations.find((i) => i.type === type && i.status === 'active')
 
   async function disconnect(integrationId: string, typeName: string) {
-    if (!confirm(`Disconnect ${typeName}? You can reconnect later.`)) return
     try {
       const res = await fetch(`/api/integrations/${integrationId}`, { method: 'DELETE' })
       if (res.ok) {
@@ -112,7 +128,6 @@ export default function ProjectSettingsPage() {
   return (
     <PanelPage projectId={projectId} title="Settings">
       <div className="space-y-8">
-        {/* Integrations */}
         <div>
           <h3 className="text-xs text-muted-foreground uppercase tracking-wider mb-4">Integrations</h3>
           <div className="space-y-3">
@@ -190,10 +205,7 @@ export default function ProjectSettingsPage() {
           </div>
         </div>
 
-        {/* Schedule */}
         <ScheduleSection projectId={projectId} />
-
-        {/* Danger Zone */}
         <DeleteProjectSection projectId={projectId} projectName={project?.name || ''} />
       </div>
     </PanelPage>
@@ -254,45 +266,47 @@ function ScheduleSection({ projectId }: { projectId: string }) {
   return (
     <div>
       <h3 className="text-xs text-muted-foreground uppercase tracking-wider mb-4">Schedule</h3>
-      <div className="border border-border rounded-lg p-4 space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm">Automatic test suggestions</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Analyze and suggest test flows on a schedule</p>
+      <Card size="sm" className="ring-0 border border-border">
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Automatic test suggestions</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Analyze and suggest test flows on a schedule</p>
+            </div>
+            <Switch checked={enabled} onCheckedChange={setEnabled} />
           </div>
-          <button
-            onClick={() => setEnabled(!enabled)}
-            className={`w-10 h-6 rounded-full transition-colors relative ${enabled ? 'bg-green-500' : 'bg-muted'}`}
-          >
-            <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${enabled ? 'left-[18px]' : 'left-0.5'}`} />
-          </button>
-        </div>
 
-        {enabled && (
-          <>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1.5">Time</label>
-              <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="bg-transparent border border-border rounded px-2.5 py-1.5 text-sm outline-none" />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1.5">Days</label>
-              <div className="flex gap-1.5">
-                {DAYS.map((d) => (
-                  <button key={d.value} onClick={() => toggleDay(d.value)} className={`px-2.5 py-1 text-xs rounded border transition-colors ${days.includes(d.value) ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-                    {d.label}
-                  </button>
-                ))}
+          {enabled && (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="schedule-time">Time</Label>
+                <Input id="schedule-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-auto" />
               </div>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1.5">Timezone</label>
-              <input value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="America/New_York" className="w-full max-w-xs bg-transparent border-b border-border py-1.5 text-sm outline-none placeholder:text-muted-foreground/50" />
-            </div>
-          </>
-        )}
+              <div className="space-y-1.5">
+                <Label>Days</Label>
+                <div className="flex gap-1.5">
+                  {DAYS.map((d) => (
+                    <Button
+                      key={d.value}
+                      variant={days.includes(d.value) ? 'default' : 'outline'}
+                      size="xs"
+                      onClick={() => toggleDay(d.value)}
+                    >
+                      {d.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="schedule-tz">Timezone</Label>
+                <Input id="schedule-tz" value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="America/New_York" className="max-w-xs" />
+              </div>
+            </>
+          )}
 
-        <button onClick={save} disabled={saving} className="text-sm underline disabled:opacity-30">{saving ? 'Saving...' : 'Save schedule'}</button>
-      </div>
+          <Button variant="link" size="sm" className="px-0" onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save schedule'}</Button>
+        </CardContent>
+      </Card>
     </div>
   )
 }
@@ -367,28 +381,51 @@ function SettingsIntegrationCard({
   }, [waiting, connected, title, type])
 
   return (
-    <div className="border border-border rounded-lg p-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <h4 className="text-sm font-medium">{title}</h4>
-          <span className={`text-xs px-1.5 py-0.5 rounded-full ${connected ? 'bg-green-500/10 text-green-500' : waiting ? 'bg-yellow-500/10 text-yellow-500' : 'text-muted-foreground/50'}`}>
-            {connected ? 'Active' : waiting ? 'Waiting...' : 'Not connected'}
-          </span>
+    <Card size="sm" className="ring-0 border border-border">
+      <CardContent>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <h4 className="text-sm font-medium">{title}</h4>
+            <Badge
+              variant={connected ? 'outline' : waiting ? 'outline' : 'secondary'}
+              className={connected ? 'border-green-500/30 text-green-500' : waiting ? 'border-yellow-500/30 text-yellow-500' : ''}
+            >
+              {connected ? 'Active' : waiting ? 'Waiting...' : 'Not connected'}
+            </Badge>
+          </div>
+          <div className="flex items-center gap-3">
+            {connected ? (
+              <AlertDialog>
+                <AlertDialogTrigger render={<Button variant="ghost" size="xs" className="text-muted-foreground" />}>
+                  Disconnect
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Disconnect {title}?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will remove the {title} integration. You can reconnect later.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction variant="destructive" onClick={() => onDisconnect(integration.id, title)}>
+                      Disconnect
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            ) : waiting ? (
+              <span className="text-xs text-muted-foreground">Complete setup in the opened tab</span>
+            ) : openInNewTab ? (
+              <Button variant="link" size="xs" onClick={handleConnect}>Connect →</Button>
+            ) : (
+              <Button variant="link" size="xs" render={<a href={connectUrl} />}>Connect →</Button>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          {connected ? (
-            <button onClick={() => onDisconnect(integration.id, title)} className="text-xs text-muted-foreground hover:text-foreground underline">Disconnect</button>
-          ) : waiting ? (
-            <span className="text-xs text-muted-foreground">Complete setup in the opened tab</span>
-          ) : openInNewTab ? (
-            <button onClick={handleConnect} className="text-xs underline text-foreground/60 hover:text-foreground">Connect →</button>
-          ) : (
-            <a href={connectUrl} className="text-xs underline text-foreground/60 hover:text-foreground">Connect →</a>
-          )}
-        </div>
-      </div>
-      {connected && children && <div className="mt-2 text-xs text-muted-foreground">{children}</div>}
-    </div>
+        {connected && children && <div className="mt-2 text-xs text-muted-foreground">{children}</div>}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -459,17 +496,21 @@ function SlackDetails({ integration, projectId, onRefresh }: { integration?: Int
       {channelName ? (
         <div className="flex items-center gap-2">
           <p>Channel: #{channelName}</p>
-          <button onClick={loadChannels} disabled={loadingChannels} className="text-xs underline text-muted-foreground">Change</button>
+          <Button variant="link" size="xs" className="px-0 text-muted-foreground" onClick={loadChannels} disabled={loadingChannels}>
+            Change
+          </Button>
         </div>
       ) : (
-        <button onClick={loadChannels} disabled={loadingChannels} className="text-xs underline mt-1">
+        <Button variant="link" size="xs" className="px-0" onClick={loadChannels} disabled={loadingChannels}>
           {loadingChannels ? 'Loading...' : 'Select a channel'}
-        </button>
+        </Button>
       )}
       {showPicker && (
-        <div className="mt-2 max-h-36 overflow-y-auto border border-border rounded p-2 space-y-0.5">
+        <div className="mt-2 max-h-36 overflow-y-auto border border-border rounded-lg p-2 space-y-0.5">
           {channels.map((ch) => (
-            <button key={ch.id} onClick={() => selectChannel(ch.id, ch.name)} disabled={saving} className="block w-full text-left px-2 py-1 rounded text-sm hover:bg-muted/50">#{ch.name}</button>
+            <Button key={ch.id} variant="ghost" size="sm" className="w-full justify-start" onClick={() => selectChannel(ch.id, ch.name)} disabled={saving}>
+              #{ch.name}
+            </Button>
           ))}
         </div>
       )}
@@ -480,7 +521,6 @@ function SlackDetails({ integration, projectId, onRefresh }: { integration?: Int
 function DeleteProjectSection({ projectId, projectName }: { projectId: string; projectName: string }) {
   const router = useRouter()
   const [confirmText, setConfirmText] = useState('')
-  const [showConfirm, setShowConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
   async function handleDelete() {
@@ -501,24 +541,48 @@ function DeleteProjectSection({ projectId, projectName }: { projectId: string; p
   const nameMatches = confirmText === projectName
 
   return (
-    <div className="border border-red-500/20 rounded-lg p-4">
-      <h3 className="text-sm text-red-500/80 font-medium mb-1">Danger Zone</h3>
-      <p className="text-xs text-muted-foreground mb-4">
-        Deleting a project permanently removes all data. This cannot be undone.
-      </p>
-
-      {!showConfirm ? (
-        <button onClick={() => setShowConfirm(true)} className="text-xs text-red-500/80 underline hover:text-red-500">Delete this project</button>
-      ) : (
-        <div className="space-y-3">
-          <p className="text-xs">Type <span className="font-mono font-medium">{projectName}</span> to confirm:</p>
-          <input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder={projectName} autoComplete="off" autoFocus className="w-full max-w-xs border-b border-border bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground/50" />
-          <div className="flex gap-3">
-            <button onClick={handleDelete} disabled={!nameMatches || deleting} className="text-xs text-red-500 underline disabled:opacity-30">{deleting ? 'Deleting...' : 'Permanently delete'}</button>
-            <button onClick={() => { setShowConfirm(false); setConfirmText('') }} className="text-xs text-muted-foreground underline">Cancel</button>
-          </div>
+    <Card size="sm" className="ring-0 border border-destructive/30">
+      <CardContent className="space-y-4">
+        <div>
+          <h3 className="text-sm text-destructive font-medium mb-1">Danger Zone</h3>
+          <p className="text-xs text-muted-foreground">
+            Deleting a project permanently removes all data. This cannot be undone.
+          </p>
         </div>
-      )}
-    </div>
+
+        <AlertDialog>
+          <AlertDialogTrigger render={<Button variant="destructive" size="sm" />}>
+            Delete this project
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete project?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete <strong>{projectName}</strong> and all its data. Type the project name to confirm.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="px-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="delete-confirm">Project name</Label>
+                <Input
+                  id="delete-confirm"
+                  value={confirmText}
+                  onChange={(e) => setConfirmText(e.target.value)}
+                  placeholder={projectName}
+                  autoComplete="off"
+                  autoFocus
+                />
+              </div>
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setConfirmText('')}>Cancel</AlertDialogCancel>
+              <AlertDialogAction variant="destructive" onClick={handleDelete} disabled={!nameMatches || deleting}>
+                {deleting ? 'Deleting...' : 'Permanently delete'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </CardContent>
+    </Card>
   )
 }

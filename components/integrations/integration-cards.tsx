@@ -4,6 +4,11 @@ import { useEffect, useState, useRef } from 'react'
 import { toast } from 'sonner'
 import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
 import { primaryGithubRepoFullName } from '@/lib/github-integration-config'
+import { Card, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import type { Json } from '@/lib/supabase/types'
 
 export type IntegrationStatus = {
@@ -33,26 +38,28 @@ export function IntegrationCard({
   children: React.ReactNode
 }) {
   return (
-    <div className="border border-border rounded-lg p-4">
-      <div className="flex items-start justify-between gap-4 mb-3">
-        <div className="min-w-0">
-          <h3 className="text-sm font-medium">
-            {title}
-            {required && (
-              <span className="ml-2 text-xs font-normal text-amber-500">
-                Required
-              </span>
-            )}
-          </h3>
-          <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
-          {meta && <p className="text-xs text-muted-foreground/70 mt-0.5">{meta}</p>}
+    <Card size="sm" className="ring-0 border border-border">
+      <CardContent>
+        <div className="flex items-start justify-between gap-4 mb-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-medium flex items-center gap-2">
+              {title}
+              {required && (
+                <Badge variant="outline" className="text-amber-500 border-amber-500/30">
+                  Required
+                </Badge>
+              )}
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+            {meta && <p className="text-xs text-muted-foreground/70 mt-0.5">{meta}</p>}
+          </div>
+          <Badge variant={connected ? 'outline' : 'secondary'} className={connected ? 'border-green-500/30 text-green-500' : ''}>
+            {connected ? 'Connected' : 'Not connected'}
+          </Badge>
         </div>
-        <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 whitespace-nowrap ${connected ? 'bg-green-500/10 text-green-500' : 'text-muted-foreground/50'}`}>
-          {connected ? 'Connected' : 'Not connected'}
-        </span>
-      </div>
-      {children}
-    </div>
+        {children}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -119,9 +126,9 @@ export function GitHubCard({
         waiting ? (
           <p className="text-xs text-muted-foreground">Waiting for GitHub authorization...</p>
         ) : (
-          <button onClick={openGitHubInstall} className="text-sm underline text-foreground/80 hover:text-foreground">
+          <Button variant="link" size="sm" className="px-0" onClick={openGitHubInstall}>
             Connect GitHub →
-          </button>
+          </Button>
         )
       ) : (
         <GitHubRepoPicker projectId={projectId} onSaved={onRefresh} />
@@ -187,18 +194,29 @@ export function PostHogCard({
       meta={integration ? `Project: ${integration.meta?.posthog_project_id}` : undefined}
     >
       {!integration && !expanded && (
-        <button onClick={() => setExpanded(true)} className="text-sm underline text-foreground/80 hover:text-foreground">
+        <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>
           Connect PostHog →
-        </button>
+        </Button>
       )}
       {!integration && expanded && (
         <div className="space-y-3 mt-2">
-          <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Personal API key" className="w-full border-b border-border bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground/50" />
-          <input value={phProjectId} onChange={(e) => setPhProjectId(e.target.value)} placeholder="PostHog Project ID" className="w-full border-b border-border bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground/50" />
-          <input value={apiHost} onChange={(e) => setApiHost(e.target.value)} placeholder="API host (optional)" className="w-full border-b border-border bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground/50" />
-          <div className="flex gap-3">
-            <button onClick={connect} disabled={submitting || !apiKey || !phProjectId} className="text-sm underline disabled:opacity-30">{submitting ? 'Connecting...' : 'Save'}</button>
-            <button onClick={() => setExpanded(false)} className="text-sm opacity-50 underline">Cancel</button>
+          <div className="space-y-1.5">
+            <Label htmlFor="ph-api-key">Personal API key</Label>
+            <Input id="ph-api-key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="phx_..." />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="ph-project-id">PostHog Project ID</Label>
+            <Input id="ph-project-id" value={phProjectId} onChange={(e) => setPhProjectId(e.target.value)} placeholder="12345" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="ph-api-host">API host (optional)</Label>
+            <Input id="ph-api-host" value={apiHost} onChange={(e) => setApiHost(e.target.value)} placeholder="https://app.posthog.com" />
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={connect} disabled={submitting || !apiKey || !phProjectId}>
+              {submitting ? 'Connecting...' : 'Save'}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setExpanded(false)}>Cancel</Button>
           </div>
         </div>
       )}
@@ -249,16 +267,25 @@ export function SentryCard({
       meta={integration ? `${integration.meta?.organization_slug}/${integration.meta?.project_slug}` : undefined}
     >
       {!integration && !expanded && (
-        <button onClick={() => setExpanded(true)} className="text-sm underline text-foreground/80 hover:text-foreground">Connect Sentry →</button>
+        <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>Connect Sentry →</Button>
       )}
       {!integration && expanded && (
         <div className="space-y-3 mt-2">
-          <input value={authToken} onChange={(e) => setAuthToken(e.target.value)} placeholder="Auth token" type="password" className="w-full border-b border-border bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground/50" />
-          <input value={orgSlug} onChange={(e) => setOrgSlug(e.target.value)} placeholder="Organization slug" className="w-full border-b border-border bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground/50" />
-          <input value={projSlug} onChange={(e) => setProjSlug(e.target.value)} placeholder="Project slug" className="w-full border-b border-border bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground/50" />
-          <div className="flex gap-3">
-            <button onClick={connect} disabled={submitting || !authToken || !orgSlug || !projSlug} className="text-sm underline disabled:opacity-30">{submitting ? 'Connecting...' : 'Save'}</button>
-            <button onClick={() => setExpanded(false)} className="text-sm opacity-50 underline">Cancel</button>
+          <div className="space-y-1.5">
+            <Label htmlFor="sentry-token">Auth token</Label>
+            <Input id="sentry-token" value={authToken} onChange={(e) => setAuthToken(e.target.value)} placeholder="sntrys_..." type="password" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="sentry-org">Organization slug</Label>
+            <Input id="sentry-org" value={orgSlug} onChange={(e) => setOrgSlug(e.target.value)} placeholder="my-org" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="sentry-proj">Project slug</Label>
+            <Input id="sentry-proj" value={projSlug} onChange={(e) => setProjSlug(e.target.value)} placeholder="my-project" />
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={connect} disabled={submitting || !authToken || !orgSlug || !projSlug}>{submitting ? 'Connecting...' : 'Save'}</Button>
+            <Button variant="ghost" size="sm" onClick={() => setExpanded(false)}>Cancel</Button>
           </div>
         </div>
       )}
@@ -306,15 +333,21 @@ export function LangSmithCard({
       meta={integration?.meta?.project_name ? `Project: ${integration.meta.project_name}` : undefined}
     >
       {!integration && !expanded && (
-        <button onClick={() => setExpanded(true)} className="text-sm underline text-foreground/80 hover:text-foreground">Connect LangSmith →</button>
+        <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>Connect LangSmith →</Button>
       )}
       {!integration && expanded && (
         <div className="space-y-3 mt-2">
-          <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="LangSmith API key" type="password" className="w-full border-b border-border bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground/50" />
-          <input value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="Project name (optional)" className="w-full border-b border-border bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground/50" />
-          <div className="flex gap-3">
-            <button onClick={connect} disabled={submitting || !apiKey} className="text-sm underline disabled:opacity-30">{submitting ? 'Connecting...' : 'Save'}</button>
-            <button onClick={() => setExpanded(false)} className="text-sm opacity-50 underline">Cancel</button>
+          <div className="space-y-1.5">
+            <Label htmlFor="ls-api-key">LangSmith API key</Label>
+            <Input id="ls-api-key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="lsv2_..." type="password" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="ls-project">Project name (optional)</Label>
+            <Input id="ls-project" value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="default" />
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={connect} disabled={submitting || !apiKey}>{submitting ? 'Connecting...' : 'Save'}</Button>
+            <Button variant="ghost" size="sm" onClick={() => setExpanded(false)}>Cancel</Button>
           </div>
         </div>
       )}
@@ -362,15 +395,21 @@ export function BraintrustCard({
       meta={integration?.meta?.project_name ? `Project: ${integration.meta.project_name}` : undefined}
     >
       {!integration && !expanded && (
-        <button onClick={() => setExpanded(true)} className="text-sm underline text-foreground/80 hover:text-foreground">Connect Braintrust →</button>
+        <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>Connect Braintrust →</Button>
       )}
       {!integration && expanded && (
         <div className="space-y-3 mt-2">
-          <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Braintrust API key" type="password" className="w-full border-b border-border bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground/50" />
-          <input value={btProjectName} onChange={(e) => setBtProjectName(e.target.value)} placeholder="Project name (optional)" className="w-full border-b border-border bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground/50" />
-          <div className="flex gap-3">
-            <button onClick={connect} disabled={submitting || !apiKey} className="text-sm underline disabled:opacity-30">{submitting ? 'Connecting...' : 'Save'}</button>
-            <button onClick={() => setExpanded(false)} className="text-sm opacity-50 underline">Cancel</button>
+          <div className="space-y-1.5">
+            <Label htmlFor="bt-api-key">Braintrust API key</Label>
+            <Input id="bt-api-key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." type="password" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="bt-project">Project name (optional)</Label>
+            <Input id="bt-project" value={btProjectName} onChange={(e) => setBtProjectName(e.target.value)} placeholder="my-project" />
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={connect} disabled={submitting || !apiKey}>{submitting ? 'Connecting...' : 'Save'}</Button>
+            <Button variant="ghost" size="sm" onClick={() => setExpanded(false)}>Cancel</Button>
           </div>
         </div>
       )}
@@ -398,13 +437,15 @@ export function SlackCard({
   const [channels, setChannels] = useState<Array<{ id: string; name: string }>>([])
   const [loadingChannels, setLoadingChannels] = useState(false)
   const [saving, setSaving] = useState(false)
+  const authPopupRef = useRef<Window | null>(null)
 
   const channelName = integration?.meta?.channel_name as string | undefined
 
   function openSlackAuth() {
     setWaiting(true)
     const rt = encodeURIComponent(returnTo || `/projects/${projectId}/settings`)
-    window.open(`/api/integrations/slack/authorize?project_id=${projectId}&return_to=${rt}`, '_blank')
+    authPopupRef.current =
+      window.open(`/api/integrations/slack/authorize?project_id=${projectId}&return_to=${rt}`, '_blank') ?? null
   }
 
   useEffect(() => {
@@ -417,6 +458,9 @@ export function SlackCard({
     if (waiting && integration) {
       setWaiting(false)
       toast.success('Slack connected')
+      authPopupRef.current?.close()
+      authPopupRef.current = null
+      window.focus()
     }
   }, [waiting, integration])
 
@@ -459,25 +503,29 @@ export function SlackCard({
         waiting ? (
           <p className="text-xs text-muted-foreground">Waiting for Slack authorization...</p>
         ) : (
-          <button onClick={openSlackAuth} className="text-sm underline text-foreground/80 hover:text-foreground">Connect Slack →</button>
+          <Button variant="link" size="sm" className="px-0" onClick={openSlackAuth}>Connect Slack →</Button>
         )
       ) : !channelName ? (
         <div>
           {!showChannels ? (
-            <button onClick={loadChannels} disabled={loadingChannels} className="text-sm underline disabled:opacity-30">
+            <Button variant="link" size="sm" className="px-0" onClick={loadChannels} disabled={loadingChannels}>
               {loadingChannels ? 'Loading...' : 'Select a channel →'}
-            </button>
+            </Button>
           ) : (
             <div className="mt-2 max-h-40 overflow-y-auto space-y-0.5">
               {channels.map((ch) => (
-                <button key={ch.id} onClick={() => selectChannel(ch.id, ch.name)} disabled={saving} className="block w-full text-left px-2 py-1.5 rounded text-sm hover:bg-muted/50">#{ch.name}</button>
+                <Button key={ch.id} variant="ghost" size="sm" className="w-full justify-start" onClick={() => selectChannel(ch.id, ch.name)} disabled={saving}>
+                  #{ch.name}
+                </Button>
               ))}
               {channels.length === 0 && <p className="text-xs text-muted-foreground px-2 py-2">No channels found.</p>}
             </div>
           )}
         </div>
       ) : (
-        <button onClick={loadChannels} disabled={loadingChannels} className="text-xs text-muted-foreground underline">Change channel</button>
+        <Button variant="link" size="xs" className="px-0 text-muted-foreground" onClick={loadChannels} disabled={loadingChannels}>
+          Change channel
+        </Button>
       )}
     </IntegrationCard>
   )

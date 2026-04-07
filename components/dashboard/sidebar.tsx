@@ -6,6 +6,13 @@ import { Plus, PanelLeftClose, PanelLeft } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useWorkspace } from '@/lib/workspace-context'
 import { SignOutLink } from '@/components/dashboard/sign-out-link'
+import { Button } from '@/components/ui/button'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from '@/components/ui/tooltip'
 
 function OrgOrb() {
   return (
@@ -55,23 +62,31 @@ export function AppSidebar() {
             <OrgOrb />
             <span className="text-sm font-normal truncate">{orgName || 'Verona'}</span>
           </div>
-          <button
-            onClick={toggleSidebar}
-            className="rounded-md p-1 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors shrink-0 ml-2"
-          >
-            <PanelLeftClose className="h-4 w-4" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={toggleSidebar}
+                className="text-sidebar-foreground/60 hover:text-sidebar-foreground shrink-0 ml-2"
+              />
+            }>
+              <PanelLeftClose className="h-4 w-4" />
+            </TooltipTrigger>
+            <TooltipContent>Collapse sidebar</TooltipContent>
+          </Tooltip>
         </div>
 
-        {/* New Chat button */}
+        {/* New project button */}
         <div className="px-3 py-3">
-          <button
+          <Button
+            variant="outline"
+            className="w-full justify-start gap-2 border-sidebar-border text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
             onClick={() => setShowNewProjectModal(true)}
-            className="flex w-full items-center gap-2 rounded-lg border border-sidebar-border px-3 py-2 text-sm text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors"
           >
             <Plus className="h-4 w-4" />
-            <span>New project</span>
-          </button>
+            New project
+          </Button>
         </div>
 
         {/* Project list */}
@@ -108,9 +123,9 @@ export function AppSidebar() {
         {/* Bottom: user info */}
         <div className="shrink-0 border-t border-sidebar-border px-4 py-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-xs font-medium">
-              {initials}
-            </div>
+            <Avatar className="h-7 w-7">
+              <AvatarFallback className="text-xs">{initials}</AvatarFallback>
+            </Avatar>
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs text-sidebar-foreground/80">
                 {userEmail}
@@ -129,11 +144,18 @@ export function SidebarToggle() {
   if (!sidebarCollapsed) return null
 
   return (
-    <button
-      onClick={toggleSidebar}
-      className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-    >
-      <PanelLeft className="h-4 w-4" />
-    </button>
+    <Tooltip>
+      <TooltipTrigger render={
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={toggleSidebar}
+          className="text-muted-foreground hover:text-foreground"
+        />
+      }>
+        <PanelLeft className="h-4 w-4" />
+      </TooltipTrigger>
+      <TooltipContent>Toggle sidebar</TooltipContent>
+    </Tooltip>
   )
 }

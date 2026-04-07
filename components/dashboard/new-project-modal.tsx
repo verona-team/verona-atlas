@@ -9,7 +9,11 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   GitHubCard,
   PostHogCard,
@@ -32,9 +36,9 @@ export function NewProjectModal() {
   const [step, setStep] = useState<Step>('details')
   const [submitting, setSubmitting] = useState(false)
 
-  // Phase 1: project details
   const [name, setName] = useState('')
   const [appUrl, setAppUrl] = useState('')
+
   // Phase 2: integrations
   const [projectId, setProjectId] = useState<string | null>(null)
   const [integrations, setIntegrations] = useState<IntegrationStatus[]>([])
@@ -168,55 +172,47 @@ export function NewProjectModal() {
             </DialogHeader>
 
             <form onSubmit={onCreateProject} className="space-y-4 mt-2">
-              <div>
-                <label className="block text-xs text-muted-foreground mb-1">
-                  Project name
-                </label>
-                <input
+              <div className="space-y-1.5">
+                <Label htmlFor="project-name">Project name</Label>
+                <Input
+                  id="project-name"
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="My product"
                   autoComplete="off"
                   autoFocus
-                  className="w-full border-b border-border bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/50 focus:border-foreground/30 transition-colors"
                 />
               </div>
 
-              <div>
-                <label className="block text-xs text-muted-foreground mb-1">
-                  App URL
-                </label>
-                <input
+              <div className="space-y-1.5">
+                <Label htmlFor="app-url">App URL</Label>
+                <Input
+                  id="app-url"
                   type="url"
                   required
                   value={appUrl}
                   onChange={(e) => setAppUrl(e.target.value)}
                   placeholder="https://app.example.com"
                   autoComplete="off"
-                  className="w-full border-b border-border bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/50 focus:border-foreground/30 transition-colors"
                 />
               </div>
 
-              <div className="flex justify-end gap-3 pt-2">
-                <button
+              <DialogFooter>
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => {
                     setShowNewProjectModal(false)
                     reset()
                   }}
-                  className="text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >
                   Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                >
+                </Button>
+                <Button type="submit" disabled={submitting}>
                   {submitting ? 'Creating...' : 'Create project'}
-                </button>
-              </div>
+                </Button>
+              </DialogFooter>
             </form>
           </>
         ) : (
@@ -237,7 +233,7 @@ export function NewProjectModal() {
                   projectId={projectId!}
                   integration={getStatus('github')}
                   onRefresh={handleRefresh}
-                  returnTo={`/projects/${projectId}`}
+                  returnTo={`/projects/${projectId}/settings`}
                 />
                 <PostHogCard
                   projectId={projectId!}
@@ -263,20 +259,19 @@ export function NewProjectModal() {
                   projectId={projectId!}
                   integration={getStatus('slack')}
                   onRefresh={handleRefresh}
-                  returnTo={`/projects/${projectId}`}
+                  returnTo={`/projects/${projectId}/settings`}
                 />
               </div>
             )}
 
             <div className="pt-3">
-              <button
-                type="button"
+              <Button
                 onClick={handleContinueToChat}
                 disabled={!githubComplete}
-                className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="w-full"
               >
                 Continue to Chat →
-              </button>
+              </Button>
               {!githubComplete && (
                 <p className="text-xs text-muted-foreground mt-2 text-center">
                   Connect GitHub and select a repository to continue.

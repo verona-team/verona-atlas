@@ -7,6 +7,9 @@ import { DefaultChatTransport } from 'ai'
 import { Send, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { MessageBubble } from './message-bubble'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import { Card, CardContent } from '@/components/ui/card'
 import type { Json, ChatMessage } from '@/lib/supabase/types'
 import { createClient } from '@/lib/supabase/client'
 
@@ -74,7 +77,6 @@ function getVisibleTextFromMessageParts(
 
 const STALE_THINKING_MS = 15 * 60 * 1000
 
-/** Pixels from the bottom to still count as "following" new messages (tolerance for sub-pixel / font rounding). */
 const NEAR_BOTTOM_THRESHOLD_PX = 96
 
 interface ChatInterfaceProps {
@@ -98,13 +100,11 @@ export function ChatInterface({
 }: ChatInterfaceProps) {
   const router = useRouter()
   const scrollRef = useRef<HTMLDivElement>(null)
-  /** When true, incoming message updates may scroll the pane to keep the latest content in view. */
   const stickToBottomRef = useRef(true)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [input, setInput] = useState('')
   const [flowStatesOverride, setFlowStatesOverride] = useState<Record<string, 'pending' | 'approved' | 'rejected'> | null>(null)
   const [dbMessages, setDbMessages] = useState<ChatMessage[]>(initialMessages)
-  /** Bumps on bootstrap failure so we retry auto-send (see onError). */
   const [bootstrapNonce, setBootstrapNonce] = useState(0)
   const lastBootstrapKeyRef = useRef<string | null>(null)
   const bootstrapFailureCountRef = useRef(0)
@@ -297,7 +297,6 @@ export function ChatInterface({
     }
   }, [sessionId, computeSessionThinking])
 
-  // Realtime can miss events (tab backgrounded, reconnect gaps). Re-fetch after a response completes.
   useEffect(() => {
     if (status !== 'ready') return
 
@@ -358,7 +357,6 @@ export function ChatInterface({
     scrollPaneToBottomIfStuck()
   }, [streamMessages, dbMessages, scrollPaneToBottomIfStuck])
 
-  /** Streamed text / async layout can grow the thread without a new React message row; keep pinned users aligned. */
   useEffect(() => {
     const el = scrollRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
@@ -448,7 +446,6 @@ export function ChatInterface({
         isStreaming: false,
       }))
 
-    // Match DB rows by role + content prefix (UI message ids differ from DB UUIDs).
     const dbContentSet = new Set(
       dbMessages.map((m) => `${m.role}:${(m.content ?? '').slice(0, 100)}`),
     )
@@ -500,7 +497,7 @@ export function ChatInterface({
           <div className="flex items-center justify-center h-full">
             <div className="text-center space-y-4">
               <h2 className="text-4xl">Welcome to Verona</h2>
-              <p className="text-xl opacity-50 max-w-md">
+              <p className="text-xl text-muted-foreground max-w-md">
                 I&apos;ll analyze your project and suggest UI flows to test.
                 Let&apos;s get started.
               </p>
@@ -525,7 +522,7 @@ export function ChatInterface({
         })}
 
         {isProcessing && (displayMessages.length === 0 || displayMessages[displayMessages.length - 1]?.role === 'user') && (
-          <div className="flex items-center gap-3 text-base opacity-50">
+          <div className="flex items-center gap-3 text-base text-muted-foreground">
             <Loader2 className="w-5 h-5 animate-spin" />
             <span>Verona is thinking...</span>
           </div>
@@ -534,38 +531,40 @@ export function ChatInterface({
 
       {approvedCount > 0 && (
         <div className="px-4 pb-2 shrink-0">
-          <div className="flex items-center gap-2 text-base opacity-60 bg-green-500/5 border border-green-500/20 rounded-lg px-4 py-2.5">
-            <span>{approvedCount} flow{approvedCount !== 1 ? 's' : ''} approved</span>
-            <span className="opacity-40">·</span>
-            <span>Tell me to &quot;start testing&quot; when ready</span>
-          </div>
+          <Card size="sm" className="ring-0 border border-green-500/20 bg-green-500/5">
+            <CardContent className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span>{approvedCount} flow{approvedCount !== 1 ? 's' : ''} approved</span>
+              <span className="text-muted-foreground/40">·</span>
+              <span>Tell me to &quot;start testing&quot; when ready</span>
+            </CardContent>
+          </Card>
         </div>
       )}
 
       <form onSubmit={handleSubmit} className="border-t px-4 py-4 shrink-0">
         <div className="flex items-end gap-3 max-w-4xl mx-auto">
-          <textarea
+          <Textarea
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Give feedback on the test flows, or say 'start testing' to begin..."
             rows={1}
-            className="flex-1 resize-none bg-transparent border rounded-lg px-4 py-3 text-lg outline-none placeholder:opacity-30 focus:border-foreground/30 transition-colors"
-            style={{ minHeight: '52px', maxHeight: '160px' }}
+            className="flex-1 resize-none min-h-[52px] max-h-[160px] text-base"
             disabled={isProcessing}
           />
-          <button
+          <Button
             type="submit"
+            variant="outline"
+            size="icon"
             disabled={isProcessing || !input.trim()}
-            className="p-3 rounded-lg border transition-all hover:bg-foreground/5 disabled:opacity-20"
           >
             {isProcessing ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
+              <Loader2 className="size-4 animate-spin" />
             ) : (
-              <Send className="w-5 h-5" />
+              <Send className="size-4" />
             )}
-          </button>
+          </Button>
         </div>
       </form>
     </div>
