@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Play, Loader2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 
 interface TriggerRunButtonProps {
   projectId: string
@@ -32,24 +33,20 @@ export function TriggerRunButton({ projectId, variant = 'header' }: TriggerRunBu
 
   if (variant === 'page') {
     return (
-      <button onClick={handleTrigger} disabled={loading} className="text-2xl underline disabled:opacity-30">
+      <Button variant="link" size="lg" onClick={handleTrigger} disabled={loading}>
         {loading ? 'Running...' : 'Run Tests'}
-      </button>
+      </Button>
     )
   }
 
   return (
-    <button
-      onClick={handleTrigger}
-      disabled={loading}
-      className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors disabled:opacity-30"
-    >
+    <Button variant="ghost" size="sm" onClick={handleTrigger} disabled={loading}>
       {loading ? (
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
       ) : (
         <Play className="h-3.5 w-3.5" />
       )}
       <span className="hidden sm:inline">{loading ? 'Running...' : 'Run'}</span>
-    </button>
+    </Button>
   )
 }

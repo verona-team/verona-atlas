@@ -3,6 +3,7 @@
 import type { ProposedFlow } from './flow-proposal-card'
 import { FlowProposalCard } from './flow-proposal-card'
 import { MarkdownContent } from './markdown-content'
+import { Card, CardContent } from '@/components/ui/card'
 import type { Json } from '@/lib/supabase/types'
 
 interface MessageBubbleProps {
@@ -46,7 +47,7 @@ export function MessageBubble({
         ) : (
           <>
             {!isFlowProposal && !isRunStarted && (
-              <div className="text-base opacity-90">
+              <div className="text-base text-foreground/90">
                 <MarkdownContent content={content} />
                 {isStreaming && (
                   <span className="inline-block w-2 h-5 ml-1 bg-foreground/60 animate-pulse" />
@@ -56,10 +57,10 @@ export function MessageBubble({
 
             {isFlowProposal && proposals && (
               <div className="space-y-5">
-                <p className="text-lg opacity-80 leading-relaxed">
+                <p className="text-lg text-foreground/80 leading-relaxed">
                   {proposals.analysis}
                 </p>
-                <p className="text-lg opacity-60">
+                <p className="text-base text-muted-foreground">
                   Here are the UI flows I recommend testing:
                 </p>
                 <div className="space-y-3">
@@ -73,17 +74,19 @@ export function MessageBubble({
                     />
                   ))}
                 </div>
-                <p className="text-base opacity-50">
+                <p className="text-sm text-muted-foreground">
                   Approve or reject each flow, then tell me to start testing when you&apos;re ready.
                 </p>
               </div>
             )}
 
             {isRunStarted && (
-              <div className="flex items-center gap-3 border border-green-500/20 rounded-lg p-5 bg-green-500/5">
-                <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" />
-                <p className="text-lg">{content}</p>
-              </div>
+              <Card size="sm" className="ring-0 border border-green-500/20 bg-green-500/5">
+                <CardContent className="flex items-center gap-3">
+                  <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" />
+                  <p className="text-base">{content}</p>
+                </CardContent>
+              </Card>
             )}
           </>
         )}

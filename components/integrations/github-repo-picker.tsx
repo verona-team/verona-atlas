@@ -2,6 +2,15 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
 
 type RepoRow = {
   full_name: string
@@ -74,12 +83,12 @@ export function GitHubRepoPicker({ projectId, onSaved }: Props) {
   }
 
   if (loading) {
-    return <p className="text-base opacity-50">Loading repositories…</p>
+    return <p className="text-sm text-muted-foreground">Loading repositories…</p>
   }
 
   if (rows.length === 0) {
     return (
-      <p className="text-base opacity-50">
+      <p className="text-sm text-muted-foreground">
         No repositories are available for this GitHub App installation. Add repositories to the installation on
         GitHub and try again.
       </p>
@@ -88,36 +97,33 @@ export function GitHubRepoPicker({ projectId, onSaved }: Props) {
 
   return (
     <div className="space-y-3">
-      <p className="text-base opacity-70">
+      <p className="text-sm text-muted-foreground">
         Pick the single repository Verona should use for code context, commits, and test planning. Each project is
         scoped to one codebase.
       </p>
-      <div className="flex flex-wrap items-center gap-3">
-        <label htmlFor={`github-repo-${projectId}`} className="sr-only">
-          Repository
-        </label>
-        <select
-          id={`github-repo-${projectId}`}
-          value={choice}
-          onChange={(e) => setChoice(e.target.value)}
-          className="min-w-[min(100%,20rem)] max-w-full rounded-lg border border-input bg-transparent px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <option value="">Select a repository…</option>
-          {rows.map((r) => (
-            <option key={r.full_name} value={r.full_name}>
-              {r.full_name}
-              {r.private ? ' (private)' : ''}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="min-w-[min(100%,20rem)] space-y-1.5">
+          <Label htmlFor={`github-repo-${projectId}`}>Repository</Label>
+          <Select value={choice} onValueChange={(v) => setChoice(v ?? '')}>
+            <SelectTrigger id={`github-repo-${projectId}`}>
+              <SelectValue placeholder="Select a repository…" />
+            </SelectTrigger>
+            <SelectContent>
+              {rows.map((r) => (
+                <SelectItem key={r.full_name} value={r.full_name}>
+                  {r.full_name}{r.private ? ' (private)' : ''}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button
+          size="sm"
           onClick={() => void save()}
           disabled={saving || !choice}
-          className="text-base underline disabled:opacity-30 disabled:no-underline"
         >
           {saving ? 'Saving…' : 'Save'}
-        </button>
+        </Button>
       </div>
     </div>
   )

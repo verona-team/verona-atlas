@@ -3,13 +3,23 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { ChevronRight } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from '@/components/ui/collapsible'
 import {
   GitHubCard,
   PostHogCard,
@@ -31,14 +41,13 @@ export function NewProjectModal() {
 
   const [step, setStep] = useState<Step>('details')
   const [submitting, setSubmitting] = useState(false)
+  const [credentialsOpen, setCredentialsOpen] = useState(false)
 
-  // Phase 1: project details
   const [name, setName] = useState('')
   const [appUrl, setAppUrl] = useState('')
   const [authEmail, setAuthEmail] = useState('')
   const [authPassword, setAuthPassword] = useState('')
 
-  // Phase 2: integrations
   const [projectId, setProjectId] = useState<string | null>(null)
   const [integrations, setIntegrations] = useState<IntegrationStatus[]>([])
   const [loadingIntegrations, setLoadingIntegrations] = useState(false)
@@ -87,6 +96,7 @@ export function NewProjectModal() {
     setAuthPassword('')
     setProjectId(null)
     setIntegrations([])
+    setCredentialsOpen(false)
   }
 
   async function onCreateProject(e: React.FormEvent) {
@@ -172,88 +182,79 @@ export function NewProjectModal() {
             </DialogHeader>
 
             <form onSubmit={onCreateProject} className="space-y-4 mt-2">
-              <div>
-                <label className="block text-xs text-muted-foreground mb-1">
-                  Project name
-                </label>
-                <input
+              <div className="space-y-1.5">
+                <Label htmlFor="project-name">Project name</Label>
+                <Input
+                  id="project-name"
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="My product"
                   autoComplete="off"
                   autoFocus
-                  className="w-full border-b border-border bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/50 focus:border-foreground/30 transition-colors"
                 />
               </div>
 
-              <div>
-                <label className="block text-xs text-muted-foreground mb-1">
-                  App URL
-                </label>
-                <input
+              <div className="space-y-1.5">
+                <Label htmlFor="app-url">App URL</Label>
+                <Input
+                  id="app-url"
                   type="url"
                   required
                   value={appUrl}
                   onChange={(e) => setAppUrl(e.target.value)}
                   placeholder="https://app.example.com"
                   autoComplete="off"
-                  className="w-full border-b border-border bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/50 focus:border-foreground/30 transition-colors"
                 />
               </div>
 
-              <details className="group">
-                <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground transition-colors">
+              <Collapsible open={credentialsOpen} onOpenChange={setCredentialsOpen}>
+                <CollapsibleTrigger className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                  <ChevronRight className={`h-3.5 w-3.5 transition-transform ${credentialsOpen ? 'rotate-90' : ''}`} />
                   Test account credentials (optional)
-                </summary>
-                <div className="space-y-3 mt-3">
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">
-                      Auth email
-                    </label>
-                    <input
-                      type="email"
-                      value={authEmail}
-                      onChange={(e) => setAuthEmail(e.target.value)}
-                      placeholder="tester@example.com"
-                      autoComplete="off"
-                      className="w-full border-b border-border bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/50"
-                    />
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="space-y-3 mt-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="auth-email">Auth email</Label>
+                      <Input
+                        id="auth-email"
+                        type="email"
+                        value={authEmail}
+                        onChange={(e) => setAuthEmail(e.target.value)}
+                        placeholder="tester@example.com"
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="auth-password">Auth password</Label>
+                      <Input
+                        id="auth-password"
+                        type="password"
+                        value={authPassword}
+                        onChange={(e) => setAuthPassword(e.target.value)}
+                        autoComplete="new-password"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">
-                      Auth password
-                    </label>
-                    <input
-                      type="password"
-                      value={authPassword}
-                      onChange={(e) => setAuthPassword(e.target.value)}
-                      autoComplete="new-password"
-                      className="w-full border-b border-border bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/50"
-                    />
-                  </div>
-                </div>
-              </details>
+                </CollapsibleContent>
+              </Collapsible>
 
-              <div className="flex justify-end gap-3 pt-2">
-                <button
+              <DialogFooter>
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => {
                     setShowNewProjectModal(false)
                     reset()
                   }}
-                  className="text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >
                   Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                >
+                </Button>
+                <Button type="submit" disabled={submitting}>
                   {submitting ? 'Creating...' : 'Create project'}
-                </button>
-              </div>
+                </Button>
+              </DialogFooter>
             </form>
           </>
         ) : (
@@ -306,14 +307,13 @@ export function NewProjectModal() {
             )}
 
             <div className="pt-3">
-              <button
-                type="button"
+              <Button
                 onClick={handleContinueToChat}
                 disabled={!githubComplete}
-                className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="w-full"
               >
                 Continue to Chat →
-              </button>
+              </Button>
               {!githubComplete && (
                 <p className="text-xs text-muted-foreground mt-2 text-center">
                   Connect GitHub and select a repository to continue.
