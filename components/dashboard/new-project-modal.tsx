@@ -159,7 +159,7 @@ export function NewProjectModal() {
       }}
     >
       <DialogContent
-        className="sm:max-w-lg max-h-[85vh] overflow-y-auto"
+        className="sm:max-w-2xl max-h-[85vh] overflow-y-auto"
         showCloseButton={step === 'details' && !projectId}
       >
         {step === 'details' ? (

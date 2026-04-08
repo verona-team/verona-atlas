@@ -102,10 +102,10 @@ export function GitHubRepoPicker({ projectId, onSaved }: Props) {
         scoped to one codebase.
       </p>
       <div className="flex flex-wrap items-end gap-3">
-        <div className="min-w-[min(100%,20rem)] space-y-1.5">
+        <div className="min-w-0 flex-1 space-y-1.5">
           <Label htmlFor={`github-repo-${projectId}`}>Repository</Label>
           <Select value={choice} onValueChange={(v) => setChoice(v ?? '')}>
-            <SelectTrigger id={`github-repo-${projectId}`}>
+            <SelectTrigger id={`github-repo-${projectId}`} className="w-full">
               <SelectValue placeholder="Select a repository…" />
             </SelectTrigger>
             <SelectContent>
