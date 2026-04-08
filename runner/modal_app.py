@@ -26,7 +26,7 @@ runner_image = (
 @app.function(
     image=runner_image,
     secrets=[modal.Secret.from_name("atlas-secrets")],
-    timeout=1800,  # 30 minutes max per test run
+    timeout=86400,  # 24h hard ceiling; actual deadline is enforced dynamically inside the pipeline
 )
 async def execute_test_run(test_run_id: str, project_id: str):
     """Main entry point triggered from Next.js via Modal TypeScript SDK."""
