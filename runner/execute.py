@@ -20,6 +20,8 @@ from runner.observability import collect_observability_data, diff_observability_
 from runner.recordings import save_session_recording
 from runner.browser import create_stagehand_session, cleanup_session
 
+SECONDS_PER_TEMPLATE = 3600  # 1 hour budget per template
+
 
 def _template_ids_from_trigger_ref(trigger_ref: str | None) -> list[str] | None:
     """If set, the run should only execute these template rows (e.g. chat-approved flows)."""
@@ -194,6 +196,12 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
             }).eq("id", test_run_id).execute()
             return
 
+        # Compute dynamic deadline: 1 hour per template
+        total_timeout = len(templates) * SECONDS_PER_TEMPLATE
+        deadline = pipeline_t0 + total_timeout
+        print(f"[PIPELINE]   dynamic timeout = {total_timeout}s "
+              f"({len(templates)} templates × {SECONDS_PER_TEMPLATE}s)")
+
         # 6. Update status to running
         print("[PIPELINE] Step 6: Setting status → running")
         supabase.table("test_runs").update({"status": "running"}).eq("id", test_run_id).execute()
@@ -202,8 +210,28 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
         results = []
         for idx, template in enumerate(templates):
             tpl_name = template.get("name", "unnamed")
+
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                print("-" * 60)
+                print(f"[PIPELINE] TIMEOUT: deadline exceeded — skipping template {idx + 1}/{len(templates)}: {tpl_name!r} "
+                      f"(and {len(templates) - idx - 1} more)")
+                for skip_tpl in templates[idx:]:
+                    results.append({
+                        "test_run_id": test_run_id,
+                        "test_template_id": skip_tpl["id"],
+                        "status": "skipped",
+                        "duration_ms": 0,
+                        "error_message": f"Skipped — pipeline deadline of {total_timeout}s exceeded",
+                        "screenshots": [],
+                        "console_logs": {"skipped_reason": "timeout"},
+                    })
+                    supabase.table("test_results").insert(results[-1]).execute()
+                break
+
             print("-" * 60)
-            print(f"[PIPELINE] Template {idx + 1}/{len(templates)}: {tpl_name!r} (id={template['id'][:12]}...)")
+            print(f"[PIPELINE] Template {idx + 1}/{len(templates)}: {tpl_name!r} (id={template['id'][:12]}...) "
+                  f"[{remaining:.0f}s remaining]")
             tpl_t0 = time.time()
             try:
                 # Re-check credentials before each template (a previous template
