@@ -103,6 +103,37 @@ async def execute_browser_action(session, page, instruction: str) -> dict:
     }
 
 
+async def execute_navigate_to_url(page, url: str) -> dict:
+    """Navigate the browser directly to a URL via Playwright page.goto().
+
+    This bypasses the Stagehand CUA agent entirely, providing reliable
+    programmatic navigation for known URLs (verification links, callbacks, etc.).
+    """
+    success = True
+    error: str | None = None
+
+    t0 = time.time()
+    try:
+        response = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        elapsed = time.time() - t0
+        status = response.status if response else None
+        print(f"[EXECUTOR]     navigate succeeded ({elapsed:.1f}s): status={status} url={page.url}")
+    except Exception as e:
+        elapsed = time.time() - t0
+        success = False
+        error = str(e)
+        print(f"[EXECUTOR]     navigate EXCEPTION ({elapsed:.1f}s): {type(e).__name__}: {e}")
+
+    await asyncio.sleep(1)
+    page_state = await capture_page_state(page)
+
+    return {
+        "success": success,
+        "error": error,
+        "page_state": page_state,
+    }
+
+
 async def execute_observe_dom(session, query: str) -> dict:
     """Run a DOM-level observation via Stagehand v3 observe endpoint."""
     t0 = time.time()
@@ -500,6 +531,41 @@ async def execute_template(
                     result_text = result["agent_output"] or "Action completed successfully."
                 else:
                     result_text = f"Action failed: {result['error']}"
+
+                content = build_tool_result_content(
+                    result["page_state"]["screenshot_base64"],
+                    result["page_state"]["url"],
+                    result_text,
+                )
+
+                if result["page_state"]["screenshot_base64"]:
+                    screenshots.append({
+                        "label": f"iter_{iteration}_{tool_name}",
+                        "base64": result["page_state"]["screenshot_base64"],
+                        "url": result["page_state"]["url"],
+                        "timestamp": result["page_state"]["timestamp"],
+                    })
+
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": content,
+                })
+
+            elif tool_name == "navigate_to_url":
+                nav_url = tool_input.get("url", "")
+                print(f"[EXECUTOR]   tool: navigate_to_url — {nav_url[:120]}")
+
+                result = await execute_navigate_to_url(page, nav_url)
+                action_record["success"] = result["success"]
+                action_record["error"] = result["error"]
+                action_record["url_after"] = result["page_state"]["url"]
+                action_record["url_requested"] = nav_url
+
+                if result["success"]:
+                    result_text = f"Successfully navigated to {result['page_state']['url']}"
+                else:
+                    result_text = f"Navigation failed: {result['error']}"
 
                 content = build_tool_result_content(
                     result["page_state"]["screenshot_base64"],
