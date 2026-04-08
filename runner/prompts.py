@@ -38,6 +38,31 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "navigate_to_url",
+        "description": (
+            "Navigate the browser directly to a specific URL. Use this when you "
+            "need to visit a URL that you already know — for example, a verification "
+            "or confirmation link from an email, an OAuth callback URL, or any "
+            "specific page URL. This performs a programmatic navigation (like "
+            "typing a URL in the address bar and pressing Enter). After navigation, "
+            "you will receive a screenshot of the resulting page state."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": (
+                        "The full URL to navigate to. Must start with http:// or https://. "
+                        "Examples: 'https://example.com/verify?token=abc123', "
+                        "'https://app.example.com/dashboard'"
+                    ),
+                }
+            },
+            "required": ["url"],
+        },
+    },
+    {
         "name": "observe_dom",
         "description": (
             "Perform a precise DOM-level observation to check whether specific "
@@ -96,7 +121,7 @@ TOOLS: list[dict[str, Any]] = [
             "account signup or 2FA. Returns the most recent messages received "
             "since the test started, including subject lines, body text, any "
             "extracted verification/confirmation URLs, and numeric OTP codes. "
-            "If a verification URL is returned, navigate to it using browser_action. "
+            "If a verification URL is returned, navigate to it using navigate_to_url. "
             "If a numeric code is returned, enter it into the verification field."
         ),
         "input_schema": {
@@ -208,7 +233,7 @@ def _build_auth_section(
             "2. Enter the email and password above.\n"
             "3. If the platform sends a verification email, use the `check_email` "
             "tool to retrieve it. If a numeric code is returned, enter it. If a "
-            "confirmation link is returned, navigate to it with `browser_action`.\n"
+            "confirmation link is returned, navigate to it with `navigate_to_url`.\n"
             "4. Once you are logged in and can see the authenticated UI, proceed "
             "with the test plan.\n\n"
             "**If login fails** (e.g. invalid credentials, account locked/deleted), "
@@ -240,7 +265,7 @@ def _build_auth_section(
         "to retrieve it. The tool will extract any verification codes and "
         "confirmation/verification URLs for you.\n"
         "   - **Verification code:** enter it into the code/OTP input field.\n"
-        "   - **Confirmation link:** use `browser_action` to navigate to the URL.\n"
+        "   - **Confirmation link:** use `navigate_to_url` to go directly to the URL.\n"
         "4. Once you have successfully signed up and can see the authenticated "
         "UI, **immediately call `save_credentials`** with the email and password "
         "you used. This saves your credentials so you can reuse them on future "
@@ -343,7 +368,8 @@ Repeat this observe → reason → act cycle until the entire test flow is compl
 
 ## Tools
 
-- **browser_action** — Execute a browser interaction (click, type, navigate, scroll, etc.) via the Stagehand AI browser agent. After each action you will receive a screenshot showing the resulting page state.
+- **browser_action** — Execute a browser interaction (click, type, scroll, etc.) via the Stagehand AI browser agent. Use this for interacting with page elements. After each action you will receive a screenshot showing the resulting page state.
+- **navigate_to_url** — Navigate the browser directly to a specific URL. Use this whenever you need to go to a known URL — especially verification/confirmation links from emails, OAuth callbacks, or specific page URLs. This is more reliable than asking browser_action to navigate because it performs a direct programmatic navigation. After navigation you will receive a screenshot of the resulting page state.
 - **observe_dom** — Perform a precise DOM-level check to verify element presence, text content, or other DOM state. Use this when you need programmatic confirmation beyond what you can see in the screenshot.
 - **save_credentials** — Save the email and password you used to create an account on the target platform. Call this immediately after successful signup so you can reuse the credentials on future runs. Only call this after you have confirmed the account works.
 - **check_email** — Check your email inbox for recent messages (verification codes, confirmation links, etc.). Use this when the platform sends a verification email during signup or login.
