@@ -28,23 +28,37 @@ def _strip_provider_prefix(model: str) -> tuple[str, str]:
     return "anthropic", model
 
 
-def stagehand_agent_model_config(model_name: str | None = None) -> dict[str, str]:
+def stagehand_agent_model_config(
+    model_name: str | None = None,
+    *,
+    prefixed: bool = False,
+) -> dict[str, str]:
     """Model config for Stagehand ``agent_config.model`` and ``observe`` ``options.model`` (ModelConfigParam).
 
     Uses snake_case keys per the Stagehand Python SDK; they serialize to
     ``modelName`` / ``apiKey`` / ``provider`` in the JSON body.
 
-    The ``model_name`` value is the **bare** model id (e.g. ``claude-opus-4-6``)
-    with the provider supplied separately.  Passing the prefixed form
-    ``anthropic/claude-opus-4-6`` as ``modelName`` caused a 404 on the
-    agentExecute endpoint because the server forwarded it verbatim to
-    Anthropic's API, which does not recognise the prefix.
+    The ``execute`` (agentExecute) endpoint requires the **bare** model id
+    (e.g. ``claude-opus-4-6``) with the provider supplied separately —
+    passing the prefixed form caused a 404 because the server forwarded it
+    verbatim to the provider API.
+
+    The ``observe`` endpoint, conversely, expects ``model_name`` in
+    ``provider/model`` format (e.g. ``anthropic/claude-opus-4-6``) and
+    returns an ``UnsupportedModelError`` if only the bare id is given.
+
+    Set *prefixed* to ``True`` when building config for ``observe`` calls.
     """
     key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
     if not key:
         raise ValueError("ANTHROPIC_API_KEY is required for Stagehand agent/observe model config")
     raw = model_name or STAGEHAND_SESSION_MODEL
     provider, bare_model = _strip_provider_prefix(raw)
+    if prefixed:
+        return {
+            "model_name": f"{provider}/{bare_model}",
+            "api_key": key,
+        }
     return {
         "provider": provider,
         "model_name": bare_model,

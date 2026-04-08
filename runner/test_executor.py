@@ -140,7 +140,7 @@ async def execute_observe_dom(session, query: str) -> dict:
     try:
         response = await session.observe(
             instruction=query,
-            options={"model": stagehand_agent_model_config()},
+            options={"model": stagehand_agent_model_config(prefixed=True)},
         )
         elapsed = time.time() - t0
         results = response.data.result
