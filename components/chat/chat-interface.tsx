@@ -109,6 +109,7 @@ export function ChatInterface({
   const lastBootstrapKeyRef = useRef<string | null>(null)
   const bootstrapFailureCountRef = useRef(0)
   const dbEmptyRef = useRef(initialMessages.length === 0)
+  const [liveRunId, setLiveRunId] = useState<string | null>(null)
 
   const computeSessionThinking = useCallback(
     (status: string, updatedAt: string | null) => {
@@ -296,6 +297,35 @@ export function ChatInterface({
       supabase.removeChannel(channel)
     }
   }, [sessionId, computeSessionThinking])
+
+  // Subscribe to test_runs changes to detect live browser sessions
+  useEffect(() => {
+    const supabase = createClient()
+    const channel = supabase
+      .channel(`live-runs-${projectId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'test_runs',
+          filter: `project_id=eq.${projectId}`,
+        },
+        (payload) => {
+          const row = payload.new as { id: string; live_session?: unknown; status?: string }
+          if (row.live_session) {
+            setLiveRunId(row.id)
+          } else if (row.status === 'completed' || row.status === 'failed') {
+            setLiveRunId((prev) => (prev === row.id ? null : prev))
+          }
+        },
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [projectId])
 
   useEffect(() => {
     if (status !== 'ready') return
@@ -507,6 +537,9 @@ export function ChatInterface({
 
         {displayMessages.map((msg, i) => {
           const isLast = i === displayMessages.length - 1
+          const isRunStarted = msg.metadata?.type === 'test_run_started'
+          const msgRunId = isRunStarted ? (msg.metadata?.run_id as string | undefined) : undefined
+          const showLiveViewer = isRunStarted && liveRunId != null && (!msgRunId || msgRunId === liveRunId)
           return (
             <MessageBubble
               key={msg.id}
@@ -517,6 +550,7 @@ export function ChatInterface({
               onApproveFlow={handleApproveFlow}
               onRejectFlow={handleRejectFlow}
               isStreaming={isLast && msg.isStreaming && isProcessing}
+              liveRunId={showLiveViewer ? liveRunId : null}
             />
           )
         })}

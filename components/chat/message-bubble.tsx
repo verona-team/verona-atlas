@@ -2,6 +2,7 @@
 
 import type { ProposedFlow } from './flow-proposal-card'
 import { FlowProposalCard } from './flow-proposal-card'
+import { LiveBrowserViewer } from './live-browser-viewer'
 import { MarkdownContent } from './markdown-content'
 import { Card, CardContent } from '@/components/ui/card'
 import type { Json } from '@/lib/supabase/types'
@@ -14,6 +15,7 @@ interface MessageBubbleProps {
   onApproveFlow?: (flowId: string) => void
   onRejectFlow?: (flowId: string) => void
   isStreaming?: boolean
+  liveRunId?: string | null
 }
 
 export function MessageBubble({
@@ -24,6 +26,7 @@ export function MessageBubble({
   onApproveFlow,
   onRejectFlow,
   isStreaming,
+  liveRunId,
 }: MessageBubbleProps) {
   const isUser = role === 'user'
   const isFlowProposal = metadata?.type === 'flow_proposals'
@@ -81,12 +84,17 @@ export function MessageBubble({
             )}
 
             {isRunStarted && (
-              <Card size="sm" className="ring-0 border border-green-500/20 bg-green-500/5">
-                <CardContent className="flex items-center gap-3">
-                  <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" />
-                  <p className="text-base">{content}</p>
-                </CardContent>
-              </Card>
+              <div className="space-y-3">
+                <Card size="sm" className="ring-0 border border-green-500/20 bg-green-500/5">
+                  <CardContent className="flex items-center gap-3">
+                    <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" />
+                    <p className="text-base">{content}</p>
+                  </CardContent>
+                </Card>
+                {liveRunId && (
+                  <LiveBrowserViewer runId={liveRunId} />
+                )}
+              </div>
             )}
           </>
         )}

@@ -374,6 +374,7 @@ export type Database = {
           completed_at: string | null
           created_at: string
           id: string
+          live_session: Json | null
           modal_call_id: string | null
           project_id: string
           started_at: string | null
@@ -386,6 +387,7 @@ export type Database = {
           completed_at?: string | null
           created_at?: string
           id?: string
+          live_session?: Json | null
           modal_call_id?: string | null
           project_id: string
           started_at?: string | null
@@ -398,6 +400,7 @@ export type Database = {
           completed_at?: string | null
           created_at?: string
           id?: string
+          live_session?: Json | null
           modal_call_id?: string | null
           project_id?: string
           started_at?: string | null

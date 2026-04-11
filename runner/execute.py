@@ -413,6 +413,20 @@ async def execute_single_template(
 
         print(f"[TEMPLATE] Browser session ready — browserbase_session_id={browserbase_session_id}")
 
+        # Publish live session info so the frontend can embed the Browserbase live view
+        if browserbase_session_id:
+            live_session = {
+                "browserbase_session_id": browserbase_session_id,
+                "template_name": tpl_name,
+                "template_id": tpl_id,
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            }
+            try:
+                supabase.table("test_runs").update({"live_session": live_session}).eq("id", test_run_id).execute()
+                print(f"[TEMPLATE] Published live_session to test_runs row")
+            except Exception as e:
+                print(f"[TEMPLATE] WARNING: failed to publish live_session: {type(e).__name__}: {e}")
+
         # Navigate to the app URL before starting the test loop
         app_url = project.get("app_url", "")
         if app_url:
@@ -543,5 +557,12 @@ async def execute_single_template(
         raise
 
     finally:
+        # Clear live session so frontend stops showing the viewer
+        if browserbase_session_id:
+            try:
+                supabase.table("test_runs").update({"live_session": None}).eq("id", test_run_id).execute()
+                print(f"[TEMPLATE] Cleared live_session from test_runs row")
+            except Exception as e:
+                print(f"[TEMPLATE] WARNING: failed to clear live_session: {type(e).__name__}: {e}")
         print(f"[TEMPLATE] Cleaning up session resources (browserbase_session={browserbase_session_id})...")
         await cleanup_session(client, session, browser, playwright_inst)
