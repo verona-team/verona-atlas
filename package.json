@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "supabase:types": "npx supabase gen types --linked --lang=typescript > lib/supabase/types.ts"
+    "supabase:types": "bash scripts/supabase-gen-types.sh"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.64",

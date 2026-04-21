@@ -632,3 +632,10 @@ export const Constants = {
     },
   },
 } as const
+
+// --- Convenience aliases -----------------------------------------------------
+// Re-added after running `supabase gen types` (which overwrites this file).
+// Keep these in sync with the generated table shapes above.
+export type Project = Database["public"]["Tables"]["projects"]["Row"]
+export type ChatSession = Database["public"]["Tables"]["chat_sessions"]["Row"]
+export type ChatMessage = Database["public"]["Tables"]["chat_messages"]["Row"]
