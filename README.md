@@ -140,6 +140,13 @@ See `.env.example` for the full list. Key variables:
 | `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` | GitHub App for repo access |
 | `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` | Slack for reporting |
 | `BROWSERBASE_API_KEY` / `BROWSERBASE_PROJECT_ID` | Cloud browsers |
+| `NEXT_PUBLIC_APP_URL` | Canonical app URL (signup email links → `/auth/confirm`) |
+
+### Supabase email confirmation & redirects
+
+1. **Redirect URLs** — In the Supabase dashboard (Authentication → URL configuration), add your confirmation callback, e.g. `https://www.deployverona.com/auth/confirm`, to **Redirect URLs**. The app exchanges the `code` from the query string for a session and then sends users to **`/projects`**.
+2. **Site URL** — Can stay as your marketing root (`https://www.deployverona.com/`). Signup uses `emailRedirectTo` pointing at `/auth/confirm`, so confirmed users are no longer dropped on the homepage without a session.
+3. **Branded links in email (optional)** — Supabase’s default template still uses `{{ .ConfirmationURL }}`, which points at `*.supabase.co` with a `redirect_to` query param. To show only `deployverona.com` in the message body, customize the template under **Authentication → Email Templates → Confirm signup** and build the link yourself, e.g. `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=signup` (and keep the same path whitelisted as above). The handler at `app/auth/confirm/route.ts` supports both PKCE (`code`) and `token_hash` + `type` flows.
 
 ## License
 

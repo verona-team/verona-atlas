@@ -1,6 +1,7 @@
 'use server'
 
 import { redirect } from 'next/navigation'
+import { getSiteUrl } from '@/lib/app-url'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceRoleClient } from '@/lib/supabase/service-role'
 
@@ -15,9 +16,14 @@ export async function signUp(formData: FormData) {
     return { error: 'All fields are required' }
   }
 
+  const emailRedirectTo = `${getSiteUrl()}/auth/confirm`
+
   const { data: authData, error: authError } = await supabase.auth.signUp({
     email,
     password,
+    options: {
+      emailRedirectTo,
+    },
   })
 
   if (authError) {

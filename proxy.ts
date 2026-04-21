@@ -40,6 +40,7 @@ export async function proxy(request: NextRequest) {
     pathname === '/' ||
     pathname === '/login' ||
     pathname === '/signup' ||
+    pathname.startsWith('/auth/') ||
     pathname.startsWith('/api/integrations/') ||
     pathname.startsWith('/api/webhooks/')
 
