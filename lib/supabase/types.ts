@@ -374,6 +374,7 @@ export type Database = {
           completed_at: string | null
           created_at: string
           id: string
+          live_session: Json | null
           modal_call_id: string | null
           project_id: string
           started_at: string | null
@@ -386,6 +387,7 @@ export type Database = {
           completed_at?: string | null
           created_at?: string
           id?: string
+          live_session?: Json | null
           modal_call_id?: string | null
           project_id: string
           started_at?: string | null
@@ -398,6 +400,7 @@ export type Database = {
           completed_at?: string | null
           created_at?: string
           id?: string
+          live_session?: Json | null
           modal_call_id?: string | null
           project_id?: string
           started_at?: string | null
@@ -629,15 +632,3 @@ export const Constants = {
     },
   },
 } as const
-
-// Convenience type aliases
-export type Organization = Database['public']['Tables']['organizations']['Row']
-export type OrgMember = Database['public']['Tables']['org_members']['Row']
-export type Project = Database['public']['Tables']['projects']['Row']
-export type Integration = Database['public']['Tables']['integrations']['Row']
-export type TestTemplate = Database['public']['Tables']['test_templates']['Row']
-export type TestRun = Database['public']['Tables']['test_runs']['Row']
-export type TestResult = Database['public']['Tables']['test_results']['Row']
-export type ChatSession = Database['public']['Tables']['chat_sessions']['Row']
-export type ChatMessage = Database['public']['Tables']['chat_messages']['Row']
-export type AgentCredential = Database['public']['Tables']['agent_credentials']['Row']

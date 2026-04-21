@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, Json } from '@/lib/supabase/types'
-import { primaryGithubRepoFullName } from '@/lib/github-integration-config'
+import { githubRepoFullName } from '@/lib/github-integration-config'
 
 export type GithubReadyState =
   | { ok: true; installationId: number; repoFullName: string }
@@ -24,8 +24,7 @@ export async function getGithubIntegrationReady(
 
   const config = integration.config as Record<string, Json>
   const installationId = config.installation_id as number | undefined
-  const repos = (config.repos as Array<Record<string, Json>>) || []
-  const repoFullName = primaryGithubRepoFullName(repos)
+  const repoFullName = githubRepoFullName(config)
 
   if (!installationId) {
     return { ok: false, reason: 'GitHub installation is incomplete. Reconnect GitHub from project setup.' }

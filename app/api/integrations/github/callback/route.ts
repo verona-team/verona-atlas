@@ -54,8 +54,7 @@ export async function GET(request: NextRequest) {
   const config: Json = {
     installation_id: installationIdNum ?? installationId,
     setup_action: setupAction,
-    // User must pick exactly one repo via the UI; do not pre-fill all installation repos.
-    repos: [],
+    repo: null,
   }
 
   const { data: existing } = await supabase

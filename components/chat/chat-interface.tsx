@@ -155,7 +155,7 @@ export function ChatInterface({
           } | null
           if (data?.code === 'GITHUB_SETUP_REQUIRED' && data.error) {
             toast.error(data.error)
-            router.push(`/projects/new?projectId=${projectId}`)
+            router.push(`/projects/${projectId}/settings`)
             return res
           }
         }

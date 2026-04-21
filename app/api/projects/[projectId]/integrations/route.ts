@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getServerUser } from '@/lib/supabase/server-user'
 import type { Json } from '@/lib/supabase/types'
-import { normalizeGithubReposForStorage } from '@/lib/github-integration-config'
+import { parseGithubLinkedRepo } from '@/lib/github-integration-config'
 
 type RouteContext = { params: Promise<{ projectId: string }> }
 
@@ -61,14 +61,16 @@ function sanitizeConfig(
 ): Record<string, Json> {
   switch (type) {
     case 'github': {
-      const repos = (config.repos as Array<Record<string, Json>>) || []
-      const normalized = normalizeGithubReposForStorage(repos)
+      const repo = parseGithubLinkedRepo(config)
       return {
         installation_id: config.installation_id ?? null,
-        repos: normalized.map((r) => ({
-          full_name: r.full_name,
-          private: r.private,
-        })),
+        repo: repo
+          ? {
+              full_name: repo.full_name,
+              private: repo.private ?? null,
+              default_branch: repo.default_branch ?? null,
+            }
+          : null,
       }
     }
     case 'posthog':

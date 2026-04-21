@@ -26,9 +26,9 @@ export default function LoginPage() {
     <div className="relative flex min-h-screen flex-col overflow-hidden bg-background">
       <HalftoneBackground />
 
-      <main className="relative z-10 flex flex-1 items-center justify-center px-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
+      <main className="relative z-10 flex flex-1 items-center justify-center px-6 py-10">
+        <Card className="w-full max-w-lg gap-6 py-7 sm:py-9">
+          <CardHeader className="gap-2 px-6 text-center sm:px-10">
             <CardTitle className="text-3xl font-normal tracking-tight sm:text-4xl">
               Welcome back
             </CardTitle>
@@ -37,9 +37,9 @@ export default function LoginPage() {
             </CardDescription>
           </CardHeader>
 
-          <CardContent>
-            <form action={handleSubmit} className="space-y-4">
-              <div className="space-y-1.5">
+          <CardContent className="px-6 sm:px-10">
+            <form action={handleSubmit} className="space-y-5">
+              <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
@@ -48,9 +48,10 @@ export default function LoginPage() {
                   placeholder="you@company.com"
                   required
                   autoComplete="email"
+                  className="h-11 px-3"
                 />
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
                 <Input
                   id="password"
@@ -59,16 +60,17 @@ export default function LoginPage() {
                   placeholder="••••••••"
                   required
                   autoComplete="current-password"
+                  className="h-11 px-3"
                 />
               </div>
 
-              <Button type="submit" disabled={loading} className="w-full">
+              <Button type="submit" disabled={loading} className="h-11 w-full">
                 {loading ? 'Signing in...' : 'Sign In'}
               </Button>
             </form>
           </CardContent>
 
-          <CardFooter className="justify-center">
+          <CardFooter className="justify-center px-6 py-5 sm:px-10">
             <p className="text-sm text-muted-foreground">
               Don&apos;t have an account?{' '}
               <Link href="/signup" className="text-foreground hover:underline transition-colors">

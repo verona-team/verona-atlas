@@ -16,19 +16,14 @@ from runner.encryption import decrypt
 # ---------------------------------------------------------------------------
 
 async def fetch_recent_commits(config: dict, since_days: int = 7) -> list[dict]:
-    """Fetch recent commits from GitHub repositories."""
+    """Fetch recent commits from the linked GitHub repository (one per project)."""
     installation_id = config.get("installation_id")
-    repos_raw = config.get("repos", [])
+    repo_obj = config.get("repo")
+    full_name = ""
+    if isinstance(repo_obj, dict):
+        full_name = str(repo_obj.get("full_name") or "")
 
-    repo_names: list[str] = []
-    for r in repos_raw:
-        if isinstance(r, dict):
-            repo_names.append(r.get("full_name", ""))
-        elif isinstance(r, str):
-            repo_names.append(r)
-    repo_names = [n for n in repo_names if n]
-
-    if not installation_id or not repo_names:
+    if not installation_id or not full_name:
         return []
 
     token = await get_github_installation_token(int(installation_id))
@@ -36,7 +31,7 @@ async def fetch_recent_commits(config: dict, since_days: int = 7) -> list[dict]:
 
     all_commits = []
     async with httpx.AsyncClient() as client:
-        for repo in repo_names[:1]:
+        for repo in [full_name]:
             response = await client.get(
                 f"https://api.github.com/repos/{repo}/commits",
                 headers={

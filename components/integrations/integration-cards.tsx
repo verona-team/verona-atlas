@@ -3,13 +3,11 @@
 import { useEffect, useState, useRef } from 'react'
 import { toast } from 'sonner'
 import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
-import { primaryGithubRepoFullName } from '@/lib/github-integration-config'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import type { Json } from '@/lib/supabase/types'
 
 export type IntegrationStatus = {
   id: string
@@ -80,8 +78,13 @@ export function GitHubCard({
 }) {
   const [waiting, setWaiting] = useState(false)
   const installPopupRef = useRef<Window | null>(null)
-  const repos = (integration?.meta?.repos as Array<{ full_name: string }>) || []
-  const linkedRepo = repos[0]?.full_name
+  const rawRepo = integration?.meta?.repo
+  const linkedRepo =
+    rawRepo != null &&
+    typeof rawRepo === 'object' &&
+    'full_name' in rawRepo
+      ? String((rawRepo as { full_name: string }).full_name)
+      : undefined
 
   function openGitHubInstall() {
     setWaiting(true)
@@ -538,6 +541,6 @@ export function SlackCard({
 export function isGitHubComplete(integrations: IntegrationStatus[]): boolean {
   const gh = integrations.find((i) => i.type === 'github' && i.status === 'active')
   if (!gh) return false
-  const repos = (gh.meta?.repos as Array<Record<string, Json>>) || []
-  return !!primaryGithubRepoFullName(repos)
+  const repo = gh.meta?.repo as { full_name?: string } | null | undefined
+  return typeof repo?.full_name === 'string' && repo.full_name.length > 0
 }

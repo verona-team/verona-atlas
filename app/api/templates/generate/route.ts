@@ -9,7 +9,7 @@ import { fetchRecentCommits } from '@/lib/github'
 import { fetchSessionRecordings, fetchErrorEvents, fetchTopPages } from '@/lib/posthog'
 import { decrypt } from '@/lib/encryption'
 import type { Json } from '@/lib/supabase/types'
-import { primaryGithubRepoFullName } from '@/lib/github-integration-config'
+import { githubRepoFullName } from '@/lib/github-integration-config'
 import { getGithubIntegrationReady } from '@/lib/github-integration-guard'
 
 const GenerateSchema = z.object({
@@ -77,8 +77,7 @@ export async function POST(request: NextRequest) {
     try {
       const config = githubIntegration.config as Record<string, Json>
       const installationId = config.installation_id as number
-      const repos = (config.repos as Array<Record<string, Json>>) || []
-      const repoName = primaryGithubRepoFullName(repos)
+      const repoName = githubRepoFullName(config)
       if (installationId && repoName) {
         const repoCommits = await fetchRecentCommits(installationId, repoName)
         commits.push(...repoCommits)

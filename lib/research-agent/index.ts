@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, Json } from '@/lib/supabase/types'
 import { decrypt } from '@/lib/encryption'
 import { getInstallationToken } from '@/lib/github'
-import { primaryGithubRepoFullName } from '@/lib/github-integration-config'
+import { githubRepoFullName } from '@/lib/github-integration-config'
 import { getGithubIntegrationReady } from '@/lib/github-integration-guard'
 import { INTEGRATION_REGISTRY } from '@/lib/integrations/registry'
 import { fetchIntegrationDocs } from '@/lib/integrations/docs'
@@ -93,8 +93,7 @@ async function runIntegrationResearchTrack(input: {
           if (installationId) {
             const token = await getInstallationToken(installationId)
             creds.push({ type, credentials: { installation_token: token } })
-            const repos = (config.repos as Array<Record<string, Json>>) || []
-            const primary = primaryGithubRepoFullName(repos)
+            const primary = githubRepoFullName(config)
             if (primary) envVars.GITHUB_REPOS = primary
           }
           break

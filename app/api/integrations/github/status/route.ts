@@ -92,7 +92,7 @@ export async function GET(request: NextRequest) {
     const config: Json = {
       installation_id: installation.id,
       setup_action: 'install',
-      repos: [],
+      repo: null,
     }
 
     const { error } = await supabase.from('integrations').insert({

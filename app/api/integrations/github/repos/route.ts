@@ -5,8 +5,8 @@ import { listInstallationRepos } from '@/lib/github'
 import { z } from 'zod'
 import type { Json } from '@/lib/supabase/types'
 import {
-  normalizeGithubReposForStorage,
-  primaryGithubRepoFullName,
+  githubRepoFullName,
+  githubRepoToJson,
 } from '@/lib/github-integration-config'
 import { clearResearchReportsForProject } from '@/lib/github-integration-guard'
 
@@ -59,16 +59,15 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const repos = await listInstallationRepos(installationId)
-    const selectedRepos = (config.repos as Array<Record<string, Json>>) || []
-    const primaryName = primaryGithubRepoFullName(selectedRepos)
+    const installationRepos = await listInstallationRepos(installationId)
+    const linkedFullName = githubRepoFullName(config)
 
     return NextResponse.json({
-      repos: repos.map((r) => ({
+      repos: installationRepos.map((r) => ({
         full_name: r.fullName,
         private: r.private,
         default_branch: r.defaultBranch,
-        selected: primaryName === r.fullName,
+        selected: linkedFullName === r.fullName,
       })),
     })
   } catch (e) {
@@ -77,10 +76,9 @@ export async function GET(request: NextRequest) {
   }
 }
 
-const UpdateReposSchema = z.object({
+const UpdateRepoSchema = z.object({
   project_id: z.string().uuid(),
-  /** Exactly one repository per project (QA agent scope). */
-  repos: z.array(z.string().min(1)).length(1),
+  repo_full_name: z.string().min(1),
 })
 
 export async function PATCH(request: NextRequest) {
@@ -89,11 +87,11 @@ export async function PATCH(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json()
-  const parsed = UpdateReposSchema.safeParse(body)
+  const parsed = UpdateRepoSchema.safeParse(body)
   if (!parsed.success)
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
 
-  const { project_id: projectId, repos: selectedRepoNames } = parsed.data
+  const { project_id: projectId, repo_full_name: repoFullName } = parsed.data
 
   const { data: membership } = await supabase
     .from('org_members')
@@ -134,28 +132,23 @@ export async function PATCH(request: NextRequest) {
   }
 
   const allRepos = await listInstallationRepos(installationId)
-  const allRepoNames = new Set(allRepos.map((r) => r.fullName))
-  const invalidRepos = selectedRepoNames.filter((name) => !allRepoNames.has(name))
-  if (invalidRepos.length > 0) {
+  const match = allRepos.find((r) => r.fullName === repoFullName)
+  if (!match) {
     return NextResponse.json(
-      { error: `Repos not accessible: ${invalidRepos.join(', ')}` },
+      { error: `Repository not accessible to this installation: ${repoFullName}` },
       { status: 400 },
     )
   }
 
-  const selectedRepoObjects = normalizeGithubReposForStorage(
-    allRepos
-      .filter((r) => selectedRepoNames.includes(r.fullName))
-      .map((r) => ({
-        full_name: r.fullName,
-        private: r.private,
-        default_branch: r.defaultBranch,
-      })),
-  )
+  const repoJson = githubRepoToJson({
+    full_name: match.fullName,
+    private: match.private,
+    default_branch: match.defaultBranch,
+  })
 
   const updatedConfig: Json = {
     ...config,
-    repos: selectedRepoObjects,
+    repo: repoJson,
   }
 
   const { error } = await supabase
@@ -168,5 +161,5 @@ export async function PATCH(request: NextRequest) {
 
   await clearResearchReportsForProject(supabase, projectId)
 
-  return NextResponse.json({ success: true, repos: selectedRepoObjects })
+  return NextResponse.json({ success: true, repo: repoJson })
 }

@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyWebhookSignature, listInstallationRepos } from '@/lib/github'
 import { createServiceRoleClient } from '@/lib/supabase/service-role'
 import type { Json } from '@/lib/supabase/types'
-import { normalizeGithubReposForStorage } from '@/lib/github-integration-config'
+import {
+  githubRepoToJson,
+  parseGithubLinkedRepo,
+} from '@/lib/github-integration-config'
 import { clearResearchReportsForProject } from '@/lib/github-integration-guard'
 
 export async function POST(request: NextRequest) {
@@ -46,21 +49,35 @@ async function handleInstallationRepositories(payload: {
   if (matching.length === 0) return
 
   try {
-    const repos = await listInstallationRepos(installationId)
+    const installationRepos = await listInstallationRepos(installationId)
+    const accessibleNames = new Set(installationRepos.map((r) => r.fullName))
 
     for (const integration of matching) {
       const projectId = integration.project_id as string
       const config = integration.config as Record<string, Json>
-      const currentSelected = (config.repos as Array<Record<string, Json>>) || []
-      const accessibleNames = new Set(repos.map((r) => r.fullName))
-      const filteredSelected = normalizeGithubReposForStorage(
-        currentSelected.filter((r) => accessibleNames.has(r.full_name as string)),
-      )
+      const linked = parseGithubLinkedRepo(config)
 
-      const updatedConfig: Json = {
-        ...config,
-        // Never replace an explicit selection with the full installation list (multi-repo confuses the agent).
-        repos: filteredSelected.length > 0 ? filteredSelected : [],
+      if (!linked) {
+        continue
+      }
+
+      let updatedConfig: Json
+      if (!accessibleNames.has(linked.full_name)) {
+        updatedConfig = { ...config, repo: null }
+      } else {
+        const fresh = installationRepos.find((r) => r.fullName === linked.full_name)
+        if (!fresh) {
+          updatedConfig = { ...config, repo: null }
+        } else {
+          updatedConfig = {
+            ...config,
+            repo: githubRepoToJson({
+              full_name: fresh.fullName,
+              private: fresh.private,
+              default_branch: fresh.defaultBranch,
+            }),
+          }
+        }
       }
 
       await supabase

@@ -65,7 +65,7 @@ export function GitHubRepoPicker({ projectId, onSaved }: Props) {
       const res = await fetch('/api/integrations/github/repos', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, repos: [choice] }),
+        body: JSON.stringify({ project_id: projectId, repo_full_name: choice }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {

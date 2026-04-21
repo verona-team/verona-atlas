@@ -438,13 +438,16 @@ function MetaDetail({ label, value }: { label: string; value?: unknown }) {
 
 function GitHubDetails({ integration, projectId, onRefresh }: { integration?: IntegrationData; projectId: string; onRefresh: () => void }) {
   if (!integration) return null
-  const repos = (integration.meta?.repos as Array<{ full_name: string; private: boolean }>) || []
-  const linked = repos[0]?.full_name
+  const repo = integration.meta?.repo as
+    | { full_name: string; private?: boolean | null }
+    | null
+    | undefined
+  const linked = repo?.full_name
 
   return (
     <div className="space-y-2">
       {linked ? (
-        <p className="text-xs">Linked repository: <span className="text-foreground/80">{linked}{repos[0]?.private && <span className="ml-1 text-muted-foreground">(private)</span>}</span></p>
+        <p className="text-xs">Linked repository: <span className="text-foreground/80">{linked}{repo?.private && <span className="ml-1 text-muted-foreground">(private)</span>}</span></p>
       ) : (
         <p className="text-xs text-amber-500/80">Choose a repository below.</p>
       )}
