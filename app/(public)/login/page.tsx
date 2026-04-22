@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { Loader2 } from 'lucide-react'
 import { signIn } from '@/app/actions/auth'
 import { HalftoneBackground } from '@/components/landing/halftone-background'
 import { toast } from 'sonner'
@@ -38,7 +39,7 @@ export default function LoginPage() {
           </CardHeader>
 
           <CardContent className="px-6 sm:px-10">
-            <form action={handleSubmit} className="space-y-5">
+            <form action={handleSubmit} className="space-y-5" aria-busy={loading}>
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <Input
@@ -48,6 +49,7 @@ export default function LoginPage() {
                   placeholder="you@company.com"
                   required
                   autoComplete="email"
+                  disabled={loading}
                   className="h-11 px-3"
                 />
               </div>
@@ -60,12 +62,20 @@ export default function LoginPage() {
                   placeholder="••••••••"
                   required
                   autoComplete="current-password"
+                  disabled={loading}
                   className="h-11 px-3"
                 />
               </div>
 
               <Button type="submit" disabled={loading} className="h-11 w-full">
-                {loading ? 'Signing in...' : 'Sign In'}
+                {loading ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    Signing in…
+                  </>
+                ) : (
+                  'Sign In'
+                )}
               </Button>
             </form>
           </CardContent>
