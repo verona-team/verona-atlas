@@ -239,6 +239,7 @@ function SettingsIntegrationCard({
   onRefresh?: () => Promise<void> | void
   children?: React.ReactNode
 }) {
+  const router = useRouter()
   const connected = !!integration
   const [waiting, setWaiting] = useState(false)
   const connectPopupRef = useRef<Window | null>(null)
@@ -299,10 +300,14 @@ function SettingsIntegrationCard({
       if (!previouslyConnectedRef.current) {
         toast.success(`${title} connected`)
         window.focus()
+        // Re-run the server component tree so any props derived from server-side
+        // integration state (e.g. ChatInterface's `githubReady`) pick up the
+        // newly-connected status without requiring a manual page refresh.
+        router.refresh()
       }
     }
     previouslyConnectedRef.current = connected
-  }, [waiting, connected, title])
+  }, [waiting, connected, title, router])
 
   return (
     <Card size="sm" className="ring-0 border border-border">

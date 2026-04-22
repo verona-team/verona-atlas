@@ -64,6 +64,7 @@ export default async function ChatPage({ params, searchParams }: PageProps) {
         initialStatusUpdatedAt={session.status_updated_at}
         projectName={project.name}
         appUrl={project.app_url}
+        githubReady={gh.ok}
       />
     </div>
   )
