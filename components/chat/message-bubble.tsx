@@ -2,10 +2,12 @@
 
 import type { ProposedFlow } from './flow-proposal-card'
 import { FlowProposalCard } from './flow-proposal-card'
+import { LiveSessionCard } from './live-session-card'
 import { MarkdownContent } from './markdown-content'
 import type { Json } from '@/lib/supabase/types'
 
 interface MessageBubbleProps {
+  projectId: string
   role: 'user' | 'assistant' | 'system'
   content: string
   metadata?: Record<string, Json>
@@ -16,6 +18,7 @@ interface MessageBubbleProps {
 }
 
 export function MessageBubble({
+  projectId,
   role,
   content,
   metadata,
@@ -27,6 +30,7 @@ export function MessageBubble({
   const isUser = role === 'user'
   const isFlowProposal = metadata?.type === 'flow_proposals'
   const isRunStarted = metadata?.type === 'test_run_started'
+  const isLiveSession = metadata?.type === 'live_session'
 
   const proposals = isFlowProposal
     ? (metadata.proposals as unknown as { analysis: string; flows: ProposedFlow[] })
@@ -44,13 +48,17 @@ export function MessageBubble({
 
   return (
     <div className="w-full space-y-4">
-      {!isFlowProposal && !isRunStarted && (
+      {!isFlowProposal && !isRunStarted && !isLiveSession && (
         <div className="text-[15px] leading-[1.7] text-foreground">
           <MarkdownContent content={content} />
           {isStreaming && (
             <span className="inline-block w-1.5 h-4 ml-0.5 align-text-bottom bg-foreground/60 animate-pulse" />
           )}
         </div>
+      )}
+
+      {isLiveSession && metadata && (
+        <LiveSessionCard projectId={projectId} metadata={metadata} />
       )}
 
       {isFlowProposal && proposals && (

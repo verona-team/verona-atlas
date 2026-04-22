@@ -543,6 +543,7 @@ export function ChatInterface({
             return (
               <MessageBubble
                 key={msg.id}
+                projectId={projectId}
                 role={msg.role}
                 content={msg.content}
                 metadata={msg.metadata}
