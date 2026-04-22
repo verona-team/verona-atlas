@@ -10,10 +10,9 @@ export async function signUp(formData: FormData) {
 
   const email = formData.get('email') as string
   const password = formData.get('password') as string
-  const orgName = formData.get('orgName') as string
 
-  if (!email || !password || !orgName) {
-    return { error: 'All fields are required' }
+  if (!email || !password) {
+    return { error: 'Email and password are required' }
   }
 
   const emailRedirectTo = `${getSiteUrl()}/auth/confirm`
@@ -39,25 +38,21 @@ export async function signUp(formData: FormData) {
   // confirmation enabled), so the anon-key client would fail RLS checks.
   // The service role bypasses RLS and is safe here because we already
   // verified the user was created above.
+  //
+  // Orgs are identified by their UUID `id` only; we no longer carry a name
+  // or slug on signup.
   const adminClient = createServiceRoleClient()
-
-  const slug = orgName
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
 
   const { data: org, error: orgError } = await adminClient
     .from('organizations')
-    .insert({
-      name: orgName,
-      slug,
-      created_by: authData.user.id,
-    })
+    .insert({ created_by: authData.user.id })
     .select()
     .single()
 
-  if (orgError) {
-    return { error: `Failed to create organization: ${orgError.message}` }
+  if (orgError || !org) {
+    return {
+      error: `Failed to create organization: ${orgError?.message ?? 'unknown error'}`,
+    }
   }
 
   const { error: memberError } = await adminClient

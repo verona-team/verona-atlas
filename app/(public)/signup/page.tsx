@@ -94,18 +94,6 @@ export default function SignupPage() {
           <CardContent className="px-6 sm:px-10">
             <form onSubmit={handleSubmit} className="space-y-5" aria-busy={loading}>
               <div className="space-y-2">
-                <Label htmlFor="orgName">Organization Name</Label>
-                <Input
-                  id="orgName"
-                  name="orgName"
-                  type="text"
-                  placeholder="Acme Inc."
-                  required
-                  disabled={loading}
-                  className="h-11 px-3"
-                />
-              </div>
-              <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"

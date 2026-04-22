@@ -13,7 +13,6 @@ import type { Project } from '@/lib/supabase/types'
 
 interface WorkspaceState {
   orgId: string
-  orgName: string
   userEmail: string
   projects: Project[]
   activeProjectId: string | null
@@ -39,7 +38,6 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null)
 interface WorkspaceProviderProps {
   children: ReactNode
   orgId: string
-  orgName: string
   userEmail: string
   initialProjects: Project[]
 }
@@ -49,7 +47,6 @@ const SIDEBAR_COLLAPSED_KEY = 'verona-sidebar-collapsed'
 export function WorkspaceProvider({
   children,
   orgId,
-  orgName,
   userEmail,
   initialProjects,
 }: WorkspaceProviderProps) {
@@ -129,7 +126,6 @@ export function WorkspaceProvider({
     <WorkspaceContext.Provider
       value={{
         orgId,
-        orgName,
         userEmail,
         projects,
         activeProjectId,
