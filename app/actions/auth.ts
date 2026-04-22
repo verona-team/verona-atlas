@@ -1,9 +1,60 @@
 'use server'
 
+import { randomBytes } from 'node:crypto'
 import { redirect } from 'next/navigation'
 import { getSiteUrl } from '@/lib/app-url'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceRoleClient } from '@/lib/supabase/service-role'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import type { Database } from '@/lib/supabase/types'
+
+function slugifyOrgName(orgName: string): string {
+  return orgName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
+function randomSlugSuffix(): string {
+  return randomBytes(4).toString('hex')
+}
+
+// Inserts an organization, disambiguating the slug if it collides with an
+// existing row. Org names are allowed to duplicate; slugs stay unique by
+// appending `-2`, `-3`, ... and falling back to a random suffix after that.
+async function createOrganizationWithUniqueSlug(
+  adminClient: SupabaseClient<Database>,
+  orgName: string,
+  userId: string,
+) {
+  const baseSlug = slugifyOrgName(orgName) || `org-${randomSlugSuffix()}`
+  const MAX_NUMERIC_ATTEMPTS = 50
+
+  for (let attempt = 0; attempt < MAX_NUMERIC_ATTEMPTS; attempt++) {
+    const slug = attempt === 0 ? baseSlug : `${baseSlug}-${attempt + 1}`
+
+    const { data, error } = await adminClient
+      .from('organizations')
+      .insert({ name: orgName, slug, created_by: userId })
+      .select()
+      .single()
+
+    if (!error) return { data, error: null as null }
+
+    const isSlugCollision =
+      error.code === '23505' && /organizations_slug_key|slug/i.test(error.message)
+    if (!isSlugCollision) return { data: null, error }
+  }
+
+  // Extremely unlikely fallback: numeric suffixes all taken. Use a random
+  // suffix which is effectively collision-free.
+  const slug = `${baseSlug}-${randomSlugSuffix()}`
+  return await adminClient
+    .from('organizations')
+    .insert({ name: orgName, slug, created_by: userId })
+    .select()
+    .single()
+}
 
 export async function signUp(formData: FormData) {
   const supabase = await createClient()
@@ -41,23 +92,16 @@ export async function signUp(formData: FormData) {
   // verified the user was created above.
   const adminClient = createServiceRoleClient()
 
-  const slug = orgName
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
+  const { data: org, error: orgError } = await createOrganizationWithUniqueSlug(
+    adminClient,
+    orgName,
+    authData.user.id,
+  )
 
-  const { data: org, error: orgError } = await adminClient
-    .from('organizations')
-    .insert({
-      name: orgName,
-      slug,
-      created_by: authData.user.id,
-    })
-    .select()
-    .single()
-
-  if (orgError) {
-    return { error: `Failed to create organization: ${orgError.message}` }
+  if (orgError || !org) {
+    return {
+      error: `Failed to create organization: ${orgError?.message ?? 'unknown error'}`,
+    }
   }
 
   const { error: memberError } = await adminClient
