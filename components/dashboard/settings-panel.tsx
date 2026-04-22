@@ -78,7 +78,16 @@ export function SettingsPanel() {
           </Button>
         </div>
         <div className="px-4 pb-8">
-          <SettingsContent projectId={renderProjectId} />
+          {/*
+           * `key` remounts SettingsContent when the active project changes
+           * while the panel is open. Without it, React reuses the instance
+           * and stale `project` / `integrations` state from the previous
+           * project survives until the new fetch resolves — which creates
+           * a confirmable-delete race in <DeleteProjectSection> where
+           * `projectName` and `projectId` briefly point at different
+           * projects.
+           */}
+          <SettingsContent key={renderProjectId} projectId={renderProjectId} />
         </div>
       </aside>
     </>
