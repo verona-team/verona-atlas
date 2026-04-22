@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react'
 import Link from 'next/link'
+import { unstable_rethrow } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
 import { signUp } from '@/app/actions/auth'
 import { HalftoneBackground } from '@/components/landing/halftone-background'
@@ -30,6 +31,7 @@ export default function SignupPage() {
         setLoading(false)
       }
     } catch (err) {
+      unstable_rethrow(err)
       toast.error(err instanceof Error ? err.message : 'Something went wrong')
       setLoading(false)
     }
