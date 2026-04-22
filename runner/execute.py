@@ -23,6 +23,120 @@ from runner.browser import create_stagehand_session, cleanup_session
 SECONDS_PER_TEMPLATE = 3600  # 1 hour budget per template
 
 
+def _load_chat_session_id(supabase, project_id: str) -> str | None:
+    """Return the chat session id for this project, if one exists."""
+    try:
+        resp = (
+            supabase.table("chat_sessions")
+            .select("id")
+            .eq("project_id", project_id)
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data or []
+        if rows:
+            return rows[0]["id"]
+    except Exception as e:
+        print(f"[CHAT] WARNING: failed to load chat session: {type(e).__name__}: {e}")
+    return None
+
+
+def _insert_live_session_chat_message(
+    supabase,
+    *,
+    chat_session_id: str,
+    test_run_id: str,
+    test_template_id: str,
+    template_name: str,
+    browserbase_session_id: str,
+    live_view_url: str | None,
+    live_view_fullscreen_url: str | None,
+    live_view_debugger_url: str | None,
+) -> str | None:
+    """Insert a chat message advertising a live browser session for a test.
+
+    Returns the message id so it can be updated when the test finishes.
+    """
+    metadata = {
+        "type": "live_session",
+        "status": "running",
+        "run_id": test_run_id,
+        "test_template_id": test_template_id,
+        "template_name": template_name,
+        "browserbase_session_id": browserbase_session_id,
+        "live_view_url": live_view_url,
+        "live_view_fullscreen_url": live_view_fullscreen_url,
+        "live_view_debugger_url": live_view_debugger_url,
+        "browserbase_dashboard_url": f"https://www.browserbase.com/sessions/{browserbase_session_id}",
+    }
+    try:
+        resp = (
+            supabase.table("chat_messages")
+            .insert({
+                "session_id": chat_session_id,
+                "role": "assistant",
+                "content": f"Running test: {template_name}",
+                "metadata": metadata,
+            })
+            .select("id")
+            .single()
+            .execute()
+        )
+        row = resp.data or {}
+        msg_id = row.get("id")
+        print(f"[CHAT] live-session chat message inserted — id={msg_id}")
+        return msg_id
+    except Exception as e:
+        print(f"[CHAT] WARNING: failed to insert live-session chat message: {type(e).__name__}: {e}")
+        return None
+
+
+def _update_live_session_chat_message(
+    supabase,
+    chat_message_id: str,
+    *,
+    status: str,
+    recording_url: str | None,
+    error_message: str | None,
+    duration_ms: int | None,
+) -> None:
+    """Finalize the live-session chat bubble once the template finishes.
+
+    Rewrites ``metadata`` so the UI flips from the embedded live iframe
+    to a completed state with the saved recording link.
+    """
+    try:
+        existing = (
+            supabase.table("chat_messages")
+            .select("content, metadata")
+            .eq("id", chat_message_id)
+            .single()
+            .execute()
+            .data
+        )
+        current_meta = (existing or {}).get("metadata") or {}
+        template_name = current_meta.get("template_name", "test")
+
+        new_meta = {
+            **current_meta,
+            "status": status,
+            "recording_url": recording_url,
+            "error_message": error_message,
+            "duration_ms": duration_ms,
+        }
+
+        verb = "Finished" if status == "passed" else ("Failed" if status == "failed" else "Ended")
+        new_content = f"{verb} test: {template_name}"
+
+        supabase.table("chat_messages").update({
+            "content": new_content,
+            "metadata": new_meta,
+        }).eq("id", chat_message_id).execute()
+        print(f"[CHAT] live-session chat message updated — id={chat_message_id} status={status}")
+    except Exception as e:
+        print(f"[CHAT] WARNING: failed to update live-session chat message: {type(e).__name__}: {e}")
+
+
 def _template_ids_from_trigger_ref(trigger_ref: str | None) -> list[str] | None:
     """If set, the run should only execute these template rows (e.g. chat-approved flows)."""
     if not trigger_ref or not str(trigger_ref).strip():
@@ -135,13 +249,26 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
 
         # 2. Load test run
         print("[PIPELINE] Step 2: Loading test run row...")
-        run_row = supabase.table("test_runs").select("trigger_ref").eq("id", test_run_id).single().execute().data
+        run_row = (
+            supabase.table("test_runs")
+            .select("trigger_ref, trigger")
+            .eq("id", test_run_id)
+            .single()
+            .execute()
+            .data
+        )
         if not run_row:
             raise ValueError(f"Test run {test_run_id} not found")
 
         scoped_template_ids = _template_ids_from_trigger_ref(run_row.get("trigger_ref"))
         print(f"[PIPELINE]   trigger_ref        = {run_row.get('trigger_ref', 'null')}")
         print(f"[PIPELINE]   scoped_template_ids = {scoped_template_ids}")
+
+        # Only post chat-message live views when the run originated from chat.
+        chat_session_id: str | None = None
+        if run_row.get("trigger") == "chat":
+            chat_session_id = _load_chat_session_id(supabase, project_id)
+            print(f"[PIPELINE]   chat_session_id    = {chat_session_id}")
 
         # 3. Load integrations
         print("[PIPELINE] Step 3: Loading integrations...")
@@ -247,6 +374,7 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
                     agentmail_inbox_id=agentmail_inbox_id,
                     existing_credentials=agent_creds,
                     generated_password=generated_password,
+                    chat_session_id=chat_session_id,
                 )
                 tpl_elapsed = time.time() - tpl_t0
                 print(f"[PIPELINE] Template {idx + 1}/{len(templates)} finished: status={result.get('status')} "
@@ -369,6 +497,7 @@ async def execute_single_template(
     agentmail_inbox_id: str | None = None,
     existing_credentials: dict | None = None,
     generated_password: str | None = None,
+    chat_session_id: str | None = None,
 ) -> dict:
     """Execute a single test template in an isolated browser session."""
     tpl_name = template.get("name", "unnamed")
@@ -378,6 +507,7 @@ async def execute_single_template(
     t0 = time.time()
     integrations = integrations or {}
     browserbase_session_id: str | None = None
+    live_chat_message_id: str | None = None
 
     print(f"[TEMPLATE] execute_single_template — {tpl_name!r} (id={tpl_id[:12]}...)")
 
@@ -412,6 +542,21 @@ async def execute_single_template(
         browserbase_session_id = session_ctx["session_id"]
 
         print(f"[TEMPLATE] Browser session ready — browserbase_session_id={browserbase_session_id}")
+
+        # If this run originated from chat, post a live-session message so
+        # the user can watch the test execute in realtime from the chat.
+        if chat_session_id and browserbase_session_id:
+            live_chat_message_id = _insert_live_session_chat_message(
+                supabase,
+                chat_session_id=chat_session_id,
+                test_run_id=test_run_id,
+                test_template_id=tpl_id,
+                template_name=tpl_name,
+                browserbase_session_id=browserbase_session_id,
+                live_view_url=session_ctx.get("live_view_url"),
+                live_view_fullscreen_url=session_ctx.get("live_view_fullscreen_url"),
+                live_view_debugger_url=session_ctx.get("live_view_debugger_url"),
+            )
 
         # Navigate to the app URL before starting the test loop
         app_url = project.get("app_url", "")
@@ -531,6 +676,18 @@ async def execute_single_template(
         print(f"[TEMPLATE] Inserting test result: status={status} duration_ms={duration_ms}")
         supabase.table("test_results").insert(result).execute()
 
+        # Finalize the chat live-session bubble (if any) so the UI flips
+        # from the live iframe to the completed state with the recording.
+        if live_chat_message_id:
+            _update_live_session_chat_message(
+                supabase,
+                live_chat_message_id,
+                status=status,
+                recording_url=recording_url,
+                error_message=error_message,
+                duration_ms=duration_ms,
+            )
+
         total_elapsed = time.time() - t0
         print(f"[TEMPLATE] execute_single_template — done ({total_elapsed:.1f}s) status={status}")
         return result
@@ -540,6 +697,15 @@ async def execute_single_template(
         print(f"[TEMPLATE] execute_single_template — EXCEPTION after {total_elapsed:.1f}s")
         print(f"[TEMPLATE]   {type(e).__name__}: {e}")
         print(f"[TEMPLATE]   traceback:\n{traceback.format_exc()}")
+        if live_chat_message_id:
+            _update_live_session_chat_message(
+                supabase,
+                live_chat_message_id,
+                status="error",
+                recording_url=None,
+                error_message=str(e),
+                duration_ms=int((time.time() - t0) * 1000),
+            )
         raise
 
     finally:

@@ -11,6 +11,7 @@ import os
 import time
 from typing import Any
 
+import httpx
 from stagehand import AsyncStagehand
 from playwright.async_api import async_playwright
 
@@ -161,6 +162,10 @@ async def create_stagehand_session() -> dict[str, Any]:
         print("[BROWSER]   partial cleanup done")
         raise
 
+    # Best-effort: fetch the embeddable live-view URL so the UI can show
+    # the realtime session while the test runs. Failure here is non-fatal.
+    live_view_urls = await fetch_live_view_urls(session_id, bb_api_key)
+
     elapsed = time.time() - t0
     print(f"[BROWSER] create_stagehand_session — completed in {elapsed:.2f}s")
     return {
@@ -170,6 +175,56 @@ async def create_stagehand_session() -> dict[str, Any]:
         "playwright": pw,
         "browser": browser,
         "page": page,
+        "live_view_url": live_view_urls.get("embed_url"),
+        "live_view_debugger_url": live_view_urls.get("debugger_url"),
+        "live_view_fullscreen_url": live_view_urls.get("fullscreen_url"),
+    }
+
+
+async def fetch_live_view_urls(session_id: str, bb_api_key: str) -> dict[str, str | None]:
+    """Fetch Browserbase's live-view (debug) URLs for an active session.
+
+    Uses ``GET /v1/sessions/{id}/debug``. Returns a dict with:
+      - ``embed_url``: fullscreen URL with ``&navbar=false`` for clean embedding
+      - ``debugger_url``: with-borders URL (browser chrome)
+      - ``fullscreen_url``: raw fullscreen URL
+
+    Any failure is logged and swallowed — live-view is a nice-to-have
+    and must never break a test run.
+    """
+    if not session_id or not bb_api_key:
+        return {}
+
+    url = f"https://api.browserbase.com/v1/sessions/{session_id}/debug"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                url,
+                headers={
+                    "x-bb-api-key": bb_api_key,
+                    "Content-Type": "application/json",
+                },
+            )
+        if response.status_code != 200:
+            print(
+                f"[BROWSER] live-view fetch non-200 ({response.status_code}) — "
+                f"body preview: {response.text[:200]}"
+            )
+            return {}
+        data = response.json()
+    except Exception as e:
+        print(f"[BROWSER] live-view fetch failed: {type(e).__name__}: {e}")
+        return {}
+
+    fullscreen = data.get("debuggerFullscreenUrl") or ""
+    debugger_url = data.get("debuggerUrl") or ""
+    embed_url = f"{fullscreen}&navbar=false" if fullscreen else ""
+
+    print(f"[BROWSER]   live-view embed URL = {embed_url or '(none)'}")
+    return {
+        "embed_url": embed_url or None,
+        "debugger_url": debugger_url or None,
+        "fullscreen_url": fullscreen or None,
     }
 
 
