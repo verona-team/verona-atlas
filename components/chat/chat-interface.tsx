@@ -17,8 +17,15 @@ import { MessageBubble } from './message-bubble'
 import { ThinkingIndicator } from './thinking-indicator'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import type { Json, ChatMessage } from '@/lib/supabase/types'
 import { createClient } from '@/lib/supabase/client'
+import { cn } from '@/lib/utils'
+import { useGithubReady } from '@/lib/settings-prefetch'
 
 function getTextFromParts(parts: Array<{ type: string; text?: string }>): string {
   return parts
@@ -107,9 +114,13 @@ export function ChatInterface({
   initialStatusUpdatedAt,
   projectName,
   appUrl,
-  githubReady,
+  githubReady: initialGithubReady,
 }: ChatInterfaceProps) {
   const { openSettings } = useWorkspace()
+  // `useGithubReady` subscribes to `lib/settings-prefetch`, so the input
+  // flips from blocked → unblocked the instant the user connects GitHub
+  // in the settings overlay, without waiting for a route-level refresh.
+  const githubReady = useGithubReady(projectId, initialGithubReady)
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottomRef = useRef(true)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -444,31 +455,36 @@ export function ChatInterface({
     [proposalMessageId],
   )
 
+  const trySend = useCallback(() => {
+    // Client-side gate — the server enforces the same invariant via
+    // `GITHUB_SETUP_REQUIRED`, but blocking here avoids a wasted round-trip
+    // and the accompanying toast cascade. When the user connects GitHub in
+    // the settings overlay, `useGithubReady` flips this to true and the
+    // input is live again.
+    if (!githubReady) {
+      toast.error('Connect GitHub to start chatting with Verona.')
+      openSettings(projectId)
+      return
+    }
+    if (!input.trim() || status !== 'ready') return
+    stickToBottomRef.current = true
+    sendMessage({ text: input })
+    setInput('')
+    requestAnimationFrame(() => {
+      scrollPaneToBottomIfStuck()
+      requestAnimationFrame(() => scrollPaneToBottomIfStuck())
+    })
+  }, [githubReady, input, openSettings, projectId, scrollPaneToBottomIfStuck, sendMessage, status])
+
   const handleSubmit = (e: SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (input.trim() && status === 'ready') {
-      stickToBottomRef.current = true
-      sendMessage({ text: input })
-      setInput('')
-      requestAnimationFrame(() => {
-        scrollPaneToBottomIfStuck()
-        requestAnimationFrame(() => scrollPaneToBottomIfStuck())
-      })
-    }
+    trySend()
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (input.trim() && status === 'ready') {
-        stickToBottomRef.current = true
-        sendMessage({ text: input })
-        setInput('')
-        requestAnimationFrame(() => {
-          scrollPaneToBottomIfStuck()
-          requestAnimationFrame(() => scrollPaneToBottomIfStuck())
-        })
-      }
+      trySend()
     }
   }
 
@@ -627,37 +643,112 @@ export function ChatInterface({
 
       <div className="shrink-0">
         <div className="mx-auto w-full max-w-[760px] px-6 pb-4 pt-2">
-          <form
-            onSubmit={handleSubmit}
-            className="relative rounded-2xl border border-border bg-card shadow-sm transition-colors focus-within:border-foreground/25"
-          >
-            <Textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={isProcessing ? 'Verona is working — please wait…' : 'Reply…'}
-              rows={1}
-              aria-busy={isProcessing}
-              className="resize-none border-0 bg-transparent min-h-[56px] max-h-[200px] pl-4 pr-14 py-4 text-[15px] leading-relaxed shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/60 disabled:cursor-not-allowed disabled:opacity-70"
-              disabled={isProcessing}
-            />
-            <Button
-              type="submit"
-              size="icon"
-              disabled={isProcessing || !input.trim()}
-              className="absolute bottom-2.5 right-2.5 size-8 rounded-full"
-              aria-label={isProcessing ? 'Sending' : 'Send message'}
-            >
-              {isProcessing ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <ArrowUp className="size-4" />
-              )}
-            </Button>
-          </form>
+          <ChatInputForm
+            githubReady={githubReady}
+            isProcessing={isProcessing}
+            input={input}
+            setInput={setInput}
+            handleSubmit={handleSubmit}
+            handleKeyDown={handleKeyDown}
+            inputRef={inputRef}
+          />
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * The chat composer. Pulled out into its own component mainly so we can
+ * conditionally wrap the whole composer in a `<Tooltip>` when GitHub is
+ * missing — without adding another layer of nesting to the main render.
+ *
+ * Why a shared tooltip instead of one per control: when GitHub isn't
+ * connected, both the textarea and the send button are effectively
+ * blocked for the same reason. Showing a single tooltip anywhere the
+ * user hovers in the composer is both less noisy and less surprising
+ * than per-element tooltips that appear/disappear as the cursor moves.
+ */
+function ChatInputForm({
+  githubReady,
+  isProcessing,
+  input,
+  setInput,
+  handleSubmit,
+  handleKeyDown,
+  inputRef,
+}: {
+  githubReady: boolean
+  isProcessing: boolean
+  input: string
+  setInput: (value: string) => void
+  handleSubmit: (e: SyntheticEvent<HTMLFormElement>) => void
+  handleKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
+  inputRef: React.RefObject<HTMLTextAreaElement | null>
+}) {
+  const disabled = isProcessing || !githubReady
+
+  const form = (
+    <form
+      onSubmit={handleSubmit}
+      className={cn(
+        'relative rounded-2xl border border-border bg-card shadow-sm transition-colors focus-within:border-foreground/25',
+        !githubReady && 'opacity-70',
+      )}
+    >
+      <Textarea
+        ref={inputRef}
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder={
+          !githubReady
+            ? 'Connect GitHub to start chatting…'
+            : isProcessing
+              ? 'Verona is working — please wait…'
+              : 'Reply…'
+        }
+        rows={1}
+        aria-busy={isProcessing}
+        className="resize-none border-0 bg-transparent min-h-[56px] max-h-[200px] pl-4 pr-14 py-4 text-[15px] leading-relaxed shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/60 disabled:cursor-not-allowed disabled:opacity-70"
+        disabled={disabled}
+      />
+      <Button
+        type="submit"
+        size="icon"
+        disabled={disabled || !input.trim()}
+        className="absolute bottom-2.5 right-2.5 size-8 rounded-full"
+        aria-label={
+          !githubReady
+            ? 'Connect GitHub to send a message'
+            : isProcessing
+              ? 'Sending'
+              : 'Send message'
+        }
+      >
+        {isProcessing ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <ArrowUp className="size-4" />
+        )}
+      </Button>
+    </form>
+  )
+
+  if (githubReady) return form
+
+  // `<TooltipTrigger render>` forwards the trigger props onto the form
+  // element so hover/focus anywhere inside the composer opens the same
+  // tooltip. Using `render` (base-ui pattern) instead of `asChild` since
+  // that's how the shadcn wrapper exports it.
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<div className="block" />}>
+        {form}
+      </TooltipTrigger>
+      <TooltipContent side="top" align="center" className="max-w-[260px] text-center leading-snug">
+        Connect GitHub in settings before chatting with Verona.
+      </TooltipContent>
+    </Tooltip>
   )
 }

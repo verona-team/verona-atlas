@@ -1,11 +1,17 @@
 'use client'
 
+import { useCallback, useSyncExternalStore } from 'react'
+
 /**
  * In-memory prefetch cache for the settings overlay. The chat page starts a
  * background fetch of `/api/projects/:id` and `/api/projects/:id/integrations`
  * while the user is still in the chat, so when they click "Settings" the
  * overlay renders with data already resolved — avoiding the multi-second
  * blank-loading state that previously gated the panel on a cold fetch.
+ *
+ * Secondary use: doubles as a reactive signal for GitHub readiness so the
+ * chat input can flip from disabled → enabled the moment the user connects
+ * GitHub in the settings overlay, without waiting for `router.refresh()`.
  */
 
 type IntegrationData = {
@@ -122,4 +128,49 @@ export function invalidateSettingsCache(projectId: string) {
   const e = entries.get(projectId)
   if (!e) return
   e.fetchedAt = 0
+}
+
+/**
+ * "Ready" means: the project has an active `github` integration *and* its
+ * `config.repo.full_name` is populated. Mirrors the server-side
+ * `getGithubIntegrationReady` invariant (see `lib/github-integration-guard.ts`)
+ * so the client gate matches exactly what the `/api/chat` guard enforces.
+ */
+export function isGithubReadyFromCache(projectId: string): boolean | null {
+  const entry = entries.get(projectId)
+  if (!entry || entry.fetchedAt === 0) return null
+  const gh = entry.integrations.find((i) => i.type === 'github' && i.status === 'active')
+  if (!gh) return false
+  const repo = gh.meta?.repo as { full_name?: string } | null | undefined
+  return typeof repo?.full_name === 'string' && repo.full_name.length > 0
+}
+
+/**
+ * React hook: returns a live boolean of GitHub readiness for `projectId`,
+ * backed by the client prefetch cache.
+ *
+ * `initial` is the authoritative server-computed value from the chat page's
+ * `getGithubIntegrationReady()` call. The hook only overrides it once the
+ * client cache has its own opinion (post-fetch), so the two sources of
+ * truth cannot disagree during the initial render. This is implemented via
+ * `useSyncExternalStore` because the cache is a mutable module-level store
+ * outside React's render cycle — the right primitive to avoid tearing and
+ * to satisfy the React Compiler's `set-state-in-effect` rule.
+ */
+export function useGithubReady(projectId: string, initial: boolean): boolean {
+  const subscribe = useCallback(
+    (onChange: () => void) => subscribeSettingsCache(projectId, onChange),
+    [projectId],
+  )
+
+  const getSnapshot = useCallback((): boolean => {
+    const fromCache = isGithubReadyFromCache(projectId)
+    // Fall back to the server-provided value whenever the cache is cold —
+    // e.g. on the very first paint before `SettingsPrefetcher` has resolved.
+    return fromCache ?? initial
+  }, [projectId, initial])
+
+  const getServerSnapshot = useCallback((): boolean => initial, [initial])
+
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 }
