@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 const VERBS = [
   'Thinking',
@@ -38,7 +38,9 @@ interface ThinkingIndicatorProps {
 }
 
 export function ThinkingIndicator({ startedAt, className = '' }: ThinkingIndicatorProps) {
-  const initialVerb = useMemo(() => Math.floor(Math.random() * VERBS.length), [])
+  // Seed initial verb from `startedAt` to keep render pure. Subsequent verbs
+  // are chosen randomly inside the interval (a side-effect context).
+  const initialVerb = Math.abs(Math.floor(startedAt / 1000)) % VERBS.length
   const [verbIdx, setVerbIdx] = useState(initialVerb)
   const [elapsed, setElapsed] = useState(() => Math.max(0, Math.floor((Date.now() - startedAt) / 1000)))
   const [dots, setDots] = useState('')
@@ -47,7 +49,6 @@ export function ThinkingIndicator({ startedAt, className = '' }: ThinkingIndicat
     const verbId = setInterval(() => {
       setVerbIdx((current) => {
         if (VERBS.length <= 1) return current
-        // Pick a different verb on each cycle.
         let next = current
         while (next === current) {
           next = Math.floor(Math.random() * VERBS.length)

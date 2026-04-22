@@ -192,6 +192,11 @@ export function GitHubCard({
   useEffect(() => {
     const nowConnected = !!integration
     if (waiting && nowConnected) {
+      // Sync our transient "waiting" state once the server confirms the
+      // integration exists. This is a legitimate external-event-driven
+      // reset — not a derived value we can compute in render, because we
+      // also fire one-shot side effects (popup.close(), toast).
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setWaiting(false)
       installPopupRef.current?.close()
       installPopupRef.current = null

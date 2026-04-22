@@ -397,6 +397,9 @@ function SettingsIntegrationCard({
 
   useEffect(() => {
     if (waiting && connected) {
+      // Sync transient "waiting" once the server confirms; also fires
+      // one-shot side effects (popup close, toast).
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setWaiting(false)
       connectPopupRef.current?.close()
       connectPopupRef.current = null

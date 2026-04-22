@@ -38,18 +38,10 @@ interface FlowProposalCardProps {
 }
 
 const priorityVariant: Record<string, string> = {
-  critical: 'border-red-500/30 text-red-500',
-  high: 'border-orange-500/30 text-orange-500',
-  medium: 'border-yellow-500/30 text-yellow-500',
-  low: 'border-green-500/30 text-green-500',
-}
-
-const stepTypeStyle: Record<string, string> = {
-  navigate: 'border-blue-500/30 text-blue-500',
-  assertion: 'border-purple-500/30 text-purple-500',
-  action: 'border-yellow-500/30 text-yellow-500',
-  extract: 'border-cyan-500/30 text-cyan-500',
-  wait: '',
+  critical: 'border-red-500/30 text-red-600',
+  high: 'border-border text-foreground/70',
+  medium: 'border-border text-foreground/70',
+  low: 'border-border text-muted-foreground',
 }
 
 export function FlowProposalCard({
@@ -64,33 +56,33 @@ export function FlowProposalCard({
   return (
     <Card
       size="sm"
-      className={`ring-0 border transition-all ${
+      className={`ring-0 border border-border bg-card transition-all ${
         state === 'approved'
-          ? 'border-green-500/40'
+          ? 'ring-1 ring-inset ring-green-500/30'
           : state === 'rejected'
-            ? 'border-red-500/20 opacity-50'
-            : 'border-border'
+            ? 'opacity-60'
+            : ''
       }`}
     >
       <CardContent>
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h4 className="text-base font-medium truncate">{flow.name}</h4>
-              <Badge variant="outline" className={priorityVariant[flow.priority]}>
+              <h4 className="text-[15px] font-medium truncate">{flow.name}</h4>
+              <Badge variant="outline" className={`text-[10px] uppercase tracking-wide ${priorityVariant[flow.priority]}`}>
                 {flow.priority}
               </Badge>
               {state !== 'pending' && (
                 <Badge
-                  variant={state === 'approved' ? 'outline' : 'destructive'}
-                  className={state === 'approved' ? 'border-green-500/30 text-green-500' : ''}
+                  variant="outline"
+                  className={`text-[10px] uppercase tracking-wide ${state === 'approved' ? 'border-green-500/30 text-green-600' : 'border-border text-muted-foreground'}`}
                 >
                   {state}
                 </Badge>
               )}
             </div>
-            <p className="text-sm text-muted-foreground mt-1">{flow.description}</p>
-            <p className="text-xs text-muted-foreground/70 mt-1 italic">{flow.rationale}</p>
+            <p className="text-sm text-foreground/80 mt-1">{flow.description}</p>
+            <p className="text-xs text-muted-foreground mt-1 italic">{flow.rationale}</p>
           </div>
 
           {state === 'pending' && (
@@ -100,7 +92,7 @@ export function FlowProposalCard({
                 size="sm"
                 onClick={() => onApprove(flow.id)}
                 disabled={disabled}
-                className="border-green-500/30 text-green-600 hover:bg-green-500/10"
+                className="border-border hover:border-green-500/40 hover:text-green-700 hover:bg-green-500/5"
               >
                 <Check className="size-3.5" />
                 Approve
@@ -110,7 +102,7 @@ export function FlowProposalCard({
                 size="sm"
                 onClick={() => onReject(flow.id)}
                 disabled={disabled}
-                className="border-red-500/30 text-red-600 hover:bg-red-500/10"
+                className="border-border hover:border-red-500/40 hover:text-red-700 hover:bg-red-500/5"
               >
                 <X className="size-3.5" />
                 Reject
@@ -127,14 +119,14 @@ export function FlowProposalCard({
           <CollapsibleContent>
             <ol className="mt-3 space-y-2 pl-4 border-l border-border">
               {flow.steps.map((step) => (
-                <li key={step.order} className="text-sm">
+                <li key={step.order} className="text-[13px] font-mono leading-relaxed">
                   <span className="text-muted-foreground/50 mr-2">{step.order}.</span>
-                  <Badge variant="outline" className={`text-[10px] mr-2 ${stepTypeStyle[step.type] || ''}`}>
+                  <span className="text-muted-foreground uppercase tracking-wide text-[10px] mr-2">
                     {step.type}
-                  </Badge>
-                  <span className="text-foreground/80">{step.instruction}</span>
+                  </span>
+                  <span className="text-foreground/85">{step.instruction}</span>
                   {step.url && (
-                    <span className="text-xs text-muted-foreground/50 ml-2">{step.url}</span>
+                    <span className="text-xs text-muted-foreground/60 ml-2">{step.url}</span>
                   )}
                 </li>
               ))}

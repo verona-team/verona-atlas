@@ -47,17 +47,15 @@ export default async function ChatPage({ params }: PageProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex min-h-0 w-full max-w-4xl flex-1 mx-auto">
-        <ChatInterface
-          projectId={projectId}
-          sessionId={session.id}
-          initialMessages={messages ?? []}
-          initialSessionStatus={session.status as 'idle' | 'thinking' | 'error'}
-          initialStatusUpdatedAt={session.status_updated_at}
-          projectName={project.name}
-          appUrl={project.app_url}
-        />
-      </div>
+      <ChatInterface
+        projectId={projectId}
+        sessionId={session.id}
+        initialMessages={messages ?? []}
+        initialSessionStatus={session.status as 'idle' | 'thinking' | 'error'}
+        initialStatusUpdatedAt={session.status_updated_at}
+        projectName={project.name}
+        appUrl={project.app_url}
+      />
     </div>
   )
 }
