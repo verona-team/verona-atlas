@@ -5,6 +5,7 @@ import { WorkspaceProvider } from '@/lib/workspace-context'
 import { AppSidebar } from '@/components/dashboard/sidebar'
 import { AppHeader } from '@/components/dashboard/topbar'
 import { NewProjectModal } from '@/components/dashboard/new-project-modal'
+import { SettingsPanel } from '@/components/dashboard/settings-panel'
 
 export default async function DashboardLayout({
   children,
@@ -54,6 +55,7 @@ export default async function DashboardLayout({
         </div>
       </div>
       <NewProjectModal />
+      <SettingsPanel />
     </WorkspaceProvider>
   )
 }

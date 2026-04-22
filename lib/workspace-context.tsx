@@ -19,6 +19,7 @@ interface WorkspaceState {
   activeProjectId: string | null
   sidebarCollapsed: boolean
   showNewProjectModal: boolean
+  settingsProjectId: string | null
 }
 
 interface WorkspaceActions {
@@ -27,6 +28,8 @@ interface WorkspaceActions {
   toggleSidebar: () => void
   setShowNewProjectModal: (show: boolean) => void
   refreshProjects: () => Promise<void>
+  openSettings: (projectId: string) => void
+  closeSettings: () => void
 }
 
 type WorkspaceContextValue = WorkspaceState & WorkspaceActions
@@ -60,6 +63,7 @@ export function WorkspaceProvider({
   const [activeProjectId, setActiveProjectIdState] = useState<string | null>(
     null,
   )
+  const [settingsProjectId, setSettingsProjectId] = useState<string | null>(null)
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -101,6 +105,14 @@ export function WorkspaceProvider({
     [router],
   )
 
+  const openSettings = useCallback((projectId: string) => {
+    setSettingsProjectId(projectId)
+  }, [])
+
+  const closeSettings = useCallback(() => {
+    setSettingsProjectId(null)
+  }, [])
+
   const refreshProjects = useCallback(async () => {
     try {
       const res = await fetch('/api/projects')
@@ -123,11 +135,14 @@ export function WorkspaceProvider({
         activeProjectId,
         sidebarCollapsed,
         showNewProjectModal,
+        settingsProjectId,
         setActiveProjectId,
         setSidebarCollapsed,
         toggleSidebar,
         setShowNewProjectModal,
         refreshProjects,
+        openSettings,
+        closeSettings,
       }}
     >
       {children}

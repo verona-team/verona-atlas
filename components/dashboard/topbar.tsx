@@ -1,20 +1,16 @@
 'use client'
 
-import { usePathname } from 'next/navigation'
-import Link from 'next/link'
 import { Settings, ExternalLink } from 'lucide-react'
 import { useWorkspace } from '@/lib/workspace-context'
 import { SidebarToggle } from '@/components/dashboard/sidebar'
 import { Button } from '@/components/ui/button'
 
 export function AppHeader() {
-  const { projects, activeProjectId } = useWorkspace()
-  const pathname = usePathname()
+  const { projects, activeProjectId, settingsProjectId, openSettings } = useWorkspace()
 
   const activeProject = projects.find((p) => p.id === activeProjectId)
 
-  const isSettingsActive =
-    activeProjectId && pathname.includes(`/projects/${activeProjectId}/settings`)
+  const isSettingsOpen = !!settingsProjectId
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-background px-4">
@@ -46,9 +42,9 @@ export function AppHeader() {
       {activeProjectId && (
         <nav className="flex items-center gap-1">
           <Button
-            variant={isSettingsActive ? 'secondary' : 'ghost'}
+            variant={isSettingsOpen ? 'secondary' : 'ghost'}
             size="sm"
-            render={<Link href={`/projects/${activeProjectId}/settings`} prefetch />}
+            onClick={() => openSettings(activeProjectId)}
           >
             <Settings className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">Settings</span>

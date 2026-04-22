@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useWorkspace } from '@/lib/workspace-context'
@@ -37,12 +37,10 @@ type ProjectData = {
   name: string
 }
 
-export function SettingsContent({ projectId: projectIdProp }: { projectId?: string } = {}) {
-  const params = useParams<{ projectId: string }>()
+export function SettingsContent({ projectId }: { projectId: string }) {
   const searchParams = useSearchParams()
-  const projectId = projectIdProp ?? params.projectId
   const toastShown = useRef(false)
-  const { refreshProjects } = useWorkspace()
+  const { refreshProjects, closeSettings } = useWorkspace()
 
   const [project, setProject] = useState<ProjectData | null>(null)
   const [integrations, setIntegrations] = useState<IntegrationData[]>([])
@@ -210,7 +208,14 @@ export function SettingsContent({ projectId: projectIdProp }: { projectId?: stri
         </div>
       </div>
 
-      <DeleteProjectSection projectId={projectId} projectName={project?.name || ''} onDeleted={refreshProjects} />
+      <DeleteProjectSection
+        projectId={projectId}
+        projectName={project?.name || ''}
+        onDeleted={async () => {
+          await refreshProjects()
+          closeSettings()
+        }}
+      />
     </div>
   )
 }

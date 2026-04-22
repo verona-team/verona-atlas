@@ -8,8 +8,8 @@ import {
   useMemo,
   type SyntheticEvent,
 } from 'react'
-import { useRouter } from 'next/navigation'
 import { useChat } from '@ai-sdk/react'
+import { useWorkspace } from '@/lib/workspace-context'
 import { DefaultChatTransport } from 'ai'
 import { ArrowUp, ArrowDown, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -105,7 +105,7 @@ export function ChatInterface({
   projectName,
   appUrl,
 }: ChatInterfaceProps) {
-  const router = useRouter()
+  const { openSettings } = useWorkspace()
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottomRef = useRef(true)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -162,14 +162,14 @@ export function ChatInterface({
           } | null
           if (data?.code === 'GITHUB_SETUP_REQUIRED' && data.error) {
             toast.error(data.error)
-            router.push(`/projects/${projectId}/settings`)
+            openSettings(projectId)
             return res
           }
         }
       }
       return res
     },
-    [projectId, router],
+    [projectId, openSettings],
   )
 
   const { messages: streamMessages, sendMessage, status } = useChat({

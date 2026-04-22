@@ -3,12 +3,17 @@ import { createClient } from '@/lib/supabase/server'
 import { getServerUser } from '@/lib/supabase/server-user'
 import { getOrCreateSession } from '@/lib/chat/session'
 import { ChatInterface } from '@/components/chat/chat-interface'
+import { SettingsQueryOpener } from '@/components/dashboard/settings-query-opener'
 import { getGithubIntegrationReady } from '@/lib/github-integration-guard'
 
-type PageProps = { params: Promise<{ projectId: string }> }
+type PageProps = {
+  params: Promise<{ projectId: string }>
+  searchParams: Promise<{ settings?: string }>
+}
 
-export default async function ChatPage({ params }: PageProps) {
+export default async function ChatPage({ params, searchParams }: PageProps) {
   const { projectId } = await params
+  const { settings } = await searchParams
   const supabase = await createClient()
 
   const user = await getServerUser(supabase)
@@ -33,9 +38,10 @@ export default async function ChatPage({ params }: PageProps) {
   if (!project) notFound()
 
   const gh = await getGithubIntegrationReady(supabase, projectId)
-  if (!gh.ok) {
-    redirect(`/projects/${projectId}/settings`)
+  if (!gh.ok && settings !== '1') {
+    redirect(`/projects/${projectId}/chat?settings=1`)
   }
+  const shouldOpenSettings = settings === '1'
 
   const session = await getOrCreateSession(supabase, projectId)
 
@@ -47,6 +53,7 @@ export default async function ChatPage({ params }: PageProps) {
 
   return (
     <div className="flex h-full flex-col">
+      {shouldOpenSettings && <SettingsQueryOpener projectId={projectId} />}
       <ChatInterface
         projectId={projectId}
         sessionId={session.id}

@@ -1,68 +1,67 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { XIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { SettingsContent } from '@/components/dashboard/settings-content'
+import { useWorkspace } from '@/lib/workspace-context'
 import { cn } from '@/lib/utils'
 
-interface SettingsPanelProps {
-  projectId: string
-}
-
-export function SettingsPanel({ projectId }: SettingsPanelProps) {
-  const router = useRouter()
-  const [open, setOpen] = useState(false)
-
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => setOpen(true))
-    return () => cancelAnimationFrame(frame)
-  }, [])
-
-  const handleClose = useCallback(() => {
-    setOpen(false)
-    // `router.back()` closes the intercepted modal instantly without
-    // re-mounting the chat. For the rarer direct-URL case, `replace` is
-    // the clean fallback that still lands the user back in the chat.
-    window.setTimeout(() => {
-      try {
-        if (window.history.length > 1) {
-          router.back()
-          return
-        }
-      } catch {}
-      router.replace(`/projects/${projectId}/chat`)
-    }, 180)
-  }, [router, projectId])
+/**
+ * Overlay settings panel driven by `workspace-context`. Intentionally does NOT
+ * change the route: opening settings over the chat must not unmount the chat.
+ */
+export function SettingsPanel() {
+  const { settingsProjectId, closeSettings } = useWorkspace()
+  // `renderProjectId` lingers through the slide-out animation so
+  // <SettingsContent /> doesn't unmount/refetch while the panel is closing.
+  const [renderProjectId, setRenderProjectId] = useState<string | null>(
+    settingsProjectId,
+  )
+  if (settingsProjectId && settingsProjectId !== renderProjectId) {
+    setRenderProjectId(settingsProjectId)
+  }
+  const visible = !!settingsProjectId
 
   useEffect(() => {
+    if (settingsProjectId) return
+    const timer = window.setTimeout(() => setRenderProjectId(null), 200)
+    return () => window.clearTimeout(timer)
+  }, [settingsProjectId])
+
+  useEffect(() => {
+    if (!settingsProjectId) return
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         e.preventDefault()
-        handleClose()
+        closeSettings()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [handleClose])
+  }, [settingsProjectId, closeSettings])
+
+  if (!renderProjectId) return null
 
   return (
     <>
       <div
         aria-hidden
+        onClick={closeSettings}
         className={cn(
           'fixed inset-0 z-40 transition-opacity duration-200',
-          open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none',
+          visible ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none',
         )}
-        onClick={handleClose}
       />
       <aside
         role="dialog"
         aria-label="Project settings"
+        data-open={visible ? '' : undefined}
+        data-closed={visible ? undefined : ''}
         className={cn(
-          'fixed inset-y-0 right-0 z-50 w-full sm:max-w-2xl bg-popover text-popover-foreground border-l border-border shadow-lg overflow-y-auto transition-transform duration-200 ease-out',
-          open ? 'translate-x-0' : 'translate-x-full',
+          'fixed inset-y-0 right-0 z-50 w-full sm:max-w-2xl bg-popover text-popover-foreground border-l border-border shadow-lg overflow-y-auto',
+          'data-open:animate-in data-open:slide-in-from-right data-open:duration-200',
+          'data-closed:animate-out data-closed:slide-out-to-right data-closed:duration-200',
         )}
       >
         <div className="flex items-center justify-between px-4 py-4">
@@ -70,14 +69,14 @@ export function SettingsPanel({ projectId }: SettingsPanelProps) {
           <Button
             variant="ghost"
             size="icon-sm"
-            onClick={handleClose}
+            onClick={closeSettings}
             aria-label="Close settings"
           >
             <XIcon className="h-4 w-4" />
           </Button>
         </div>
         <div className="px-4 pb-8">
-          <SettingsContent projectId={projectId} />
+          <SettingsContent projectId={renderProjectId} />
         </div>
       </aside>
     </>
