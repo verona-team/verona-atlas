@@ -240,8 +240,30 @@ export function ChatInterface({
     if (lastBootstrapKeyRef.current === key) return
     lastBootstrapKeyRef.current = key
 
+    /**
+     * Deterministic message id so a refresh / tab-close that re-fires
+     * this effect upserts into the same `chat_messages` row on the
+     * server (unique on `session_id, client_message_id`) instead of
+     * creating a duplicate bootstrap. The server also uses the id
+     * match to detect the re-fire as an already-in-flight turn and
+     * short-circuit with an empty SSE response, letting the original
+     * turn finish without a parallel second run. The nonce is appended
+     * so an explicit retry (onError bumps `bootstrapNonce`) gets a
+     * fresh id.
+     *
+     * NB: we use the `{ id, parts }` form rather than `messageId` —
+     * `sendMessage`'s `messageId` option looks up an existing message
+     * to replace (regenerate path) and throws when it isn't found.
+     */
     void sendMessage({
-      text: `I just set up ${projectName} (${appUrl}). Analyze my project data and suggest UI flows to test.`,
+      id: `bootstrap:${sessionId}:${bootstrapNonce}`,
+      role: 'user',
+      parts: [
+        {
+          type: 'text',
+          text: `I just set up ${projectName} (${appUrl}). Analyze my project data and suggest UI flows to test.`,
+        },
+      ],
     })
   }, [
     dbMessages.length,
