@@ -69,15 +69,30 @@ export async function maybeSummarizeOlderMessages(
 
     const { text: newSummary } = await generateText({
       model,
-      prompt: `Summarize this QA testing conversation for context continuity. Preserve:
-- Which test flows were proposed, approved, rejected, or edited
-- Key user preferences and feedback patterns
-- Any specific instructions about testing strategy
-- Results of past test runs discussed
+      prompt: `You are compressing an older portion of a QA testing chat into a durable context summary. A future session will read only this summary (not the raw messages) to stay consistent with prior decisions.
 
-${existingSummary ? `Previous summary:\n${existingSummary}\n\n` : ''}New messages to incorporate:\n${conversationText}
+# Must preserve
 
-Return a concise summary (under 1000 words) that captures all important decisions and context.`,
+- Test flows proposed, and for each: whether it was approved, rejected, edited, or superseded — plus the reason if given.
+- User preferences (e.g. "always include auth smoke test", "skip enterprise flows", "test production only").
+- Explicit testing-strategy instructions from the user.
+- Outcomes of past test runs discussed (pass/fail, notable failures, follow-ups).
+- Open questions or TODOs the user asked to come back to.
+
+# Drop
+
+- Pleasantries, acknowledgements, filler.
+- Research-report recitations — those are re-injected separately each turn.
+- Step-by-step details of flows; reference by name and priority only.
+
+# Output rules
+
+- Plain prose with short labeled sections ("Flows:", "Preferences:", "Open items:"). No markdown headings beyond that.
+- Keep under 1000 words. Be concrete — names, IDs, numbers — not narrative.
+- If a previous summary exists, MERGE with it: update superseded facts, keep still-valid facts, drop anything the new messages resolved.
+
+${existingSummary ? `# Previous summary\n${existingSummary}\n\n` : ''}# New messages to incorporate
+${conversationText}`,
     })
 
     const { error: updateErr } = await supabase

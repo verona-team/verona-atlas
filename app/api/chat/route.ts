@@ -229,58 +229,61 @@ ${ce.truncationWarnings.length ? `\n**Notes:** ${ce.truncationWarnings.join(' ')
 
   const hasExistingProposals = latestProposals?.type === 'flow_proposals'
 
-  const systemPrompt = `You are Verona, an AI QA strategist that helps teams plan and execute UI testing for their web applications. You are assisting with the project "${project.name}" at ${project.app_url}.
+  const systemPrompt = `You are Verona, an AI QA strategist helping teams plan and execute UI testing for their web app.
 
-# Research Report
-A deep analysis agent investigated the user's connected integrations and linked GitHub repository.
+Project: "${project.name}" (${project.app_url})
+
+# Tools — read carefully
+
+You have two tools. The product's UI depends on them; do not try to substitute prose for tool output.
+
+1. \`generate_flow_proposals\` — renders proposed test flows as structured, approvable cards in the chat UI. This is the ONLY way the user can approve a flow.
+2. \`start_test_run\` — executes the flows the user has approved.
+
+## When to call \`generate_flow_proposals\`
+
+Call it whenever the user wants to see, propose, refresh, or add test flows — including the very first turn of a session, or phrasings like "suggest flows", "what should I test", "give me tests", "recommend flows", "propose more", "anything else to cover".
+
+After the tool returns, reply with AT MOST two sentences that point the user at the cards and invite approval. Example: "I've proposed three flows above — approve the ones you want and tell me to start testing." Never repeat or re-describe the flows' names, steps, or rationales in prose; the cards already show them.
+
+## When to call \`start_test_run\`
+
+Call it when the user confirms they want to run approved flows ("start testing", "go", "run them", "let's do it"). After it returns, reply with one short sentence confirming execution started.
+
+## What NOT to write in prose
+
+Never write numbered lists, bullets, or prose that describes candidate flows ("Flow 1:", "Flow 2:", "Here are the flows I recommend:", "I suggest testing X, Y, Z"). If you catch yourself about to do this, stop and call \`generate_flow_proposals\` instead.
+
+# Style
+
+- Lead with the decision or answer in one short paragraph. Bullets only when they aid scanning.
+- No preamble ("I'll analyze…", "Let me look at…"). No recap of the research report unless asked.
+- When referencing findings, cite one concrete anchor per point (a commit, an error, a route, a rage-click count). One clause, not an essay.
+- When the user gives feedback, acknowledge in one or two sentences and say what you'll do next.
+- If the user asks about data from an integration not in "Integrations covered" below, tell them to connect it in Settings.
+
+# Research report (background context — do not recite)
 
 ## Summary
 ${report.summary}
 
-## Key Findings
+## Key findings
 ${findingsSummary}
 
 ${codebaseBlock}
 
-## Recommended Flows
+## Recommended flow ideas (raw — use as input when calling \`generate_flow_proposals\`)
 ${report.recommendedFlows.map((f, i) => `${i + 1}. ${f}`).join('\n')}
 
 Integrations covered: ${report.integrationsCovered.join(', ') || 'none'}
 
-# Instructions
-- Be extremely concise and pointed. Lead with the answer or decision in one short paragraph; use bullets only when they improve scanability. No preamble, no repeating the research report, no long recap unless the user explicitly asks for detail.
-- When you discuss or summarize flows, cover at most three at a time. For broader coverage, offer a follow-up turn instead of listing many flows at once.
-- When proposing or discussing flows, tie briefly to specific findings or repo context when it helps—one clause per point, not essays.
-- When the user gives feedback, acknowledge in one or two sentences and say what you will do next.
-- If the user asks about data from an integration not listed in "integrations covered", tell them to connect it in Settings
-
-# CRITICAL: How to present flows
-- The UI renders proposed flows as structured, approvable cards ONLY when you invoke the \`generate_flow_proposals\` tool. Prose descriptions of flows are NOT rendered as cards and the user CANNOT approve them.
-- NEVER describe, enumerate, number, or bullet test flows in your written response. Do not write things like "Flow 1:", "Flow 2:", "Here are the flows", or "I recommend these flows…".
-- If you need the user to see or approve flows (including the very first turn of a session, or any time they ask for suggestions, tests, recommendations, or flows to try), call \`generate_flow_proposals\` INSTEAD of writing prose. After the tool returns, reply with a short acknowledgement (one or two sentences max) that tells the user to review the cards above — do not re-describe the flows.
-- When the user approves flows and wants to start testing, call the \`start_test_run\` tool. After it returns, reply with a one-sentence confirmation.
-
-${contextSummary ? `Previous conversation context:\n${contextSummary}\n` : ''}
+# Session state
+${hasExistingProposals ? 'Flow proposals already exist for this session. Refer to them by name rather than regenerating, unless the user explicitly asks to refresh or add more.' : 'No flow proposals exist yet for this session.'}
 ${flowStatusSummary}
-
-${recentRuns && recentRuns.length > 0 ? `Recent test runs:\n${JSON.stringify(recentRuns, null, 2)}\n` : ''}
-
-${hasExistingProposals ? 'Flow proposals already exist for this session — refer to them instead of calling the tool again unless the user explicitly asks to refresh.' : 'No flow proposals exist yet for this session.'}`
+${contextSummary ? `\nPrior conversation summary:\n${contextSummary}` : ''}
+${recentRuns && recentRuns.length > 0 ? `\nRecent test runs:\n${JSON.stringify(recentRuns, null, 2)}` : ''}`
 
   const modelMessages = await convertToModelMessages(uiMessages)
-
-  /**
-   * When there are no flow proposals yet and the user is asking for suggestions,
-   * force the model to call `generate_flow_proposals` on the first step rather
-   * than writing a prose response. Without this, the model often re-describes
-   * flows inline and the structured approval cards never appear. The trigger
-   * is the bootstrap message the client sends ("suggest UI flows to test") or
-   * any explicit request for flows/tests.
-   */
-  const wantsFlowProposals = /suggest.*flow|recommend.*flow|propose.*flow|what.*test|flows?\s+to\s+test|ui\s+flows?/i.test(
-    lastUserText,
-  )
-  const shouldForceProposalsTool = !hasExistingProposals && wantsFlowProposals
 
   const logChatTool = (
     level: 'error' | 'warn' | 'info',
@@ -579,13 +582,15 @@ ${hasExistingProposals ? 'Flow proposals already exist for this session — refe
         tools: {
           generate_flow_proposals: tool({
             description:
-              'Generate structured UI test flow proposals (at most 3 flows) rendered as approvable cards. You MUST call this instead of describing flows in prose whenever the user asks for suggestions, recommendations, tests, or flows to try, or when bootstrapping a session. Never list flows in your written reply.',
+              'Render up to 3 proposed UI test flows as structured approval cards in the chat UI. The user can only approve flows that come through this tool — prose descriptions cannot be approved. Call this any time the user asks to see, refresh, add, or propose test flows, or when bootstrapping a new session. Do not describe flows in your written reply; the cards already show the names, priorities, and steps.',
             inputSchema: z.object({
-              reason: z.string().describe('Brief reason for generating proposals'),
+              reason: z
+                .string()
+                .describe('Why you are generating proposals now, e.g. "initial bootstrap" or "user asked for auth-focused flows".'),
               refresh: z
                 .boolean()
                 .optional()
-                .describe('If true, re-run the research agent to get fresh data before generating proposals'),
+                .describe('Set true only when the user explicitly asks for fresh data — re-runs the research agent before generating.'),
             }),
             execute: executeGenerateFlowProposals as (input: {
               reason: string
@@ -594,9 +599,11 @@ ${hasExistingProposals ? 'Flow proposals already exist for this session — refe
           }),
           start_test_run: tool({
             description:
-              'Start executing the approved test flows. Creates test templates from approved flows and triggers a test run.',
+              'Kick off a cloud browser run for every currently-approved flow. Call when the user confirms they want to start testing (phrases like "start testing", "run them", "go"). Requires at least one approved flow.',
             inputSchema: z.object({
-              confirmation: z.string().describe('Brief confirmation message'),
+              confirmation: z
+                .string()
+                .describe('Short paraphrase of the user\'s go-ahead, e.g. "user confirmed starting run".'),
             }),
             execute: executeStartTestRun as (input: {
               confirmation: string
@@ -604,27 +611,9 @@ ${hasExistingProposals ? 'Flow proposals already exist for this session — refe
           }),
         },
         /**
-         * On the bootstrap/"suggest flows" turn, force the tool call on step 0.
-         * This eliminates prose-only responses that render without approvable
-         * cards. After the tool runs on step 1, step 2 is left to produce a
-         * short acknowledgement; `toolChoice: 'none'` prevents the model from
-         * calling the tool a second time in the same turn.
-         */
-        prepareStep: shouldForceProposalsTool
-          ? async ({ stepNumber }) => {
-              if (stepNumber === 0) {
-                return {
-                  toolChoice: { type: 'tool', toolName: 'generate_flow_proposals' as const },
-                  activeTools: ['generate_flow_proposals'],
-                }
-              }
-              return { toolChoice: 'none' as const }
-            }
-          : undefined,
-        /**
-         * Stop after a successful proposals/run tool call so the model does not
-         * run an extra step that rewrites the flow cards as prose. The step
-         * count cap is a secondary safety net.
+         * Stop after a successful proposals/run tool call so the model does
+         * not run an extra step that rewrites the structured cards as prose.
+         * The step count cap is a secondary safety net.
          */
         stopWhen: [
           stepCountIs(3),
