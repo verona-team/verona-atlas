@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { InteractiveLogo } from '@/components/landing/interactive-logo'
+import { Museum } from '@/components/landing/museum'
 
 export default function LandingPage() {
   return (
@@ -22,15 +23,22 @@ export default function LandingPage() {
         </nav>
       </header>
 
-      <main className="relative z-10 flex flex-1 flex-col items-center justify-center px-6" style={{ minHeight: 'calc(100vh - 68px)' }}>
-        <div className="flex flex-col items-center gap-[68px] -mt-16">
-          <InteractiveLogo size={180} />
-          <h1
-            className="max-w-2xl text-center text-5xl font-normal leading-[1.1] tracking-tight text-[#1a1a1a] sm:text-6xl"
-          >
-            Autonomous QA that works.
-          </h1>
-        </div>
+      <main className="relative z-10 flex flex-col items-center px-6">
+        <section
+          className="flex w-full flex-col items-center justify-center"
+          style={{ minHeight: 'calc(100vh - 68px)' }}
+        >
+          <div className="flex flex-col items-center gap-[68px] -mt-16">
+            <InteractiveLogo size={180} />
+            <h1
+              className="max-w-3xl text-center text-5xl font-normal leading-[1.1] tracking-tight text-[#1a1a1a] sm:text-6xl"
+            >
+              Verona bug bashes your UI like a human would.
+            </h1>
+          </div>
+        </section>
+
+        <Museum />
       </main>
     </div>
   )
