@@ -14,6 +14,7 @@ import { DefaultChatTransport } from 'ai'
 import { Send, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { MessageBubble } from './message-bubble'
+import { ThinkingIndicator } from './thinking-indicator'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent } from '@/components/ui/card'
@@ -442,6 +443,18 @@ export function ChatInterface({
   const isStreamActive = status === 'submitted' || status === 'streaming'
   const isProcessing = isStreamActive || backendThinking
 
+  const thinkingStartRef = useRef<number | null>(null)
+  const [thinkingStart, setThinkingStart] = useState<number | null>(null)
+  useEffect(() => {
+    if (isProcessing && thinkingStartRef.current == null) {
+      thinkingStartRef.current = Date.now()
+      setThinkingStart(thinkingStartRef.current)
+    } else if (!isProcessing && thinkingStartRef.current != null) {
+      thinkingStartRef.current = null
+      setThinkingStart(null)
+    }
+  }, [isProcessing])
+
   const displayMessages = useMemo(() => {
     const dbRendered = dbMessages
       .filter((m) => m.role !== 'system')
@@ -528,11 +541,8 @@ export function ChatInterface({
           )
         })}
 
-        {isProcessing && (displayMessages.length === 0 || displayMessages[displayMessages.length - 1]?.role === 'user') && (
-          <div className="flex items-center gap-3 text-base text-muted-foreground">
-            <Loader2 className="w-5 h-5 animate-spin" />
-            <span>Verona is thinking...</span>
-          </div>
+        {isProcessing && thinkingStart != null && (displayMessages.length === 0 || displayMessages[displayMessages.length - 1]?.role === 'user') && (
+          <ThinkingIndicator startedAt={thinkingStart} />
         )}
       </div>
 
