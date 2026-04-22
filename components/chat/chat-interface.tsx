@@ -514,18 +514,6 @@ export function ChatInterface({
   const isStreamActive = status === 'submitted' || status === 'streaming'
   const isProcessing = isStreamActive || backendThinking
 
-  const thinkingStartRef = useRef<number | null>(null)
-  const [thinkingStart, setThinkingStart] = useState<number | null>(null)
-  useEffect(() => {
-    if (isProcessing && thinkingStartRef.current == null) {
-      thinkingStartRef.current = Date.now()
-      setThinkingStart(thinkingStartRef.current)
-    } else if (!isProcessing && thinkingStartRef.current != null) {
-      thinkingStartRef.current = null
-      setThinkingStart(null)
-    }
-  }, [isProcessing])
-
   const displayMessages = useMemo(() => {
     const dbRendered = dbMessages
       .filter((m) => m.role !== 'system')
@@ -624,9 +612,7 @@ export function ChatInterface({
            * though the backend is still working. See:
            * https://github.com/verona-team/atlas/issues (chat loading state)
            */}
-          {isProcessing && thinkingStart != null && (
-            <ThinkingIndicator startedAt={thinkingStart} />
-          )}
+          {isProcessing && <ThinkingIndicator />}
         </div>
       </div>
 

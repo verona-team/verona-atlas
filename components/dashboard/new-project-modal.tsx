@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef, type SyntheticEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   Dialog,
@@ -35,6 +36,7 @@ export function NewProjectModal() {
 
   const [step, setStep] = useState<Step>('details')
   const [submitting, setSubmitting] = useState(false)
+  const [continuing, setContinuing] = useState(false)
 
   const [name, setName] = useState('')
   const [appUrl, setAppUrl] = useState('')
@@ -95,6 +97,7 @@ export function NewProjectModal() {
     setAppUrl('')
     setProjectId(null)
     setIntegrations([])
+    setContinuing(false)
   }
 
   async function onCreateProject(e: SyntheticEvent<HTMLFormElement>) {
@@ -147,17 +150,31 @@ export function NewProjectModal() {
   }, [projectId, loadIntegrations])
 
   async function handleContinueToChat() {
-    if (!githubComplete || !projectId) return
-    await refreshProjects()
-    setShowNewProjectModal(false)
-    reset()
-    router.push(`/projects/${projectId}`)
+    if (!githubComplete || !projectId || continuing) return
+    setContinuing(true)
+    try {
+      await refreshProjects()
+      router.push(`/projects/${projectId}`)
+      // Intentionally keep `continuing` true through the navigation — the
+      // modal is about to unmount, and we don't want the spinner to flicker
+      // back to the idle label in the meantime. `reset()` (called when the
+      // dialog closes) will clear it.
+      setShowNewProjectModal(false)
+    } catch (err) {
+      setContinuing(false)
+      toast.error(err instanceof Error ? err.message : 'Something went wrong')
+    }
   }
 
   return (
     <Dialog
       open={showNewProjectModal}
       onOpenChange={(open) => {
+        if (!open && continuing) {
+          // Navigation is already in flight — don't let the user close the
+          // modal and lose the loading feedback.
+          return
+        }
         if (!open && step === 'integrations' && !githubComplete) {
           toast.error('Connect GitHub and select a repository to continue.')
           return
@@ -271,12 +288,19 @@ export function NewProjectModal() {
             <div className="pt-3">
               <Button
                 onClick={handleContinueToChat}
-                disabled={!githubComplete}
+                disabled={!githubComplete || continuing}
                 className="w-full"
               >
-                Continue to Chat →
+                {continuing ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Opening chat...
+                  </>
+                ) : (
+                  <>Continue to Chat →</>
+                )}
               </Button>
-              {!githubComplete && (
+              {!githubComplete && !continuing && (
                 <p className="text-xs text-muted-foreground mt-2 text-center">
                   Connect GitHub and select a repository to continue.
                 </p>
