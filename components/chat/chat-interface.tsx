@@ -577,7 +577,16 @@ export function ChatInterface({
             )
           })}
 
-          {isProcessing && thinkingStart != null && (displayMessages.length === 0 || displayMessages[displayMessages.length - 1]?.role === 'user') && (
+          {/**
+           * Keep the thinking indicator visible for the entire processing
+           * window — including the gap after the assistant's opening text
+           * streams in but before its tool call (e.g. `generate_flow_proposals`)
+           * finishes executing. Without this, users see the streamed intro,
+           * the indicator disappears, and they assume the turn is done even
+           * though the backend is still working. See:
+           * https://github.com/verona-team/atlas/issues (chat loading state)
+           */}
+          {isProcessing && thinkingStart != null && (
             <ThinkingIndicator startedAt={thinkingStart} />
           )}
         </div>
@@ -627,9 +636,10 @@ export function ChatInterface({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Message Verona…"
+              placeholder={isProcessing ? 'Verona is working — please wait…' : 'Message Verona…'}
               rows={1}
-              className="resize-none border-0 bg-transparent min-h-[56px] max-h-[200px] pl-4 pr-14 py-4 text-[15px] leading-relaxed shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/60"
+              aria-busy={isProcessing}
+              className="resize-none border-0 bg-transparent min-h-[56px] max-h-[200px] pl-4 pr-14 py-4 text-[15px] leading-relaxed shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/60 disabled:cursor-not-allowed disabled:opacity-70"
               disabled={isProcessing}
             />
             <Button
