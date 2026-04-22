@@ -10,7 +10,6 @@ import {
   getTextFileContent,
   parseRepoFullName,
   suggestImportantPaths,
-  DEFAULT_MAX_FILE_CHARS,
   DEFAULT_MAX_LIST_PATHS,
   DEFAULT_MAX_PATH_MATCHES,
 } from '@/lib/github-repo-explorer'
@@ -30,7 +29,6 @@ export async function runCodebaseExplorationAgent(input: {
   repoFullName: string
 }): Promise<CodebaseExplorationResult> {
   const maxSteps = envInt('RESEARCH_CODEBASE_MAX_STEPS', 32)
-  const maxFileChars = envInt('RESEARCH_CODEBASE_MAX_FILE_CHARS', DEFAULT_MAX_FILE_CHARS)
 
   const parsedRef = parseRepoFullName(input.repoFullName)
   if (!parsedRef) {
@@ -105,7 +103,7 @@ export async function runCodebaseExplorationAgent(input: {
   })
 
   const readFileTool = tool({
-    description: 'Read a text file from the repository at the given path (UTF-8). Large files are truncated.',
+    description: 'Read a text file from the repository at the given path (UTF-8).',
     inputSchema: z.object({
       path: z.string().describe('Repository-relative path to the file'),
     }),
@@ -113,7 +111,13 @@ export async function runCodebaseExplorationAgent(input: {
       toolSteps.push({ tool: 'get_file_content', detail: path })
       await ensureTree()
       const branch = cachedBranch ?? 'HEAD'
-      const result = await getTextFileContent(octokit, ref, path, branch, maxFileChars)
+      const result = await getTextFileContent(
+        octokit,
+        ref,
+        path,
+        branch,
+        Number.POSITIVE_INFINITY,
+      )
       if (!result.ok) {
         return { ok: false as const, path, error: result.error }
       }

@@ -113,8 +113,7 @@ async function fetchUrl(url: string): Promise<string | null> {
       signal: AbortSignal.timeout(10000),
     })
     if (!response.ok) return null
-    const text = await response.text()
-    return text.slice(0, 15000)
+    return await response.text()
   } catch {
     return null
   }
@@ -134,7 +133,7 @@ export async function fetchIntegrationDocs(type: string): Promise<string> {
       .map((r) => r.value!)
 
     if (fetched.length > 0) {
-      const content = fetched.join('\n\n---\n\n').slice(0, 30000)
+      const content = fetched.join('\n\n---\n\n')
       docsCache.set(type, { content, fetchedAt: Date.now() })
       return content
     }

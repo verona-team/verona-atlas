@@ -216,9 +216,9 @@ async function runResearchLoopCore(ctx: AgentContext): Promise<IntegrationResear
   const preflightSummary = Object.entries(preflightResults)
     .map(([type, result]) => {
       if (result.success) {
-        return `## ${type.toUpperCase()} Preflight Data (auto-collected)\n\n\`\`\`json\n${result.data.slice(0, 12000)}\n\`\`\``
+        return `## ${type.toUpperCase()} Preflight Data (auto-collected)\n\n\`\`\`json\n${result.data}\n\`\`\``
       }
-      return `## ${type.toUpperCase()} Preflight Data\n\nFailed: ${result.error?.slice(0, 500) ?? 'unknown error'}. Use execute_code to investigate manually.`
+      return `## ${type.toUpperCase()} Preflight Data\n\nFailed: ${result.error ?? 'unknown error'}. Use execute_code to investigate manually.`
     })
     .join('\n\n---\n\n')
 
@@ -317,13 +317,13 @@ Review the preflight data above. Then use execute_code for DEEPER investigation 
             processInputs: (inputs) => ({
               purpose: inputs.purpose,
               codeLength: inputs.code?.length ?? 0,
-              codePreview: (inputs.code ?? '').slice(0, 4000),
+              code: inputs.code ?? '',
             }),
             processOutputs: (out) => ({
               purpose: out.purpose,
               exitCode: out.exitCode,
-              stdoutPreview: out.stdout?.slice(0, 8000),
-              stderrPreview: out.stderr?.slice(0, 2000),
+              stdout: out.stdout ?? '',
+              stderr: out.stderr ?? '',
             }),
           },
         ) as (input: { code: string; purpose: string }) => Promise<{

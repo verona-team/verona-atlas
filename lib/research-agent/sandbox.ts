@@ -50,8 +50,8 @@ export async function executeInSandbox(
   const stderr = await result.stderr()
 
   return {
-    stdout: stdout.slice(0, 50000),
-    stderr: stderr.slice(0, 10000),
+    stdout,
+    stderr,
     exitCode: result.exitCode,
   }
 }

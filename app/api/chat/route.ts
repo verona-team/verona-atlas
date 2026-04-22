@@ -246,9 +246,10 @@ ${report.recommendedFlows.map((f, i) => `${i + 1}. ${f}`).join('\n')}
 Integrations covered: ${report.integrationsCovered.join(', ') || 'none'}
 
 # Instructions
-- Be concise and actionable
-- When proposing or discussing flows, reference specific findings from the research report above and the repository understanding when relevant
-- When the user provides feedback, acknowledge it and explain how you'll incorporate it
+- Be extremely concise and pointed. Lead with the answer or decision in one short paragraph; use bullets only when they improve scanability. No preamble, no repeating the research report, no long recap unless the user explicitly asks for detail.
+- When you discuss or summarize flows, cover at most three at a time. For broader coverage, offer a follow-up turn instead of listing many flows at once.
+- When proposing or discussing flows, tie briefly to specific findings or repo context when it helps—one clause per point, not essays.
+- When the user gives feedback, acknowledge in one or two sentences and say what you will do next.
 - If the user asks about data from an integration not listed in "integrations covered", tell them to connect it in Settings
 
 ${contextSummary ? `Previous conversation context:\n${contextSummary}\n` : ''}
@@ -558,7 +559,7 @@ When the user approves flows and wants to start testing, use the start_test_run 
         tools: {
           generate_flow_proposals: tool({
             description:
-              'Generate structured UI test flow proposals with approval cards based on the research report. Use this when the user first asks to analyze their project, or when they want to refresh proposals.',
+              'Generate structured UI test flow proposals (at most 3 flows) with approval cards based on the research report. Use when the user first asks to analyze their project, or when they want to refresh proposals.',
             inputSchema: z.object({
               reason: z.string().describe('Brief reason for generating proposals'),
               refresh: z

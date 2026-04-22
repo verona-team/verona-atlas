@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, type SyntheticEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
@@ -88,7 +88,7 @@ export function NewProjectModal() {
     setIntegrations([])
   }
 
-  async function onCreateProject(e: React.FormEvent) {
+  async function onCreateProject(e: SyntheticEvent<HTMLFormElement>) {
     e.preventDefault()
     setSubmitting(true)
     try {
@@ -145,10 +145,6 @@ export function NewProjectModal() {
       open={showNewProjectModal}
       onOpenChange={(open) => {
         if (!open && step === 'integrations' && !githubComplete) {
-          toast.error('Connect GitHub and select a repository to continue.')
-          return
-        }
-        if (!open && step === 'details' && projectId) {
           toast.error('Connect GitHub and select a repository to continue.')
           return
         }

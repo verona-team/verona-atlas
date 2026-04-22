@@ -98,23 +98,41 @@ export function GitHubCard({
 
   useEffect(() => {
     if (!waiting) return
-    const interval = setInterval(async () => {
+
+    let cancelled = false
+
+    async function checkStatus() {
+      if (cancelled) return
       try {
         const res = await fetch(`/api/integrations/github/status?project_id=${projectId}`)
-        if (res.ok) {
-          const data = await res.json()
-          if (data.connected) {
-            await onRefresh()
-            setWaiting(false)
-            toast.success('GitHub connected')
-            installPopupRef.current?.close()
-            installPopupRef.current = null
-            window.focus()
-          }
-        }
-      } catch {}
-    }, 3000)
-    return () => clearInterval(interval)
+        if (!res.ok || cancelled) return
+        const data = await res.json()
+        if (!data.connected || cancelled) return
+        await onRefresh()
+        if (cancelled) return
+        setWaiting(false)
+        toast.success('GitHub connected')
+        installPopupRef.current?.close()
+        installPopupRef.current = null
+        window.focus()
+      } catch {
+        /* ignore */
+      }
+    }
+
+    void checkStatus()
+    const interval = setInterval(() => void checkStatus(), 1000)
+
+    function onVisibility() {
+      if (document.visibilityState === 'visible') void checkStatus()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [waiting, projectId, onRefresh])
 
   return (
@@ -453,8 +471,31 @@ export function SlackCard({
 
   useEffect(() => {
     if (!waiting) return
-    const interval = setInterval(async () => { await onRefresh() }, 2000)
-    return () => clearInterval(interval)
+
+    let cancelled = false
+
+    async function refresh() {
+      if (cancelled) return
+      try {
+        await onRefresh()
+      } catch {
+        /* ignore */
+      }
+    }
+
+    void refresh()
+    const interval = setInterval(() => void refresh(), 1000)
+
+    function onVisibility() {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [waiting, onRefresh])
 
   useEffect(() => {

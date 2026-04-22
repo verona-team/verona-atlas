@@ -39,7 +39,6 @@ interface WorkspaceProviderProps {
   orgName: string
   userEmail: string
   initialProjects: Project[]
-  initialActiveProjectId?: string | null
 }
 
 const SIDEBAR_COLLAPSED_KEY = 'verona-sidebar-collapsed'
@@ -50,28 +49,34 @@ export function WorkspaceProvider({
   orgName,
   userEmail,
   initialProjects,
-  initialActiveProjectId,
 }: WorkspaceProviderProps) {
   const router = useRouter()
   const pathname = usePathname()
   const [projects, setProjects] = useState<Project[]>(initialProjects)
-  const [activeProjectId, setActiveProjectIdState] = useState<string | null>(
-    initialActiveProjectId ?? null,
-  )
   const [sidebarCollapsed, setSidebarCollapsedState] = useState(false)
-  const [showNewProjectModal, setShowNewProjectModal] = useState(false)
+  const [showNewProjectModal, setShowNewProjectModal] = useState(
+    () => initialProjects.length === 0,
+  )
+  const [activeProjectId, setActiveProjectIdState] = useState<string | null>(
+    null,
+  )
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(SIDEBAR_COLLAPSED_KEY)
-      if (stored === 'true') setSidebarCollapsedState(true)
-    } catch {}
+    const frame = requestAnimationFrame(() => {
+      try {
+        if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true') {
+          setSidebarCollapsedState(true)
+        }
+      } catch {}
+    })
+    return () => cancelAnimationFrame(frame)
   }, [])
 
   useEffect(() => {
     const match = pathname.match(/^\/projects\/([^/]+)/)
     if (match && match[1] !== 'new') {
-      setActiveProjectIdState(match[1])
+      const id = match[1]
+      queueMicrotask(() => setActiveProjectIdState(id))
     }
   }, [pathname])
 
@@ -88,7 +93,7 @@ export function WorkspaceProvider({
 
   const setActiveProjectId = useCallback(
     (id: string | null) => {
-      setActiveProjectIdState(id)
+      queueMicrotask(() => setActiveProjectIdState(id))
       if (id) {
         router.push(`/projects/${id}`)
       }
@@ -107,12 +112,6 @@ export function WorkspaceProvider({
       }
     } catch {}
   }, [])
-
-  useEffect(() => {
-    if (initialProjects.length === 0) {
-      setShowNewProjectModal(true)
-    }
-  }, [initialProjects.length])
 
   return (
     <WorkspaceContext.Provider

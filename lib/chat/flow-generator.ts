@@ -15,8 +15,10 @@ export const proposedFlowSchema = z.object({
 })
 
 const flowProposalsSchema = z.object({
-  analysis: z.string().describe('Brief analysis of the project state that informed these recommendations'),
-  flows: z.array(proposedFlowSchema),
+  analysis: z
+    .string()
+    .describe('Very brief analysis (2–3 sentences max) of what matters most for testing right now'),
+  flows: z.array(proposedFlowSchema).max(3),
 })
 
 export type ProposedFlow = z.infer<typeof proposedFlowSchema>
@@ -67,7 +69,7 @@ ${report.recommendedFlows.map((f, i) => `${i + 1}. ${f}`).join('\n')}
 Integrations investigated: ${report.integrationsCovered.join(', ') || 'none'}
 Integrations skipped: ${report.integrationsSkipped.join(', ') || 'none'}
 
-Based on this research, generate 3-5 concrete UI test flows. Each flow should:
+Based on this research, generate at most 3 concrete UI test flows—only the highest-impact ones; fewer is fine if two flows clearly dominate. Never return more than 3 flows. Each flow should:
 - Have a unique kebab-case id
 - Explain WHY it's recommended by referencing specific findings (commits, errors, URLs, routes, or code structure from the repository section)
 - Include detailed step-by-step instructions an AI browser agent can execute
@@ -106,7 +108,7 @@ export function serializeFlowsForMessage(proposals: FlowProposals): {
     .map((f, i) => `**${i + 1}. ${f.name}** (${f.priority} priority)\n${f.description}\n_Rationale: ${f.rationale}_\n${f.steps.length} steps`)
     .join('\n\n')
 
-  const content = `${proposals.analysis}\n\nHere are the UI flows I recommend testing:\n\n${flowList}\n\nYou can approve, reject, or edit each flow. Once you're happy with the test plan, just tell me to start testing and I'll kick off the browser sessions.`
+  const content = `${proposals.analysis}\n\n**Flows to test (max 3):**\n\n${flowList}\n\nApprove, reject, or edit each; say when to start testing.`
 
   const flow_states: Record<string, Json> = {}
   for (const f of flows) {
