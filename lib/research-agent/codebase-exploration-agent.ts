@@ -183,18 +183,35 @@ export async function runCodebaseExplorationAgent(input: {
     },
   })
 
-  const system = `You are an expert software architect and QA strategist exploring a single GitHub repository: ${input.repoFullName}.
+  const system = `You are an expert software architect and QA strategist exploring the GitHub repository ${input.repoFullName}. Your output will directly feed QA test planning for the deployed web app, so focus on what a user would actually do in the UI.
 
-Your job: use the tools repeatedly to build a deep understanding of how the application is structured and what user-facing flows exist, so UI testing can be planned effectively.
+# Approach
 
-Rules:
-- Prefer exploring app/, src/, pages/, packages/, and root config files (package.json, next.config.*, vite.config.*, README).
-- Read enough representative files to understand routing, auth, forms, and critical user journeys.
-- Skip binary assets and dependency folders (already filtered from listings).
-- When satisfied, you MUST call finish_codebase_exploration with a complete structured summary.
-- If you cannot fully explore (API errors, huge repo), still finish with lower confidence and explain in truncationWarnings.`
+1. Start with \`get_repo_ref\` to know the default branch, then \`suggest_important_paths\` for a high-signal entrypoint list.
+2. Read README, package.json / framework config (next.config.*, vite.config.*, nuxt.config.*, astro.config.*, svelte.config.*) to identify the framework, router, and any monorepo layout. This disambiguates where routes/pages live.
+3. Explore the routing surface: \`app/\`, \`src/app/\`, \`pages/\`, \`src/pages/\`, \`routes/\`, or framework equivalent. Read representative route files — don't read every file, read the ones that reveal distinct user journeys (auth, onboarding, core workflows, forms, payments, settings).
+4. Skim middleware/guards, auth helpers, and API route handlers only insofar as they reveal user-visible behaviour. Skip pure utility and type-only files.
+5. Binary assets and dependency folders are already filtered from listings.
 
-  const userMsg = `Explore ${input.repoFullName} thoroughly using the tools. Map architecture, infer primary user flows from routes/pages/components, and note testing implications (auth, payments, forms, edge cases). Finish with finish_codebase_exploration.`
+# Efficiency
+
+- Prefer listing + targeted reads over broad enumeration. One good read beats three skimmed ones.
+- Stop exploring a path when returns diminish. You have a hard step budget — spend it where it reveals new flows, not to confirm what you already inferred.
+
+# Finish
+
+When you have enough to describe the app's real user journeys, call \`finish_codebase_exploration\`.
+- \`summary\`: 3–5 sentences. What kind of app is this, what's its primary value to a user, and what is the dominant flow.
+- \`architecture\`: stack + routing model + auth strategy + any notable patterns (monorepo, server actions, tRPC, etc.).
+- \`inferredUserFlows\`: concrete, UI-level flows a user actually does — each phrased as a short action ("Sign in with magic link", "Create a new sheet and add columns"). Derive from routes/pages/components, not from tech.
+- \`testingImplications\`: risks a QA human should prioritize given what you saw (auth surface area, payment flows, forms with complex validation, new or heavily churned modules, accessibility traps).
+- \`keyPathsExamined\`: the files you actually read that most informed your answer.
+- \`confidence\`: high / medium / low. Use low if you hit API errors, repo was truncated, or you didn't get to read a meaningful cross-section.
+- \`truncationWarnings\`: honest list of gaps (e.g. "Could not read src/lib/payments — GitHub returned 404").
+
+If you hit errors or a huge repo, still finish with lower confidence rather than leaving empty.`
+
+  const userMsg = `Explore ${input.repoFullName} to map its real user-facing flows for QA planning. Use the tools iteratively — start from routes/pages, read enough representative files to infer the main journeys (auth, core workflow, forms, settings), and finish by calling \`finish_codebase_exploration\` with concrete inferredUserFlows and testingImplications.`
 
   const exploration = await generateText({
     model,

@@ -36,35 +36,47 @@ export async function generateTemplates(context: {
   const { output } = await generateText({
     model,
     output: Output.object({ schema: templatesArraySchema }),
-    prompt: `You are a QA test planner for a web application at ${context.appUrl}.
+    prompt: `You are a QA test planner for ${context.appUrl}. Produce reusable test TEMPLATES that an AI browser agent can execute. Each template maps to one user flow.
 
-Given the following context about recent activity:
+# Selection
 
-## Recent Git Commits
+- Return 3–5 templates. Fewer is better than padding with weak ones.
+- Required: at least one smoke test covering auth + a primary navigation path.
+- Prioritise, in order: regressions on recently changed code, error-prone flows (exceptions, high drop-off), highest-traffic user journeys.
+- Do NOT duplicate any existing template (match on intent, not just name). If an existing one already covers the journey, skip it.
+
+# Template fields
+
+- \`name\`: 4–8 words, descriptive ("Magic link signup + onboarding").
+- \`description\`: one sentence, user-centric, stating what the template validates and why it matters.
+- \`steps\`: ordered from 1, each doing ONE thing.
+
+# Step-writing rules
+
+- Start with \`navigate\` to an absolute URL based at ${context.appUrl}.
+- \`action\` steps name the target ("click the 'Continue' button") and what to type when applicable.
+- \`assertion\` steps state the concrete observable ("the 'Welcome back' heading is visible").
+- \`wait\` only for real async boundaries (job completion, network flush); never padding.
+- \`extract\` only when a later step truly needs captured data.
+- Include \`url\` on navigate steps, \`expected\` on assertions, \`timeout\` only when needed above the default.
+- Be self-contained — a fresh browser should be able to execute the template end-to-end.
+
+# Context
+
+## Recent git commits
 ${JSON.stringify(context.commits.slice(0, 20), null, 2)}
 
-## PostHog Session Recordings (recent user sessions)
+## PostHog session recordings
 ${JSON.stringify(context.sessionRecordings.slice(0, 20), null, 2)}
 
-## Error Events
+## Error events
 ${JSON.stringify(context.errorEvents.slice(0, 20), null, 2)}
 
-## Most Visited Pages
+## Most visited pages
 ${JSON.stringify(context.topPages.slice(0, 15), null, 2)}
 
-## Existing Test Templates (avoid duplicates)
-${JSON.stringify(context.existingTemplates, null, 2)}
-
-Generate 3-5 test templates that would be most valuable to run. Each template should test a specific user flow.
-
-Prioritize:
-- Flows affected by recent code changes
-- Most common user flows from session data
-- Error-prone flows (exceptions, high drop-off)
-- Always include at least one smoke test (basic auth + navigation)
-
-For each step, the "instruction" should be a clear natural language instruction that an AI browser agent can execute.
-Step types: navigate (go to URL), action (click/type/interact), assertion (verify something is visible/correct), extract (get data from page), wait (pause)`,
+## Existing templates (do not duplicate)
+${JSON.stringify(context.existingTemplates, null, 2)}`,
   })
 
   return output.templates

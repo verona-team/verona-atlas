@@ -50,11 +50,42 @@ Key paths: ${ce.keyPathsExamined.slice(0, 30).join(', ') || '—'}`
   const { output } = await generateText({
     model,
     output: Output.object({ schema: flowProposalsSchema }),
-    prompt: `You are a QA strategist for the web application at ${appUrl}.
+    prompt: `You are a QA strategist producing UI test flow proposals for ${appUrl}. Your output feeds directly into approvable cards in the user's chat UI and an AI browser agent that will execute approved flows.
 
-A research agent has investigated the user's connected integrations and linked GitHub repository.
+# Selection rules
 
-## Executive Summary
+- Return AT MOST 3 flows. Prefer fewer (even 1) if only a couple of findings truly dominate risk. Never return 0.
+- Every flow must be grounded in a specific finding from the research below — a commit SHA, PR number, URL, route, error message, rage-click page, or code reference. If you can't anchor a flow to evidence, drop it.
+- Prioritise by user impact and freshness: critical for things actively breaking for real users; high for risky areas of heavy recent change; medium/low only when higher-priority candidates are already covered.
+- Avoid near-duplicates. If two candidates test the same underlying change, merge them or drop the weaker one.
+- Always include at least one happy-path smoke flow touching auth + a core journey UNLESS a direct regression flow already exercises that path.
+
+# Flow schema requirements
+
+- \`id\`: short, unique, kebab-case. Descriptive (e.g. \`sheet-autosave-conflict\`), not generic (\`flow-1\`).
+- \`name\`: 4–8 words, human-readable.
+- \`description\`: one sentence stating what the flow validates, in user terms.
+- \`rationale\`: one or two sentences citing the concrete evidence (e.g. "PR #206 replaced the pipeline (33 files changed)" or "290 rage clicks on /w/*/sheets in the last 14 days").
+- \`priority\`: critical | high | medium | low.
+- \`steps\`: ordered, executable, self-contained instructions for a browser agent that starts from a blank browser. Include credentials/test-account hints only if the research explicitly provides them.
+
+# Step-writing rules
+
+- First step is almost always \`navigate\` to an absolute URL starting from ${appUrl}.
+- Each step does ONE thing. Break compound actions apart.
+- \`action\` steps name the target element ("click the 'Add column' button in the toolbar") and what to type when relevant.
+- \`assertion\` steps state the concrete observable ("the new column 'Full Name' appears as the rightmost header and persists after reload").
+- Add a \`wait\` step only when a real async boundary exists (autosave flush, network fetch, job completion) — don't pad.
+- Include \`url\` on navigate steps. Include \`expected\` on assertion steps. Set \`timeout\` only when a step legitimately needs longer than default (e.g. long-running enrichment).
+- Steps should be numbered sequentially from 1.
+
+# Analysis field
+
+2–3 sentences. State the single biggest risk and why the proposed flows address it. Do not restate flow names or counts.
+
+# Research context
+
+## Executive summary
 ${report.summary}
 
 ## Findings
@@ -62,20 +93,14 @@ ${findingsBlock}
 
 ${codebaseBlock}
 
-## Recommended Flows (from research)
+## Candidate flow ideas (from research — use as inspiration, do not copy verbatim)
 ${report.recommendedFlows.map((f, i) => `${i + 1}. ${f}`).join('\n')}
 
 ## Coverage
-Integrations investigated: ${report.integrationsCovered.join(', ') || 'none'}
-Integrations skipped: ${report.integrationsSkipped.join(', ') || 'none'}
+Investigated: ${report.integrationsCovered.join(', ') || 'none'}
+Skipped: ${report.integrationsSkipped.join(', ') || 'none'}
 
-Based on this research, generate at most 3 concrete UI test flows—only the highest-impact ones; fewer is fine if two flows clearly dominate. Never return more than 3 flows. Each flow should:
-- Have a unique kebab-case id
-- Explain WHY it's recommended by referencing specific findings (commits, errors, URLs, routes, or code structure from the repository section)
-- Include detailed step-by-step instructions an AI browser agent can execute
-- Be prioritized by severity of the underlying finding
-
-Step types: navigate (go to URL), action (click/type/interact), assertion (verify something), extract (get data), wait (pause)
+# Output formatting
 
 Do not include any emoji characters in the analysis, flow names, descriptions, rationales, or steps. Use plain text only.`,
   })
