@@ -86,7 +86,7 @@ export async function GET(request: NextRequest) {
     await clearResearchReportsForProject(supabase, projectId)
   }
 
-  const redirectPath = returnTo || `/projects/${projectId}/settings`
+  const redirectPath = returnTo || `/projects/${projectId}/chat?settings=1`
   const redirect = new URL(redirectPath, request.nextUrl.origin)
   redirect.searchParams.set('github', 'connected')
   return NextResponse.redirect(redirect)
