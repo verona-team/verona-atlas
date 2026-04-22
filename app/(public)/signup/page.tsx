@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { Loader2 } from 'lucide-react'
 import { signUp } from '@/app/actions/auth'
 import { HalftoneBackground } from '@/components/landing/halftone-background'
 import { toast } from 'sonner'
@@ -81,7 +82,7 @@ export default function SignupPage() {
           </CardHeader>
 
           <CardContent className="px-6 sm:px-10">
-            <form action={handleSubmit} className="space-y-5">
+            <form action={handleSubmit} className="space-y-5" aria-busy={loading}>
               <div className="space-y-2">
                 <Label htmlFor="orgName">Organization Name</Label>
                 <Input
@@ -90,6 +91,7 @@ export default function SignupPage() {
                   type="text"
                   placeholder="Acme Inc."
                   required
+                  disabled={loading}
                   className="h-11 px-3"
                 />
               </div>
@@ -102,6 +104,7 @@ export default function SignupPage() {
                   placeholder="you@company.com"
                   required
                   autoComplete="email"
+                  disabled={loading}
                   className="h-11 px-3"
                 />
               </div>
@@ -115,12 +118,20 @@ export default function SignupPage() {
                   required
                   autoComplete="new-password"
                   minLength={8}
+                  disabled={loading}
                   className="h-11 px-3"
                 />
               </div>
 
               <Button type="submit" disabled={loading} className="h-11 w-full">
-                {loading ? 'Creating account...' : 'Create Account'}
+                {loading ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    Creating account…
+                  </>
+                ) : (
+                  'Create Account'
+                )}
               </Button>
             </form>
           </CardContent>

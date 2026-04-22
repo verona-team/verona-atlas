@@ -3,7 +3,6 @@
 import type { ProposedFlow } from './flow-proposal-card'
 import { FlowProposalCard } from './flow-proposal-card'
 import { MarkdownContent } from './markdown-content'
-import { Card, CardContent } from '@/components/ui/card'
 import type { Json } from '@/lib/supabase/types'
 
 interface MessageBubbleProps {
@@ -33,64 +32,58 @@ export function MessageBubble({
     ? (metadata.proposals as unknown as { analysis: string; flows: ProposedFlow[] })
     : null
 
-  return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-      <div
-        className={`max-w-[85%] ${
-          isUser
-            ? 'bg-primary text-primary-foreground rounded-2xl rounded-br-sm px-6 py-4'
-            : 'space-y-5'
-        }`}
-      >
-        {isUser ? (
-          <p className="text-lg whitespace-pre-wrap">{content}</p>
-        ) : (
-          <>
-            {!isFlowProposal && !isRunStarted && (
-              <div className="text-base text-foreground/90">
-                <MarkdownContent content={content} />
-                {isStreaming && (
-                  <span className="inline-block w-2 h-5 ml-1 bg-foreground/60 animate-pulse" />
-                )}
-              </div>
-            )}
-
-            {isFlowProposal && proposals && (
-              <div className="space-y-5">
-                <p className="text-lg text-foreground/80 leading-relaxed">
-                  {proposals.analysis}
-                </p>
-                <p className="text-base text-muted-foreground">
-                  Here are the UI flows I recommend testing:
-                </p>
-                <div className="space-y-3">
-                  {proposals.flows.map((flow) => (
-                    <FlowProposalCard
-                      key={flow.id}
-                      flow={flow}
-                      state={flowStates?.[flow.id] ?? 'pending'}
-                      onApprove={onApproveFlow ?? (() => {})}
-                      onReject={onRejectFlow ?? (() => {})}
-                    />
-                  ))}
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Approve or reject each flow, then tell me to start testing when you&apos;re ready.
-                </p>
-              </div>
-            )}
-
-            {isRunStarted && (
-              <Card size="sm" className="ring-0 border border-green-500/20 bg-green-500/5">
-                <CardContent className="flex items-center gap-3">
-                  <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" />
-                  <p className="text-base">{content}</p>
-                </CardContent>
-              </Card>
-            )}
-          </>
-        )}
+  if (isUser) {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[80%] rounded-2xl bg-muted px-4 py-2.5 text-[15px] leading-relaxed text-foreground">
+          <p className="whitespace-pre-wrap">{content}</p>
+        </div>
       </div>
+    )
+  }
+
+  return (
+    <div className="w-full space-y-4">
+      {!isFlowProposal && !isRunStarted && (
+        <div className="text-[15px] leading-[1.7] text-foreground">
+          <MarkdownContent content={content} />
+          {isStreaming && (
+            <span className="inline-block w-1.5 h-4 ml-0.5 align-text-bottom bg-foreground/60 animate-pulse" />
+          )}
+        </div>
+      )}
+
+      {isFlowProposal && proposals && (
+        <div className="space-y-4">
+          <p className="text-[15px] leading-[1.7] text-foreground">
+            {proposals.analysis}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Here are the UI flows I recommend testing:
+          </p>
+          <div className="space-y-3">
+            {proposals.flows.map((flow) => (
+              <FlowProposalCard
+                key={flow.id}
+                flow={flow}
+                state={flowStates?.[flow.id] ?? 'pending'}
+                onApprove={onApproveFlow ?? (() => {})}
+                onReject={onRejectFlow ?? (() => {})}
+              />
+            ))}
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Approve or reject each flow, then tell me to start testing when you&apos;re ready.
+          </p>
+        </div>
+      )}
+
+      {isRunStarted && (
+        <div className="flex items-center gap-3 rounded-lg border border-border bg-foreground/[0.03] px-4 py-3">
+          <div className="size-2 rounded-full bg-green-500 animate-pulse" />
+          <p className="text-sm text-foreground">{content}</p>
+        </div>
+      )}
     </div>
   )
 }

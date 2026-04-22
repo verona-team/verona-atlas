@@ -11,12 +11,12 @@ import {
 import { useRouter } from 'next/navigation'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
-import { Send, Loader2 } from 'lucide-react'
+import { ArrowUp, ArrowDown, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { MessageBubble } from './message-bubble'
+import { ThinkingIndicator } from './thinking-indicator'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { Card, CardContent } from '@/components/ui/card'
 import type { Json, ChatMessage } from '@/lib/supabase/types'
 import { createClient } from '@/lib/supabase/client'
 
@@ -339,11 +339,14 @@ export function ChatInterface({
     return () => timeouts.forEach(clearTimeout)
   }, [status, sessionId])
 
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false)
+
   const updateStickToBottomFromScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     stickToBottomRef.current = distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_PX
+    setShowJumpToBottom(distanceFromBottom > NEAR_BOTTOM_THRESHOLD_PX * 3)
   }, [])
 
   useEffect(() => {
@@ -358,6 +361,14 @@ export function ChatInterface({
     const el = scrollRef.current
     if (!el || !stickToBottomRef.current) return
     el.scrollTop = el.scrollHeight
+  }, [])
+
+  const jumpToBottom = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    stickToBottomRef.current = true
+    setShowJumpToBottom(false)
   }, [])
 
   useEffect(() => {
@@ -442,6 +453,18 @@ export function ChatInterface({
   const isStreamActive = status === 'submitted' || status === 'streaming'
   const isProcessing = isStreamActive || backendThinking
 
+  const thinkingStartRef = useRef<number | null>(null)
+  const [thinkingStart, setThinkingStart] = useState<number | null>(null)
+  useEffect(() => {
+    if (isProcessing && thinkingStartRef.current == null) {
+      thinkingStartRef.current = Date.now()
+      setThinkingStart(thinkingStartRef.current)
+    } else if (!isProcessing && thinkingStartRef.current != null) {
+      thinkingStartRef.current = null
+      setThinkingStart(null)
+    }
+  }, [isProcessing])
+
   const displayMessages = useMemo(() => {
     const dbRendered = dbMessages
       .filter((m) => m.role !== 'system')
@@ -498,82 +521,110 @@ export function ChatInterface({
   }, [dbMessages, streamMessages, isStreamActive])
 
   return (
-    <div className="flex flex-col h-full">
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
-        {displayMessages.length === 0 && !isProcessing && (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center space-y-4">
-              <h2 className="text-4xl">Welcome to Verona</h2>
-              <p className="text-xl text-muted-foreground max-w-md">
-                I&apos;ll analyze your project and suggest UI flows to test.
-                Let&apos;s get started.
+    <div className="relative flex flex-col h-full">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-[760px] px-6 py-8 space-y-8">
+          {displayMessages.length === 0 && !isProcessing && (
+            <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
+              <div className="size-10 rounded-full bg-foreground/5 flex items-center justify-center">
+                <span className="text-lg font-medium text-foreground/60">V</span>
+              </div>
+              <h2 className="text-2xl font-normal text-foreground/90 tracking-tight">
+                What shall we test in {projectName}?
+              </h2>
+              <p className="text-sm text-muted-foreground max-w-sm">
+                I&apos;ll analyze your app, PostHog events, and repo to propose flows worth testing.
               </p>
             </div>
-          </div>
-        )}
+          )}
 
-        {displayMessages.map((msg, i) => {
-          const isLast = i === displayMessages.length - 1
-          return (
-            <MessageBubble
-              key={msg.id}
-              role={msg.role}
-              content={msg.content}
-              metadata={msg.metadata}
-              flowStates={flowStates}
-              onApproveFlow={handleApproveFlow}
-              onRejectFlow={handleRejectFlow}
-              isStreaming={isLast && msg.isStreaming && isProcessing}
-            />
-          )
-        })}
+          {displayMessages.map((msg, i) => {
+            const isLast = i === displayMessages.length - 1
+            return (
+              <MessageBubble
+                key={msg.id}
+                role={msg.role}
+                content={msg.content}
+                metadata={msg.metadata}
+                flowStates={flowStates}
+                onApproveFlow={handleApproveFlow}
+                onRejectFlow={handleRejectFlow}
+                isStreaming={isLast && msg.isStreaming && isProcessing}
+              />
+            )
+          })}
 
-        {isProcessing && (displayMessages.length === 0 || displayMessages[displayMessages.length - 1]?.role === 'user') && (
-          <div className="flex items-center gap-3 text-base text-muted-foreground">
-            <Loader2 className="w-5 h-5 animate-spin" />
-            <span>Verona is thinking...</span>
-          </div>
-        )}
+          {isProcessing && thinkingStart != null && (displayMessages.length === 0 || displayMessages[displayMessages.length - 1]?.role === 'user') && (
+            <ThinkingIndicator startedAt={thinkingStart} />
+          )}
+        </div>
       </div>
 
-      {approvedCount > 0 && (
-        <div className="px-4 pb-2 shrink-0">
-          <Card size="sm" className="ring-0 border border-green-500/20 bg-green-500/5">
-            <CardContent className="flex items-center gap-2 text-sm text-muted-foreground">
-              <span>{approvedCount} flow{approvedCount !== 1 ? 's' : ''} approved</span>
-              <span className="text-muted-foreground/40">·</span>
-              <span>Tell me to &quot;start testing&quot; when ready</span>
-            </CardContent>
-          </Card>
+      {/* gradient fade into input bar */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 bottom-[96px] h-8 bg-gradient-to-t from-background to-transparent"
+      />
+
+      {/* jump-to-latest pill */}
+      {showJumpToBottom && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-[108px] flex justify-center">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={jumpToBottom}
+            className="pointer-events-auto rounded-full bg-background shadow-sm text-xs gap-1.5 h-8 px-3"
+          >
+            <ArrowDown className="size-3.5" />
+            Jump to latest
+          </Button>
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="border-t px-4 py-4 shrink-0">
-        <div className="flex items-end gap-3 max-w-4xl mx-auto">
-          <Textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Give feedback on the test flows, or say 'start testing' to begin..."
-            rows={1}
-            className="flex-1 resize-none min-h-[52px] max-h-[160px] text-base"
-            disabled={isProcessing}
-          />
-          <Button
-            type="submit"
-            variant="outline"
-            size="icon"
-            disabled={isProcessing || !input.trim()}
-          >
-            {isProcessing ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Send className="size-4" />
-            )}
-          </Button>
+      {approvedCount > 0 && (
+        <div className="mx-auto w-full max-w-[760px] px-6 pb-2 shrink-0">
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-foreground/[0.03] px-3 py-2 text-xs text-muted-foreground">
+            <span className="size-1.5 rounded-full bg-green-500" />
+            <span>{approvedCount} flow{approvedCount !== 1 ? 's' : ''} approved</span>
+            <span className="text-muted-foreground/40">·</span>
+            <span>Tell me to &quot;start testing&quot; when ready</span>
+          </div>
         </div>
-      </form>
+      )}
+
+      <div className="shrink-0">
+        <div className="mx-auto w-full max-w-[760px] px-6 pb-4 pt-2">
+          <form
+            onSubmit={handleSubmit}
+            className="relative rounded-2xl border border-border bg-card shadow-sm transition-colors focus-within:border-foreground/25"
+          >
+            <Textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Message Verona…"
+              rows={1}
+              className="resize-none border-0 bg-transparent min-h-[56px] max-h-[200px] pl-4 pr-14 py-4 text-[15px] leading-relaxed shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/60"
+              disabled={isProcessing}
+            />
+            <Button
+              type="submit"
+              size="icon"
+              disabled={isProcessing || !input.trim()}
+              className="absolute bottom-2.5 right-2.5 size-8 rounded-full"
+              aria-label={isProcessing ? 'Sending' : 'Send message'}
+            >
+              {isProcessing ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <ArrowUp className="size-4" />
+              )}
+            </Button>
+          </form>
+        </div>
+      </div>
     </div>
   )
 }

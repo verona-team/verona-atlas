@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Check, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   Select,
@@ -9,7 +10,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 
 type RepoRow = {
@@ -27,8 +27,14 @@ type Props = {
 export function GitHubRepoPicker({ projectId, onSaved }: Props) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [justSaved, setJustSaved] = useState(false)
   const [rows, setRows] = useState<RepoRow[]>([])
   const [choice, setChoice] = useState('')
+  const [savedChoice, setSavedChoice] = useState('')
+
+  // Monotonic request id — lets a later selection supersede an earlier in-flight PATCH.
+  const requestIdRef = useRef(0)
+  const savedFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -43,7 +49,9 @@ export function GitHubRepoPicker({ projectId, onSaved }: Props) {
       const list = (data.repos || []) as RepoRow[]
       setRows(list)
       const selected = list.find((r) => r.selected)
-      setChoice(selected?.full_name ?? '')
+      const initial = selected?.full_name ?? ''
+      setChoice(initial)
+      setSavedChoice(initial)
     } catch {
       toast.error('Could not load repositories')
     } finally {
@@ -55,32 +63,59 @@ export function GitHubRepoPicker({ projectId, onSaved }: Props) {
     void load()
   }, [load])
 
-  async function save() {
-    if (!choice) {
-      toast.error('Select a repository')
-      return
+  useEffect(() => {
+    return () => {
+      if (savedFlashTimerRef.current) clearTimeout(savedFlashTimerRef.current)
     }
-    setSaving(true)
-    try {
-      const res = await fetch('/api/integrations/github/repos', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, repo_full_name: choice }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        toast.error(typeof data.error === 'string' ? data.error : 'Failed to save repository')
+  }, [])
+
+  const handleChange = useCallback(
+    async (next: string) => {
+      if (!next || next === savedChoice) {
+        setChoice(next)
         return
       }
-      toast.success('Repository saved')
-      await onSaved?.()
-      await load()
-    } catch {
-      toast.error('Failed to save repository')
-    } finally {
-      setSaving(false)
-    }
-  }
+
+      const previousSaved = savedChoice
+      const reqId = ++requestIdRef.current
+
+      setChoice(next)
+      setSaving(true)
+      setJustSaved(false)
+
+      try {
+        const res = await fetch('/api/integrations/github/repos', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project_id: projectId, repo_full_name: next }),
+        })
+        const data = await res.json().catch(() => ({}))
+
+        if (requestIdRef.current !== reqId) return
+
+        if (!res.ok) {
+          toast.error(typeof data.error === 'string' ? data.error : 'Failed to save repository')
+          setChoice(previousSaved)
+          return
+        }
+
+        setSavedChoice(next)
+        await onSaved?.()
+
+        if (requestIdRef.current !== reqId) return
+        setJustSaved(true)
+        if (savedFlashTimerRef.current) clearTimeout(savedFlashTimerRef.current)
+        savedFlashTimerRef.current = setTimeout(() => setJustSaved(false), 1500)
+      } catch {
+        if (requestIdRef.current !== reqId) return
+        toast.error('Failed to save repository')
+        setChoice(previousSaved)
+      } finally {
+        if (requestIdRef.current === reqId) setSaving(false)
+      }
+    },
+    [projectId, savedChoice, onSaved],
+  )
 
   if (loading) {
     return <p className="text-sm text-muted-foreground">Loading repositories…</p>
@@ -104,7 +139,7 @@ export function GitHubRepoPicker({ projectId, onSaved }: Props) {
       <div className="flex flex-wrap items-end gap-3">
         <div className="min-w-0 flex-1 space-y-1.5">
           <Label htmlFor={`github-repo-${projectId}`}>Repository</Label>
-          <Select value={choice} onValueChange={(v) => setChoice(v ?? '')}>
+          <Select value={choice} onValueChange={(v) => void handleChange(v ?? '')}>
             <SelectTrigger id={`github-repo-${projectId}`} className="w-full">
               <SelectValue placeholder="Select a repository…" />
             </SelectTrigger>
@@ -117,13 +152,19 @@ export function GitHubRepoPicker({ projectId, onSaved }: Props) {
             </SelectContent>
           </Select>
         </div>
-        <Button
-          size="sm"
-          onClick={() => void save()}
-          disabled={saving || !choice}
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </Button>
+        <div className="flex h-9 items-center gap-1.5 text-xs text-muted-foreground min-w-[72px] transition-opacity">
+          {saving ? (
+            <>
+              <Loader2 className="size-3 animate-spin" />
+              <span>Saving…</span>
+            </>
+          ) : justSaved ? (
+            <>
+              <Check className="size-3 text-green-600" />
+              <span>Saved</span>
+            </>
+          ) : null}
+        </div>
       </div>
     </div>
   )
