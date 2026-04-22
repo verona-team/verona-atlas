@@ -1,28 +1,28 @@
-import type { Metadata } from 'next'
-import { Inter, Geist_Mono } from 'next/font/google'
-import { Toaster } from '@/components/ui/sonner'
-import { TooltipProvider } from '@/components/ui/tooltip'
-import './globals.css'
+import type { Metadata } from "next";
+import { Inter, Geist_Mono } from "next/font/google";
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import "./globals.css";
 
 const inter = Inter({
-  variable: '--font-inter',
-  subsets: ['latin'],
-})
+  variable: "--font-inter",
+  subsets: ["latin"],
+});
 
 const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
-})
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
 
 export const metadata: Metadata = {
-  title: 'Verona — Autonomous QA that works',
-  description: 'Autonomous QA that works.',
-}
+  title: "Verona — Bug bashes your product like a human",
+  description: "Bug bashes your product like a human.",
+};
 
 export default function RootLayout({
   children,
 }: Readonly<{
-  children: React.ReactNode
+  children: React.ReactNode;
 }>) {
   return (
     <html
@@ -30,11 +30,9 @@ export default function RootLayout({
       className={`${inter.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
-        <TooltipProvider>
-          {children}
-        </TooltipProvider>
+        <TooltipProvider>{children}</TooltipProvider>
         <Toaster />
       </body>
     </html>
-  )
+  );
 }

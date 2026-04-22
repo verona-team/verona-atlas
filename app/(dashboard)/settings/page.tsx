@@ -9,14 +9,14 @@ export default async function SettingsPage() {
 
   const { data: membership } = await supabase
     .from('org_members')
-    .select('org_id, role, organizations(id, name, slug, plan)')
+    .select('org_id, role, organizations(id, plan)')
     .eq('user_id', user.id)
     .limit(1)
     .single()
 
   const org = (membership?.organizations as unknown as {
-    id: string; name: string; slug: string; plan: string
-  }) ?? { id: '', name: 'Unknown', slug: '', plan: 'free' }
+    id: string; plan: string
+  }) ?? { id: '', plan: 'free' }
 
   const { data: members } = await supabase
     .from('org_members')
@@ -28,14 +28,6 @@ export default async function SettingsPage() {
       <h1 className="text-lg font-medium">Organization Settings</h1>
 
       <div className="space-y-3">
-        <div className="flex justify-between py-1.5 text-sm">
-          <span className="text-muted-foreground">Organization</span>
-          <span>{org.name}</span>
-        </div>
-        <div className="flex justify-between py-1.5 text-sm">
-          <span className="text-muted-foreground">Slug</span>
-          <span className="font-mono text-xs">{org.slug}</span>
-        </div>
         <div className="flex justify-between py-1.5 text-sm">
           <span className="text-muted-foreground">Plan</span>
           <span>{org.plan}</span>

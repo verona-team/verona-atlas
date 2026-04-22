@@ -1,37 +1,46 @@
-'use client'
+"use client";
 
-import { useState, type FormEvent } from 'react'
-import Link from 'next/link'
-import { Loader2 } from 'lucide-react'
-import { signUp } from '@/app/actions/auth'
-import { HalftoneBackground } from '@/components/landing/halftone-background'
-import { toast } from 'sonner'
-import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Button } from '@/components/ui/button'
+import { useState, type FormEvent } from "react";
+import Link from "next/link";
+import { unstable_rethrow } from "next/navigation";
+import { Loader2 } from "lucide-react";
+import { signUp } from "@/app/actions/auth";
+import { HalftoneBackground } from "@/components/landing/halftone-background";
+import { toast } from "sonner";
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 export default function SignupPage() {
-  const [loading, setLoading] = useState(false)
-  const [confirmEmail, setConfirmEmail] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false);
+  const [confirmEmail, setConfirmEmail] = useState<string | null>(null);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    if (loading) return
-    setLoading(true)
-    const formData = new FormData(e.currentTarget)
+    e.preventDefault();
+    if (loading) return;
+    setLoading(true);
+    const formData = new FormData(e.currentTarget);
     try {
-      const result = await signUp(formData)
+      const result = await signUp(formData);
       if (result?.error) {
-        toast.error(result.error)
-        setLoading(false)
+        toast.error(result.error);
+        setLoading(false);
       } else if (result?.success) {
-        setConfirmEmail(result.email ?? (formData.get('email') as string))
+        setConfirmEmail(result.email ?? (formData.get("email") as string));
       } else {
-        setLoading(false)
+        setLoading(false);
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Something went wrong')
-      setLoading(false)
+      unstable_rethrow(err);
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
+      setLoading(false);
     }
   }
 
@@ -44,7 +53,16 @@ export default function SignupPage() {
           <Card className="w-full max-w-lg gap-6 py-7 text-center sm:py-9">
             <CardHeader className="gap-2 px-6 sm:px-10">
               <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-muted">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <svg
+                  width="28"
+                  height="28"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
                   <rect x="2" y="4" width="20" height="16" rx="2" />
                   <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
                 </svg>
@@ -52,14 +70,13 @@ export default function SignupPage() {
               <CardTitle className="text-2xl font-normal tracking-tight sm:text-3xl">
                 Check your email
               </CardTitle>
-              <CardDescription>
-                We sent a confirmation link to
-              </CardDescription>
+              <CardDescription>We sent a confirmation link to</CardDescription>
               <p className="text-sm font-medium text-foreground mt-1">
                 {confirmEmail}
               </p>
               <p className="text-sm text-muted-foreground mt-2">
-                Click the link in the email to verify your account. If you don&apos;t see it, check your spam folder.
+                Click the link in the email to verify your account. If you
+                don&apos;t see it, check your spam folder.
               </p>
             </CardHeader>
             <CardFooter className="justify-center px-6 py-5 sm:px-10">
@@ -73,7 +90,7 @@ export default function SignupPage() {
           </Card>
         </main>
       </div>
-    )
+    );
   }
 
   return (
@@ -86,25 +103,14 @@ export default function SignupPage() {
             <CardTitle className="text-3xl font-normal tracking-tight sm:text-4xl">
               Create your account
             </CardTitle>
-            <CardDescription>
-              Get started with autonomous QA testing
-            </CardDescription>
           </CardHeader>
 
           <CardContent className="px-6 sm:px-10">
-            <form onSubmit={handleSubmit} className="space-y-5" aria-busy={loading}>
-              <div className="space-y-2">
-                <Label htmlFor="orgName">Organization Name</Label>
-                <Input
-                  id="orgName"
-                  name="orgName"
-                  type="text"
-                  placeholder="Acme Inc."
-                  required
-                  disabled={loading}
-                  className="h-11 px-3"
-                />
-              </div>
+            <form
+              onSubmit={handleSubmit}
+              className="space-y-5"
+              aria-busy={loading}
+            >
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <Input
@@ -140,7 +146,7 @@ export default function SignupPage() {
                     Creating account…
                   </>
                 ) : (
-                  'Create Account'
+                  "Create Account"
                 )}
               </Button>
             </form>
@@ -148,8 +154,11 @@ export default function SignupPage() {
 
           <CardFooter className="justify-center px-6 py-5 sm:px-10">
             <p className="text-sm text-muted-foreground">
-              Already have an account?{' '}
-              <Link href="/login" className="text-foreground hover:underline transition-colors">
+              Already have an account?{" "}
+              <Link
+                href="/login"
+                className="text-foreground hover:underline transition-colors"
+              >
                 Sign in
               </Link>
             </p>
@@ -157,5 +166,5 @@ export default function SignupPage() {
         </Card>
       </main>
     </div>
-  )
+  );
 }

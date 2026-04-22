@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef, type SyntheticEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   Dialog,
@@ -35,6 +36,7 @@ export function NewProjectModal() {
 
   const [step, setStep] = useState<Step>('details')
   const [submitting, setSubmitting] = useState(false)
+  const [continuing, setContinuing] = useState(false)
 
   const [name, setName] = useState('')
   const [appUrl, setAppUrl] = useState('')
@@ -95,6 +97,7 @@ export function NewProjectModal() {
     setAppUrl('')
     setProjectId(null)
     setIntegrations([])
+    setContinuing(false)
   }
 
   async function onCreateProject(e: SyntheticEvent<HTMLFormElement>) {
@@ -147,17 +150,33 @@ export function NewProjectModal() {
   }, [projectId, loadIntegrations])
 
   async function handleContinueToChat() {
-    if (!githubComplete || !projectId) return
-    await refreshProjects()
-    setShowNewProjectModal(false)
-    reset()
-    router.push(`/projects/${projectId}`)
+    if (!githubComplete || !projectId || continuing) return
+    setContinuing(true)
+    try {
+      await refreshProjects()
+      router.push(`/projects/${projectId}`)
+      setShowNewProjectModal(false)
+      // NOTE: `onOpenChange` does NOT fire for programmatic close (only for
+      // Escape / outside-click / close-button), so we must clear state here
+      // explicitly. Otherwise the modal stays mounted under the dashboard
+      // layout and the next "New project" click reopens it stuck on the
+      // integrations step with a spinning "Opening chat..." button.
+      reset()
+    } catch (err) {
+      setContinuing(false)
+      toast.error(err instanceof Error ? err.message : 'Something went wrong')
+    }
   }
 
   return (
     <Dialog
       open={showNewProjectModal}
       onOpenChange={(open) => {
+        if (!open && continuing) {
+          // Navigation is already in flight — don't let the user close the
+          // modal and lose the loading feedback.
+          return
+        }
         if (!open && step === 'integrations' && !githubComplete) {
           toast.error('Connect GitHub and select a repository to continue.')
           return
@@ -271,13 +290,20 @@ export function NewProjectModal() {
             <div className="pt-3">
               <Button
                 onClick={handleContinueToChat}
-                disabled={!githubComplete}
+                disabled={!githubComplete || continuing}
                 size="lg"
                 className="w-full h-11 text-sm"
               >
-                Continue →
+                {continuing ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Opening chat...
+                  </>
+                ) : (
+                  <>Continue →</>
+                )}
               </Button>
-              {!githubComplete && (
+              {!githubComplete && !continuing && (
                 <p className="text-xs text-muted-foreground mt-2 text-center">
                   Connect GitHub and select a repository to continue.
                 </p>

@@ -1,10 +1,9 @@
-import Link from 'next/link'
-import { InteractiveLogo } from '@/components/landing/interactive-logo'
+import Link from "next/link";
+import { InteractiveLogo } from "@/components/landing/interactive-logo";
 
 export default function LandingPage() {
   return (
     <div className="relative min-h-screen bg-white">
-
       <header className="relative z-10 flex items-center justify-end px-6 py-5 sm:px-10">
         <nav className="flex items-center gap-5">
           <Link
@@ -22,16 +21,17 @@ export default function LandingPage() {
         </nav>
       </header>
 
-      <main className="relative z-10 flex flex-1 flex-col items-center justify-center px-6" style={{ minHeight: 'calc(100vh - 68px)' }}>
+      <main
+        className="relative z-10 flex flex-1 flex-col items-center justify-center px-6"
+        style={{ minHeight: "calc(100vh - 68px)" }}
+      >
         <div className="flex flex-col items-center gap-[68px] -mt-16">
           <InteractiveLogo size={180} />
-          <h1
-            className="max-w-2xl text-center text-5xl font-normal leading-[1.1] tracking-tight text-[#1a1a1a] sm:text-6xl"
-          >
-            Autonomous QA that works.
+          <h1 className="max-w-2xl text-center text-5xl font-normal leading-[1.1] tracking-tight text-[#1a1a1a] sm:text-6xl">
+            Verona bug bashes your product like a human.
           </h1>
         </div>
       </main>
     </div>
-  )
+  );
 }
