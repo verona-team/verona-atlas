@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
+import { SlackChannelPicker } from '@/components/integrations/slack-channel-picker'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -57,14 +58,6 @@ export function IntegrationCard({
   meta,
   required,
   children,
-  /**
-   * When true, the card renders with a consistent min-height across the
-   * idle / connecting / connected states so the layout doesn't jump as the
-   * user moves through the connect flow. Cards that expand an inline form
-   * (PostHog, Sentry, ...) pass `false` so they aren't pinned to an
-   * oversized box while the form is open.
-   */
-  stablePanel = true,
 }: {
   title: string
   description: string
@@ -73,7 +66,6 @@ export function IntegrationCard({
   meta?: string
   required?: boolean
   children: React.ReactNode
-  stablePanel?: boolean
 }) {
   const status: 'connected' | 'connecting' | 'idle' = connected
     ? 'connected'
@@ -81,10 +73,21 @@ export function IntegrationCard({
       ? 'connecting'
       : 'idle'
 
+  // A card only needs a body section when there is interactive content to
+  // render (e.g. a "Connect" CTA, the repo picker, the channel picker, or a
+  // form). Treating empty bodies as absent lets fully-connected cards with no
+  // further action collapse to a tight single row without baked-in empty
+  // whitespace.
+  const hasBody =
+    children !== null &&
+    children !== undefined &&
+    children !== false &&
+    !(Array.isArray(children) && children.length === 0)
+
   return (
-    <Card size="sm" className="ring-0 border border-border">
+    <Card size="sm" className="ring-0 border border-border py-3">
       <CardContent>
-        <div className="flex items-start justify-between gap-4 mb-3">
+        <div className={`flex items-center justify-between gap-3 ${hasBody ? 'mb-2' : ''}`}>
           <div className="min-w-0">
             <h3 className="text-sm font-medium flex items-center gap-2">
               {title}
@@ -94,12 +97,8 @@ export function IntegrationCard({
                 </Badge>
               )}
             </h3>
-            <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
-            <p
-              className={`text-xs text-muted-foreground/70 mt-0.5 transition-opacity duration-200 ${meta ? 'opacity-100' : 'opacity-0 h-0'}`}
-              aria-hidden={!meta}
-            >
-              {meta || '\u00A0'}
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {meta || description}
             </p>
           </div>
           <Badge
@@ -119,11 +118,7 @@ export function IntegrationCard({
                 : 'Not connected'}
           </Badge>
         </div>
-        <div
-          className={`transition-[min-height] duration-200 ${stablePanel ? 'min-h-[48px]' : ''}`}
-        >
-          {children}
-        </div>
+        {hasBody && <div>{children}</div>}
       </CardContent>
     </Card>
   )
@@ -146,13 +141,6 @@ export function GitHubCard({
 }) {
   const [waiting, setWaiting] = useState(false)
   const installPopupRef = useRef<Window | null>(null)
-  const rawRepo = integration?.meta?.repo
-  const linkedRepo =
-    rawRepo != null &&
-    typeof rawRepo === 'object' &&
-    'full_name' in rawRepo
-      ? String((rawRepo as { full_name: string }).full_name)
-      : undefined
 
   function openGitHubInstall() {
     setWaiting(true)
@@ -235,28 +223,19 @@ export function GitHubCard({
       connected={!!integration}
       connecting={waiting && !integration}
       required
-      meta={linkedRepo ? `Repository: ${linkedRepo}` : integration ? 'Select a repository below' : undefined}
     >
-      <div className="relative">
-        {showConnectCta && (
-          <div className="h-9 flex items-center">
-            <Button variant="link" size="sm" className="px-0" onClick={openGitHubInstall}>
-              Connect GitHub →
-            </Button>
-          </div>
-        )}
-        {waiting && !integration && (
-          <div className="h-9 flex items-center gap-2 text-xs text-muted-foreground transition-opacity duration-200">
-            <Loader2 className="size-3.5 animate-spin" />
-            <span>Waiting for GitHub authorization…</span>
-          </div>
-        )}
-        {integration && (
-          <div className="transition-opacity duration-200">
-            <GitHubRepoPicker projectId={projectId} onSaved={onRefresh} />
-          </div>
-        )}
-      </div>
+      {showConnectCta && (
+        <Button variant="link" size="sm" className="px-0" onClick={openGitHubInstall}>
+          Connect GitHub →
+        </Button>
+      )}
+      {waiting && !integration && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" />
+          <span>Waiting for GitHub authorization…</span>
+        </div>
+      )}
+      {integration && <GitHubRepoPicker projectId={projectId} onSaved={onRefresh} />}
     </IntegrationCard>
   )
 }
@@ -316,18 +295,15 @@ export function PostHogCard({
       description="Monitor analytics events and session recordings."
       connected={!!integration}
       connecting={submitting && !integration}
-      stablePanel={!expanded}
       meta={integration ? `Project: ${integration.meta?.posthog_project_id}` : undefined}
     >
       {!integration && !expanded && (
-        <div className="h-9 flex items-center">
-          <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>
-            Connect PostHog →
-          </Button>
-        </div>
+        <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>
+          Connect PostHog →
+        </Button>
       )}
       {!integration && expanded && (
-        <div className="space-y-3 mt-2">
+        <div className="space-y-3">
           <div className="space-y-1.5">
             <Label htmlFor="ph-api-key">Personal API key</Label>
             <Input id="ph-api-key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="phx_..." />
@@ -393,16 +369,13 @@ export function SentryCard({
       description="Detect backend and frontend errors during test runs."
       connected={!!integration}
       connecting={submitting && !integration}
-      stablePanel={!expanded}
       meta={integration ? `${integration.meta?.organization_slug}/${integration.meta?.project_slug}` : undefined}
     >
       {!integration && !expanded && (
-        <div className="h-9 flex items-center">
-          <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>Connect Sentry →</Button>
-        </div>
+        <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>Connect Sentry →</Button>
       )}
       {!integration && expanded && (
-        <div className="space-y-3 mt-2">
+        <div className="space-y-3">
           <div className="space-y-1.5">
             <Label htmlFor="sentry-token">Auth token</Label>
             <Input id="sentry-token" value={authToken} onChange={(e) => setAuthToken(e.target.value)} placeholder="sntrys_..." type="password" />
@@ -463,16 +436,13 @@ export function LangSmithCard({
       description="Trace LLM calls and detect failures."
       connected={!!integration}
       connecting={submitting && !integration}
-      stablePanel={!expanded}
       meta={integration?.meta?.project_name ? `Project: ${integration.meta.project_name}` : undefined}
     >
       {!integration && !expanded && (
-        <div className="h-9 flex items-center">
-          <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>Connect LangSmith →</Button>
-        </div>
+        <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>Connect LangSmith →</Button>
       )}
       {!integration && expanded && (
-        <div className="space-y-3 mt-2">
+        <div className="space-y-3">
           <div className="space-y-1.5">
             <Label htmlFor="ls-api-key">LangSmith API key</Label>
             <Input id="ls-api-key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="lsv2_..." type="password" />
@@ -529,16 +499,13 @@ export function BraintrustCard({
       description="Evaluate LLM outputs and track scores."
       connected={!!integration}
       connecting={submitting && !integration}
-      stablePanel={!expanded}
       meta={integration?.meta?.project_name ? `Project: ${integration.meta.project_name}` : undefined}
     >
       {!integration && !expanded && (
-        <div className="h-9 flex items-center">
-          <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>Connect Braintrust →</Button>
-        </div>
+        <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>Connect Braintrust →</Button>
       )}
       {!integration && expanded && (
-        <div className="space-y-3 mt-2">
+        <div className="space-y-3">
           <div className="space-y-1.5">
             <Label htmlFor="bt-api-key">Braintrust API key</Label>
             <Input id="bt-api-key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." type="password" />
@@ -573,13 +540,10 @@ export function SlackCard({
   returnTo?: string
 }) {
   const [waiting, setWaiting] = useState(false)
-  const [showChannels, setShowChannels] = useState(false)
-  const [channels, setChannels] = useState<Array<{ id: string; name: string }>>([])
-  const [loadingChannels, setLoadingChannels] = useState(false)
-  const [saving, setSaving] = useState(false)
   const authPopupRef = useRef<Window | null>(null)
 
-  const channelName = integration?.meta?.channel_name as string | undefined
+  const teamName = integration?.meta?.team_name as string | undefined
+  const currentChannelId = integration?.meta?.channel_id as string | undefined
 
   function openSlackAuth() {
     setWaiting(true)
@@ -625,6 +589,10 @@ export function SlackCard({
   useEffect(() => {
     const nowConnected = !!integration
     if (waiting && nowConnected) {
+      // Sync transient "waiting" state once the server confirms the
+      // integration exists. Legitimate external-event-driven reset paired
+      // with one-shot side effects (popup.close(), toast).
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setWaiting(false)
       authPopupRef.current?.close()
       authPopupRef.current = null
@@ -636,100 +604,33 @@ export function SlackCard({
     previouslyConnectedRef.current = nowConnected
   }, [waiting, integration])
 
-  // Pre-fetch channels in the background once Slack is connected so the
-  // dropdown renders instantly when the user opens it.
-  useEffect(() => {
-    if (!integration || channels.length > 0 || loadingChannels) return
-    let cancelled = false
-    void (async () => {
-      try {
-        const res = await fetch(`/api/integrations/slack/channels?project_id=${projectId}`)
-        if (!res.ok || cancelled) return
-        const data = await res.json()
-        if (!cancelled) setChannels(data.channels || [])
-      } catch {
-        /* ignore */
-      }
-    })()
-    return () => { cancelled = true }
-  }, [integration, projectId, channels.length, loadingChannels])
-
-  async function loadChannels() {
-    setLoadingChannels(true)
-    try {
-      const res = await fetch(`/api/integrations/slack/channels?project_id=${projectId}`)
-      if (res.ok) {
-        const data = await res.json()
-        setChannels(data.channels || [])
-        setShowChannels(true)
-      } else { toast.error('Failed to load channels') }
-    } catch { toast.error('Failed to load channels') } finally { setLoadingChannels(false) }
-  }
-
-  async function selectChannel(channelId: string, name: string) {
-    setSaving(true)
-    try {
-      const res = await fetch('/api/integrations/slack/channels', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, channel_id: channelId, channel_name: name }),
-      })
-      if (res.ok) {
-        toast.success(`Channel set to #${name}`)
-        setShowChannels(false)
-        onRefresh()
-      } else { toast.error('Failed to set channel') }
-    } catch { toast.error('Failed to set channel') } finally { setSaving(false) }
-  }
-
   return (
     <IntegrationCard
       title="Slack"
       description="Get test run reports sent to a Slack channel."
       connected={!!integration}
       connecting={waiting && !integration}
-      meta={integration ? `${integration.meta?.team_name || 'Workspace'}${channelName ? ` · #${channelName}` : ''}` : undefined}
+      meta={integration && teamName ? `Workspace: ${teamName}` : undefined}
     >
-      <div className="relative">
-        {!integration && !waiting && (
-          <div className="h-9 flex items-center">
-            <Button variant="link" size="sm" className="px-0" onClick={openSlackAuth}>Connect Slack →</Button>
-          </div>
-        )}
-        {waiting && !integration && (
-          <div className="h-9 flex items-center gap-2 text-xs text-muted-foreground transition-opacity duration-200">
-            <Loader2 className="size-3.5 animate-spin" />
-            <span>Waiting for Slack authorization…</span>
-          </div>
-        )}
-        {integration && !channelName && (
-          <div>
-            {!showChannels ? (
-              <div className="h-9 flex items-center">
-                <Button variant="link" size="sm" className="px-0" onClick={loadChannels} disabled={loadingChannels}>
-                  {loadingChannels ? 'Loading…' : 'Select a channel →'}
-                </Button>
-              </div>
-            ) : (
-              <div className="mt-2 max-h-40 overflow-y-auto space-y-0.5">
-                {channels.map((ch) => (
-                  <Button key={ch.id} variant="ghost" size="sm" className="w-full justify-start" onClick={() => selectChannel(ch.id, ch.name)} disabled={saving}>
-                    #{ch.name}
-                  </Button>
-                ))}
-                {channels.length === 0 && <p className="text-xs text-muted-foreground px-2 py-2">No channels found.</p>}
-              </div>
-            )}
-          </div>
-        )}
-        {integration && channelName && (
-          <div className="h-9 flex items-center">
-            <Button variant="link" size="sm" className="px-0 text-muted-foreground" onClick={loadChannels} disabled={loadingChannels}>
-              Change channel
-            </Button>
-          </div>
-        )}
-      </div>
+      {!integration && !waiting && (
+        <Button variant="link" size="sm" className="px-0" onClick={openSlackAuth}>
+          Connect Slack →
+        </Button>
+      )}
+      {waiting && !integration && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" />
+          <span>Waiting for Slack authorization…</span>
+        </div>
+      )}
+      {integration && (
+        <SlackChannelPicker
+          projectId={projectId}
+          currentChannelId={currentChannelId}
+          autoDefault={!currentChannelId}
+          onSaved={onRefresh}
+        />
+      )}
     </IntegrationCard>
   )
 }

@@ -3,13 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Check, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { SearchablePicker } from '@/components/ui/searchable-picker'
 import { Label } from '@/components/ui/label'
 
 type RepoRow = {
@@ -130,29 +124,23 @@ export function GitHubRepoPicker({ projectId, onSaved }: Props) {
     )
   }
 
+  const items = rows.map((r) => {
+    const [owner] = r.full_name.split('/')
+    return {
+      value: r.full_name,
+      label: r.full_name,
+      sublabel: r.private ? 'Private' : undefined,
+      group: owner,
+    }
+  })
+
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
-        Pick the single repository Verona should use for code context, commits, and test planning. Each project is
-        scoped to one codebase.
-      </p>
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="min-w-0 flex-1 space-y-1.5">
-          <Label htmlFor={`github-repo-${projectId}`}>Repository</Label>
-          <Select value={choice} onValueChange={(v) => void handleChange(v ?? '')}>
-            <SelectTrigger id={`github-repo-${projectId}`} className="w-full">
-              <SelectValue placeholder="Select a repository…" />
-            </SelectTrigger>
-            <SelectContent>
-              {rows.map((r) => (
-                <SelectItem key={r.full_name} value={r.full_name}>
-                  {r.full_name}{r.private ? ' (private)' : ''}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex h-9 items-center gap-1.5 text-xs text-muted-foreground min-w-[72px] transition-opacity">
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <Label htmlFor={`github-repo-${projectId}`} className="text-xs">
+          Repository
+        </Label>
+        <div className="flex h-4 items-center gap-1.5 text-xs text-muted-foreground transition-opacity">
           {saving ? (
             <>
               <Loader2 className="size-3 animate-spin" />
@@ -166,6 +154,15 @@ export function GitHubRepoPicker({ projectId, onSaved }: Props) {
           ) : null}
         </div>
       </div>
+      <SearchablePicker
+        id={`github-repo-${projectId}`}
+        value={choice}
+        onChange={(v) => void handleChange(v)}
+        items={items}
+        placeholder="Select a repository…"
+        searchPlaceholder="Search repositories..."
+        emptyText="No repositories found."
+      />
     </div>
   )
 }

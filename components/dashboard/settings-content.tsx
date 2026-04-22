@@ -12,6 +12,7 @@ import {
   subscribeSettingsCache,
 } from '@/lib/settings-prefetch'
 import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
+import { SlackChannelPicker } from '@/components/integrations/slack-channel-picker'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -430,68 +431,20 @@ function GitHubDetails({ integration, projectId, onRefresh }: { integration?: In
 }
 
 function SlackDetails({ integration, projectId, onRefresh }: { integration?: IntegrationData; projectId: string; onRefresh: () => void }) {
-  const [channels, setChannels] = useState<Array<{ id: string; name: string }>>([])
-  const [showPicker, setShowPicker] = useState(false)
-  const [loadingChannels, setLoadingChannels] = useState(false)
-  const [saving, setSaving] = useState(false)
-
   if (!integration) return null
 
-  const teamName = integration.meta?.team_name as string
-  const channelName = integration.meta?.channel_name as string
-
-  async function loadChannels() {
-    setLoadingChannels(true)
-    try {
-      const res = await fetch(`/api/integrations/slack/channels?project_id=${projectId}`)
-      if (res.ok) {
-        const data = await res.json()
-        setChannels(data.channels || [])
-        setShowPicker(true)
-      }
-    } catch { toast.error('Failed to load channels') } finally { setLoadingChannels(false) }
-  }
-
-  async function selectChannel(channelId: string, name: string) {
-    setSaving(true)
-    try {
-      const res = await fetch('/api/integrations/slack/channels', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, channel_id: channelId, channel_name: name }),
-      })
-      if (res.ok) {
-        toast.success(`Channel set to #${name}`)
-        setShowPicker(false)
-        onRefresh()
-      }
-    } catch { toast.error('Failed to set channel') } finally { setSaving(false) }
-  }
+  const teamName = integration.meta?.team_name as string | undefined
+  const currentChannelId = integration.meta?.channel_id as string | undefined
 
   return (
-    <div>
+    <div className="space-y-2">
       {teamName && <p>Workspace: {teamName}</p>}
-      {channelName ? (
-        <div className="flex items-center gap-2">
-          <p>Channel: #{channelName}</p>
-          <Button variant="link" size="xs" className="px-0 text-muted-foreground" onClick={loadChannels} disabled={loadingChannels}>
-            Change
-          </Button>
-        </div>
-      ) : (
-        <Button variant="link" size="xs" className="px-0" onClick={loadChannels} disabled={loadingChannels}>
-          {loadingChannels ? 'Loading...' : 'Select a channel'}
-        </Button>
-      )}
-      {showPicker && (
-        <div className="mt-2 max-h-36 overflow-y-auto border border-border rounded-lg p-2 space-y-0.5">
-          {channels.map((ch) => (
-            <Button key={ch.id} variant="ghost" size="sm" className="w-full justify-start" onClick={() => selectChannel(ch.id, ch.name)} disabled={saving}>
-              #{ch.name}
-            </Button>
-          ))}
-        </div>
-      )}
+      <SlackChannelPicker
+        projectId={projectId}
+        currentChannelId={currentChannelId}
+        autoDefault={!currentChannelId}
+        onSaved={onRefresh}
+      />
     </div>
   )
 }
