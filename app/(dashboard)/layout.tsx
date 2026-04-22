@@ -21,14 +21,12 @@ export default async function DashboardLayout({
 
   const { data: membership } = await supabase
     .from('org_members')
-    .select('org_id, organizations(name)')
+    .select('org_id')
     .eq('user_id', user.id)
     .limit(1)
     .single()
 
   const orgId = membership?.org_id ?? ''
-  const orgName =
-    (membership?.organizations as unknown as { name: string } | null)?.name ?? ''
 
   const { data: projects } = orgId
     ? await supabase
@@ -41,7 +39,6 @@ export default async function DashboardLayout({
   return (
     <WorkspaceProvider
       orgId={orgId}
-      orgName={orgName}
       userEmail={user.email ?? ''}
       initialProjects={projects ?? []}
     >

@@ -197,6 +197,54 @@ export type Database = {
           },
         ]
       }
+      landing_generated_images: {
+        Row: {
+          created_at: string
+          id: string
+          image_url: string
+          location: string | null
+          name: string
+          prompt: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          image_url: string
+          location?: string | null
+          name: string
+          prompt: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          image_url?: string
+          location?: string | null
+          name?: string
+          prompt?: string
+        }
+        Relationships: []
+      }
+      landing_generation_lock: {
+        Row: {
+          id: number
+          lock_expires_at: string | null
+          locked_by: string | null
+          next_allowed_at: string | null
+        }
+        Insert: {
+          id: number
+          lock_expires_at?: string | null
+          locked_by?: string | null
+          next_allowed_at?: string | null
+        }
+        Update: {
+          id?: number
+          lock_expires_at?: string | null
+          locked_by?: string | null
+          next_allowed_at?: string | null
+        }
+        Relationships: []
+      }
       org_members: {
         Row: {
           created_at: string
@@ -234,27 +282,21 @@ export type Database = {
           created_at: string
           created_by: string
           id: string
-          name: string
           plan: string
-          slug: string
           updated_at: string
         }
         Insert: {
           created_at?: string
           created_by: string
           id?: string
-          name: string
           plan?: string
-          slug: string
           updated_at?: string
         }
         Update: {
           created_at?: string
           created_by?: string
           id?: string
-          name?: string
           plan?: string
-          slug?: string
           updated_at?: string
         }
         Relationships: []
@@ -471,12 +513,21 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      commit_landing_lock: {
+        Args: { p_cooldown_seconds?: number; p_token: string }
+        Returns: boolean
+      }
       delete_auth_user_app_data: {
         Args: { target_user_id: string }
         Returns: undefined
       }
       get_user_org_ids: { Args: never; Returns: string[] }
       is_org_owner: { Args: { target_org_id: string }; Returns: boolean }
+      release_landing_lock: { Args: { p_token: string }; Returns: boolean }
+      try_acquire_landing_lock: {
+        Args: { p_lock_duration_seconds?: number }
+        Returns: string
+      }
     }
     Enums: {
       integration_status: "active" | "disconnected"
