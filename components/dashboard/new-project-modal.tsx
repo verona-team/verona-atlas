@@ -291,7 +291,8 @@ export function NewProjectModal() {
               <Button
                 onClick={handleContinueToChat}
                 disabled={!githubComplete || continuing}
-                className="w-full"
+                size="lg"
+                className="w-full h-11 text-sm"
               >
                 {continuing ? (
                   <>
@@ -299,7 +300,7 @@ export function NewProjectModal() {
                     Opening chat...
                   </>
                 ) : (
-                  <>Continue to Chat →</>
+                  <>Continue →</>
                 )}
               </Button>
               {!githubComplete && !continuing && (
