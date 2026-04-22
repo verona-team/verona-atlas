@@ -39,7 +39,6 @@ export function SettingsPanel() {
         closeSettings()
       }
     }
-    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [settingsProjectId, closeSettings])
