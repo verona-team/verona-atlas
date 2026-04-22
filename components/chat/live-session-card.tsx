@@ -7,7 +7,6 @@ import {
   AlertCircle,
   Loader2,
   ExternalLink,
-  Play,
 } from 'lucide-react'
 import type { Json } from '@/lib/supabase/types'
 
@@ -27,7 +26,8 @@ export interface LiveSessionMetadata {
 }
 
 interface LiveSessionCardProps {
-  projectId: string
+  /** Retained for future deep-link surfaces; currently unused since run detail pages were removed. */
+  projectId?: string
   metadata: Record<string, Json>
 }
 
@@ -41,16 +41,14 @@ function formatDuration(ms: number | null | undefined): string {
   return remSeconds ? `${minutes}m ${remSeconds}s` : `${minutes}m`
 }
 
-export function LiveSessionCard({ projectId, metadata }: LiveSessionCardProps) {
+export function LiveSessionCard({ metadata }: LiveSessionCardProps) {
   const meta = metadata as unknown as LiveSessionMetadata
 
   const status = meta.status ?? 'running'
   const isRunning = status === 'running'
   const templateName = meta.template_name ?? 'Test'
   const liveViewUrl = meta.live_view_url ?? meta.live_view_fullscreen_url ?? ''
-  const recordingUrl = meta.recording_url ?? null
   const dashboardUrl = meta.browserbase_dashboard_url ?? null
-  const runId = meta.run_id ?? null
 
   const [disconnected, setDisconnected] = useState(false)
 
@@ -139,19 +137,8 @@ export function LiveSessionCard({ projectId, metadata }: LiveSessionCardProps) {
               {meta.error_message}
             </p>
           )}
-          <div className="flex flex-wrap gap-2">
-            {recordingUrl && runId && (
-              <a
-                href={`/projects/${projectId}/runs/${runId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 h-7 rounded-md border border-border bg-background px-2.5 text-xs text-foreground hover:bg-muted"
-              >
-                <Play className="size-3.5" />
-                Watch replay
-              </a>
-            )}
-            {dashboardUrl && (
+          {dashboardUrl && (
+            <div className="flex flex-wrap gap-2">
               <a
                 href={dashboardUrl}
                 target="_blank"
@@ -161,8 +148,8 @@ export function LiveSessionCard({ projectId, metadata }: LiveSessionCardProps) {
                 <ExternalLink className="size-3.5" />
                 Open in Browserbase
               </a>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -98,7 +98,11 @@ ${report.recommendedFlows.map((f, i) => `${i + 1}. ${f}`).join('\n')}
 
 ## Coverage
 Investigated: ${report.integrationsCovered.join(', ') || 'none'}
-Skipped: ${report.integrationsSkipped.join(', ') || 'none'}`,
+Skipped: ${report.integrationsSkipped.join(', ') || 'none'}
+
+# Output formatting
+
+Do not include any emoji characters in the analysis, flow names, descriptions, rationales, or steps. Use plain text only.`,
   })
 
   return output

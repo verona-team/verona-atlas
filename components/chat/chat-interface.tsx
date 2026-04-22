@@ -8,8 +8,8 @@ import {
   useMemo,
   type SyntheticEvent,
 } from 'react'
-import { useRouter } from 'next/navigation'
 import { useChat } from '@ai-sdk/react'
+import { useWorkspace } from '@/lib/workspace-context'
 import { DefaultChatTransport } from 'ai'
 import { ArrowUp, ArrowDown, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -89,6 +89,14 @@ interface ChatInterfaceProps {
   initialStatusUpdatedAt: string | null
   projectName: string
   appUrl: string
+  /**
+   * Whether the project's GitHub integration is configured and ready. When
+   * `false` we skip the auto-bootstrap message (otherwise it would hit the
+   * server's `GITHUB_SETUP_REQUIRED` guard and toast-spam its way through
+   * two retries). Bootstrap resumes once this flips to `true`, typically
+   * after the user connects GitHub in the settings overlay.
+   */
+  githubReady: boolean
 }
 
 export function ChatInterface({
@@ -99,8 +107,9 @@ export function ChatInterface({
   initialStatusUpdatedAt,
   projectName,
   appUrl,
+  githubReady,
 }: ChatInterfaceProps) {
-  const router = useRouter()
+  const { openSettings } = useWorkspace()
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottomRef = useRef(true)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -157,14 +166,14 @@ export function ChatInterface({
           } | null
           if (data?.code === 'GITHUB_SETUP_REQUIRED' && data.error) {
             toast.error(data.error)
-            router.push(`/projects/${projectId}/settings`)
+            openSettings(projectId)
             return res
           }
         }
       }
       return res
     },
-    [projectId, router],
+    [projectId, openSettings],
   )
 
   const { messages: streamMessages, sendMessage, status } = useChat({
@@ -190,11 +199,29 @@ export function ChatInterface({
     },
   })
 
+  // Reset the bootstrap retry counter when GitHub becomes ready. Without this,
+  // a user who landed on the chat pre-setup would have exhausted their retries
+  // (2) against GITHUB_SETUP_REQUIRED and auto-bootstrap would never re-fire
+  // after they connect GitHub. We key the reset on the false → true transition.
+  const prevGithubReadyRef = useRef(githubReady)
+  useEffect(() => {
+    if (!prevGithubReadyRef.current && githubReady) {
+      bootstrapFailureCountRef.current = 0
+      lastBootstrapKeyRef.current = null
+    }
+    prevGithubReadyRef.current = githubReady
+  }, [githubReady])
+
   useEffect(() => {
     if (dbMessages.length > 0) {
       bootstrapFailureCountRef.current = 0
       return
     }
+
+    // Do not auto-bootstrap before GitHub is configured: the server would
+    // short-circuit with GITHUB_SETUP_REQUIRED, which just toast-spams the
+    // user while the settings overlay is already open for them to fix it.
+    if (!githubReady) return
 
     if (backendThinking) return
 
@@ -209,6 +236,7 @@ export function ChatInterface({
     dbMessages.length,
     bootstrapNonce,
     backendThinking,
+    githubReady,
     sessionId,
     projectName,
     appUrl,

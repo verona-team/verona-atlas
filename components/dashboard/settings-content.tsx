@@ -1,18 +1,16 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useWorkspace } from '@/lib/workspace-context'
 import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
-import { PanelPage } from '@/components/dashboard/panel-page'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,12 +37,10 @@ type ProjectData = {
   name: string
 }
 
-export default function ProjectSettingsPage() {
-  const params = useParams<{ projectId: string }>()
+export function SettingsContent({ projectId }: { projectId: string }) {
   const searchParams = useSearchParams()
-  const projectId = params.projectId
   const toastShown = useRef(false)
-  const { refreshProjects } = useWorkspace()
+  const { refreshProjects, closeSettings } = useWorkspace()
 
   const [project, setProject] = useState<ProjectData | null>(null)
   const [integrations, setIntegrations] = useState<IntegrationData[]>([])
@@ -130,195 +126,96 @@ export default function ProjectSettingsPage() {
   }
 
   if (loading) {
-    return (
-      <PanelPage projectId={projectId} title="Settings">
-        <p className="text-sm text-muted-foreground">Loading...</p>
-      </PanelPage>
-    )
+    return <p className="text-sm text-muted-foreground">Loading...</p>
   }
 
   return (
-    <PanelPage projectId={projectId} title="Settings">
-      <div className="space-y-8">
-        <div>
-          <h3 className="text-xs text-muted-foreground uppercase tracking-wider mb-4">Integrations</h3>
-          <div className="space-y-3">
-            <SettingsIntegrationCard
-              type="github"
-              title="GitHub"
-              integration={getIntegration('github')}
-              onDisconnect={disconnect}
-              connectUrl={`/api/integrations/github/install?project_id=${projectId}&return_to=${encodeURIComponent('/auth/oauth-complete?integration=github')}`}
-              openInNewTab
-              onRefresh={loadData}
-            >
-              <GitHubDetails integration={getIntegration('github')} projectId={projectId} onRefresh={loadData} />
-            </SettingsIntegrationCard>
+    <div className="space-y-8">
+      <div>
+        <h3 className="text-xs text-muted-foreground uppercase tracking-wider mb-4">Integrations</h3>
+        <div className="space-y-3">
+          <SettingsIntegrationCard
+            type="github"
+            title="GitHub"
+            integration={getIntegration('github')}
+            onDisconnect={disconnect}
+            connectUrl={`/api/integrations/github/install?project_id=${projectId}&return_to=${encodeURIComponent('/auth/oauth-complete?integration=github')}`}
+            openInNewTab
+            onRefresh={loadData}
+          >
+            <GitHubDetails integration={getIntegration('github')} projectId={projectId} onRefresh={loadData} />
+          </SettingsIntegrationCard>
 
-            <SettingsIntegrationCard
-              type="posthog"
-              title="PostHog"
-              integration={getIntegration('posthog')}
-              onDisconnect={disconnect}
-              connectUrl={`/projects/new?projectId=${projectId}`}
-            >
-              <MetaDetail label="Project" value={getIntegration('posthog')?.meta?.posthog_project_id} />
-              <MetaDetail label="Host" value={getIntegration('posthog')?.meta?.api_host} />
-            </SettingsIntegrationCard>
+          <SettingsIntegrationCard
+            type="posthog"
+            title="PostHog"
+            integration={getIntegration('posthog')}
+            onDisconnect={disconnect}
+            connectUrl={`/projects/new?projectId=${projectId}`}
+          >
+            <MetaDetail label="Project" value={getIntegration('posthog')?.meta?.posthog_project_id} />
+            <MetaDetail label="Host" value={getIntegration('posthog')?.meta?.api_host} />
+          </SettingsIntegrationCard>
 
-            <SettingsIntegrationCard
-              type="sentry"
-              title="Sentry"
-              integration={getIntegration('sentry')}
-              onDisconnect={disconnect}
-              connectUrl={`/projects/new?projectId=${projectId}`}
-            >
-              <MetaDetail
-                label="Project"
-                value={
-                  getIntegration('sentry')?.meta
-                    ? `${getIntegration('sentry')!.meta.organization_slug}/${getIntegration('sentry')!.meta.project_slug}`
-                    : undefined
-                }
-              />
-            </SettingsIntegrationCard>
+          <SettingsIntegrationCard
+            type="sentry"
+            title="Sentry"
+            integration={getIntegration('sentry')}
+            onDisconnect={disconnect}
+            connectUrl={`/projects/new?projectId=${projectId}`}
+          >
+            <MetaDetail
+              label="Project"
+              value={
+                getIntegration('sentry')?.meta
+                  ? `${getIntegration('sentry')!.meta.organization_slug}/${getIntegration('sentry')!.meta.project_slug}`
+                  : undefined
+              }
+            />
+          </SettingsIntegrationCard>
 
-            <SettingsIntegrationCard
-              type="langsmith"
-              title="LangSmith"
-              integration={getIntegration('langsmith')}
-              onDisconnect={disconnect}
-              connectUrl={`/projects/new?projectId=${projectId}`}
-            >
-              <MetaDetail label="Project" value={getIntegration('langsmith')?.meta?.project_name} />
-            </SettingsIntegrationCard>
+          <SettingsIntegrationCard
+            type="langsmith"
+            title="LangSmith"
+            integration={getIntegration('langsmith')}
+            onDisconnect={disconnect}
+            connectUrl={`/projects/new?projectId=${projectId}`}
+          >
+            <MetaDetail label="Project" value={getIntegration('langsmith')?.meta?.project_name} />
+          </SettingsIntegrationCard>
 
-            <SettingsIntegrationCard
-              type="braintrust"
-              title="Braintrust"
-              integration={getIntegration('braintrust')}
-              onDisconnect={disconnect}
-              connectUrl={`/projects/new?projectId=${projectId}`}
-            >
-              <MetaDetail label="Project" value={getIntegration('braintrust')?.meta?.project_name} />
-            </SettingsIntegrationCard>
+          <SettingsIntegrationCard
+            type="braintrust"
+            title="Braintrust"
+            integration={getIntegration('braintrust')}
+            onDisconnect={disconnect}
+            connectUrl={`/projects/new?projectId=${projectId}`}
+          >
+            <MetaDetail label="Project" value={getIntegration('braintrust')?.meta?.project_name} />
+          </SettingsIntegrationCard>
 
-            <SettingsIntegrationCard
-              type="slack"
-              title="Slack"
-              integration={getIntegration('slack')}
-              onDisconnect={disconnect}
-              connectUrl={`/api/integrations/slack/authorize?project_id=${projectId}&return_to=${encodeURIComponent('/auth/oauth-complete?integration=slack')}`}
-              openInNewTab
-              onRefresh={loadData}
-            >
-              <SlackDetails integration={getIntegration('slack')} projectId={projectId} onRefresh={loadData} />
-            </SettingsIntegrationCard>
-          </div>
+          <SettingsIntegrationCard
+            type="slack"
+            title="Slack"
+            integration={getIntegration('slack')}
+            onDisconnect={disconnect}
+            connectUrl={`/api/integrations/slack/authorize?project_id=${projectId}&return_to=${encodeURIComponent('/auth/oauth-complete?integration=slack')}`}
+            openInNewTab
+            onRefresh={loadData}
+          >
+            <SlackDetails integration={getIntegration('slack')} projectId={projectId} onRefresh={loadData} />
+          </SettingsIntegrationCard>
         </div>
-
-        <ScheduleSection projectId={projectId} />
-        <DeleteProjectSection projectId={projectId} projectName={project?.name || ''} onDeleted={refreshProjects} />
       </div>
-    </PanelPage>
-  )
-}
 
-const DAYS = [
-  { value: 'mon', label: 'Mon' },
-  { value: 'tue', label: 'Tue' },
-  { value: 'wed', label: 'Wed' },
-  { value: 'thu', label: 'Thu' },
-  { value: 'fri', label: 'Fri' },
-  { value: 'sat', label: 'Sat' },
-  { value: 'sun', label: 'Sun' },
-] as const
-
-function ScheduleSection({ projectId }: { projectId: string }) {
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [enabled, setEnabled] = useState(false)
-  const [time, setTime] = useState('21:00')
-  const [days, setDays] = useState<string[]>(['mon', 'tue', 'wed', 'thu', 'fri'])
-  const [timezone, setTimezone] = useState('')
-
-  useEffect(() => {
-    const detectedTz = Intl.DateTimeFormat().resolvedOptions().timeZone
-    fetch(`/api/projects/${projectId}/schedule`)
-      .then((r) => r.json())
-      .then((data) => {
-        setEnabled(data.schedule_enabled ?? false)
-        setTime(data.schedule_time ?? '21:00')
-        setDays(data.schedule_days ?? ['mon', 'tue', 'wed', 'thu', 'fri'])
-        setTimezone(data.timezone || detectedTz)
-      })
-      .catch(() => { setTimezone(detectedTz) })
-      .finally(() => setLoading(false))
-  }, [projectId])
-
-  async function save() {
-    setSaving(true)
-    try {
-      const res = await fetch(`/api/projects/${projectId}/schedule`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ schedule_enabled: enabled, schedule_time: time, schedule_days: days, timezone }),
-      })
-      if (res.ok) toast.success('Schedule updated')
-      else toast.error('Failed to update schedule')
-    } catch { toast.error('Failed to update schedule') } finally { setSaving(false) }
-  }
-
-  function toggleDay(day: string) {
-    setDays((prev) => prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day])
-  }
-
-  if (loading) return null
-
-  return (
-    <div>
-      <h3 className="text-xs text-muted-foreground uppercase tracking-wider mb-4">Schedule</h3>
-      <Card size="sm" className="ring-0 border border-border">
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium">Automatic test suggestions</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Analyze and suggest test flows on a schedule</p>
-            </div>
-            <Switch checked={enabled} onCheckedChange={setEnabled} />
-          </div>
-
-          {enabled && (
-            <>
-              <div className="space-y-1.5">
-                <Label htmlFor="schedule-time">Time</Label>
-                <Input id="schedule-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-auto" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Days</Label>
-                <div className="flex gap-1.5">
-                  {DAYS.map((d) => (
-                    <Button
-                      key={d.value}
-                      variant={days.includes(d.value) ? 'default' : 'outline'}
-                      size="xs"
-                      onClick={() => toggleDay(d.value)}
-                    >
-                      {d.label}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="schedule-tz">Timezone</Label>
-                <Input id="schedule-tz" value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="America/New_York" className="max-w-xs" />
-              </div>
-            </>
-          )}
-
-          <Button variant="link" size="sm" className="px-0" onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save schedule'}</Button>
-        </CardContent>
-      </Card>
+      <DeleteProjectSection
+        projectId={projectId}
+        projectName={project?.name || ''}
+        onDeleted={async () => {
+          await refreshProjects()
+          closeSettings()
+        }}
+      />
     </div>
   )
 }
@@ -342,6 +239,7 @@ function SettingsIntegrationCard({
   onRefresh?: () => Promise<void> | void
   children?: React.ReactNode
 }) {
+  const router = useRouter()
   const connected = !!integration
   const [waiting, setWaiting] = useState(false)
   const connectPopupRef = useRef<Window | null>(null)
@@ -354,7 +252,6 @@ function SettingsIntegrationCard({
     }
   }
 
-  // Fast path: the oauth-complete popup posts back on success.
   useEffect(() => {
     if (!waiting || !onRefresh) return
     const refresh = onRefresh
@@ -369,7 +266,6 @@ function SettingsIntegrationCard({
     return () => window.removeEventListener('message', handler)
   }, [waiting, onRefresh, type])
 
-  // Fallback polling.
   useEffect(() => {
     if (!waiting) return
     const refresh = onRefresh
@@ -397,8 +293,6 @@ function SettingsIntegrationCard({
 
   useEffect(() => {
     if (waiting && connected) {
-      // Sync transient "waiting" once the server confirms; also fires
-      // one-shot side effects (popup close, toast).
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setWaiting(false)
       connectPopupRef.current?.close()
@@ -406,10 +300,14 @@ function SettingsIntegrationCard({
       if (!previouslyConnectedRef.current) {
         toast.success(`${title} connected`)
         window.focus()
+        // Re-run the server component tree so any props derived from server-side
+        // integration state (e.g. ChatInterface's `githubReady`) pick up the
+        // newly-connected status without requiring a manual page refresh.
+        router.refresh()
       }
     }
     previouslyConnectedRef.current = connected
-  }, [waiting, connected, title])
+  }, [waiting, connected, title, router])
 
   return (
     <Card size="sm" className="ring-0 border border-border">

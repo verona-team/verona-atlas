@@ -1,23 +1,16 @@
 'use client'
 
-import { usePathname } from 'next/navigation'
-import Link from 'next/link'
-import { History, Settings, ExternalLink } from 'lucide-react'
+import { Settings, ExternalLink } from 'lucide-react'
 import { useWorkspace } from '@/lib/workspace-context'
 import { SidebarToggle } from '@/components/dashboard/sidebar'
-import { TriggerRunButton } from '@/components/dashboard/trigger-run-button'
 import { Button } from '@/components/ui/button'
 
 export function AppHeader() {
-  const { projects, activeProjectId } = useWorkspace()
-  const pathname = usePathname()
+  const { projects, activeProjectId, settingsProjectId, openSettings } = useWorkspace()
 
   const activeProject = projects.find((p) => p.id === activeProjectId)
 
-  const isRunsActive =
-    activeProjectId && pathname.includes(`/projects/${activeProjectId}/runs`)
-  const isSettingsActive =
-    activeProjectId && pathname.includes(`/projects/${activeProjectId}/settings`)
+  const isSettingsOpen = !!settingsProjectId
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-background px-4">
@@ -48,20 +41,10 @@ export function AppHeader() {
 
       {activeProjectId && (
         <nav className="flex items-center gap-1">
-          <TriggerRunButton projectId={activeProjectId} />
-
           <Button
-            variant={isRunsActive ? 'secondary' : 'ghost'}
+            variant={isSettingsOpen ? 'secondary' : 'ghost'}
             size="sm"
-            render={<Link href={`/projects/${activeProjectId}/runs`} />}
-          >
-            <History className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Runs</span>
-          </Button>
-          <Button
-            variant={isSettingsActive ? 'secondary' : 'ghost'}
-            size="sm"
-            render={<Link href={`/projects/${activeProjectId}/settings`} />}
+            onClick={() => openSettings(activeProjectId)}
           >
             <Settings className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">Settings</span>
