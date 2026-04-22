@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useWorkspace } from '@/lib/workspace-context'
 import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
@@ -48,6 +49,7 @@ export default function ProjectSettingsPage() {
   const [project, setProject] = useState<ProjectData | null>(null)
   const [integrations, setIntegrations] = useState<IntegrationData[]>([])
   const [loading, setLoading] = useState(true)
+  const lastIntegrationsKeyRef = useRef<string>('')
 
   const loadData = useCallback(async () => {
     try {
@@ -62,7 +64,15 @@ export default function ProjectSettingsPage() {
       }
       if (intRes.ok) {
         const intData = await intRes.json()
-        setIntegrations(intData.integrations || [])
+        const next = (intData.integrations || []) as IntegrationData[]
+        const key = next
+          .map((i) => `${i.id}:${i.status}:${JSON.stringify(i.meta ?? {})}`)
+          .sort()
+          .join('|')
+        if (key !== lastIntegrationsKeyRef.current) {
+          lastIntegrationsKeyRef.current = key
+          setIntegrations(next)
+        }
       }
     } catch {
     } finally {
@@ -138,7 +148,7 @@ export default function ProjectSettingsPage() {
               title="GitHub"
               integration={getIntegration('github')}
               onDisconnect={disconnect}
-              connectUrl={`/api/integrations/github/install?project_id=${projectId}&return_to=${encodeURIComponent(`/projects/${projectId}/settings`)}`}
+              connectUrl={`/api/integrations/github/install?project_id=${projectId}&return_to=${encodeURIComponent('/auth/oauth-complete?integration=github')}`}
               openInNewTab
               onRefresh={loadData}
             >
@@ -198,7 +208,7 @@ export default function ProjectSettingsPage() {
               title="Slack"
               integration={getIntegration('slack')}
               onDisconnect={disconnect}
-              connectUrl={`/api/integrations/slack/authorize?project_id=${projectId}&return_to=${encodeURIComponent(`/projects/${projectId}/settings`)}`}
+              connectUrl={`/api/integrations/slack/authorize?project_id=${projectId}&return_to=${encodeURIComponent('/auth/oauth-complete?integration=slack')}`}
               openInNewTab
               onRefresh={loadData}
             >
@@ -335,6 +345,7 @@ function SettingsIntegrationCard({
   const connected = !!integration
   const [waiting, setWaiting] = useState(false)
   const connectPopupRef = useRef<Window | null>(null)
+  const previouslyConnectedRef = useRef(connected)
 
   function handleConnect() {
     if (openInNewTab) {
@@ -343,8 +354,26 @@ function SettingsIntegrationCard({
     }
   }
 
+  // Fast path: the oauth-complete popup posts back on success.
   useEffect(() => {
     if (!waiting || !onRefresh) return
+    const refresh = onRefresh
+    const handler = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return
+      const data = event.data as { source?: string; integration?: string } | null
+      if (!data || data.source !== 'verona-oauth') return
+      if (data.integration !== type) return
+      void refresh()
+    }
+    window.addEventListener('message', handler)
+    return () => window.removeEventListener('message', handler)
+  }, [waiting, onRefresh, type])
+
+  // Fallback polling.
+  useEffect(() => {
+    if (!waiting) return
+    const refresh = onRefresh
+    if (!refresh) return
     const interval = setInterval(async () => {
       if (type === 'github') {
         try {
@@ -354,33 +383,30 @@ function SettingsIntegrationCard({
             if (res.ok) {
               const data = await res.json()
               if (data.connected) {
-                await onRefresh()
-                setWaiting(false)
-                toast.success(`${title} connected`)
-                connectPopupRef.current?.close()
-                connectPopupRef.current = null
-                window.focus()
+                await refresh()
                 return
               }
             }
           }
         } catch {}
       }
-      await onRefresh()
-    }, 3000)
+      await refresh()
+    }, 2000)
     return () => clearInterval(interval)
-  }, [waiting, onRefresh, type, connectUrl, title])
+  }, [waiting, onRefresh, type, connectUrl])
 
   useEffect(() => {
-    if (!waiting || !connected || type === 'github') return
-    queueMicrotask(() => {
+    if (waiting && connected) {
       setWaiting(false)
-      toast.success(`${title} connected`)
       connectPopupRef.current?.close()
       connectPopupRef.current = null
-      window.focus()
-    })
-  }, [waiting, connected, title, type])
+      if (!previouslyConnectedRef.current) {
+        toast.success(`${title} connected`)
+        window.focus()
+      }
+    }
+    previouslyConnectedRef.current = connected
+  }, [waiting, connected, title])
 
   return (
     <Card size="sm" className="ring-0 border border-border">
@@ -389,10 +415,16 @@ function SettingsIntegrationCard({
           <div className="flex items-center gap-2">
             <h4 className="text-sm font-medium">{title}</h4>
             <Badge
-              variant={connected ? 'outline' : waiting ? 'outline' : 'secondary'}
-              className={connected ? 'border-green-500/30 text-green-500' : waiting ? 'border-yellow-500/30 text-yellow-500' : ''}
+              variant={connected ? 'outline' : 'secondary'}
+              className={`transition-colors duration-200 ${
+                connected
+                  ? 'border-green-500/30 text-green-500'
+                  : waiting
+                    ? 'border-border text-muted-foreground'
+                    : ''
+              }`}
             >
-              {connected ? 'Active' : waiting ? 'Waiting...' : 'Not connected'}
+              {connected ? 'Active' : waiting ? 'Connecting…' : 'Not connected'}
             </Badge>
           </div>
           <div className="flex items-center gap-3">
@@ -417,7 +449,10 @@ function SettingsIntegrationCard({
                 </AlertDialogContent>
               </AlertDialog>
             ) : waiting ? (
-              <span className="text-xs text-muted-foreground">Complete setup in the opened tab</span>
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 className="size-3 animate-spin" />
+                Complete setup in the opened tab
+              </span>
             ) : openInNewTab ? (
               <Button variant="link" size="xs" onClick={handleConnect}>Connect →</Button>
             ) : (

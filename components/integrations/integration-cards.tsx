@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
 import { Card, CardContent } from '@/components/ui/card'
@@ -16,6 +17,34 @@ export type IntegrationStatus = {
   meta: Record<string, unknown>
 }
 
+type OAuthMessage = {
+  source?: string
+  integration?: string
+}
+
+/**
+ * Listen for the oauth-complete popup's postMessage; invoke `onMatch` when
+ * the message is for this integration. Returns a cleanup function.
+ */
+function useOAuthPopupListener(
+  integrationType: string,
+  enabled: boolean,
+  onMatch: () => void,
+) {
+  useEffect(() => {
+    if (!enabled) return
+    function handler(event: MessageEvent) {
+      if (event.origin !== window.location.origin) return
+      const data = event.data as OAuthMessage | null
+      if (!data || data.source !== 'verona-oauth') return
+      if (data.integration !== integrationType) return
+      onMatch()
+    }
+    window.addEventListener('message', handler)
+    return () => window.removeEventListener('message', handler)
+  }, [enabled, integrationType, onMatch])
+}
+
 /* ------------------------------------------------------------------ */
 /*  Shared card wrapper                                                */
 /* ------------------------------------------------------------------ */
@@ -24,6 +53,7 @@ export function IntegrationCard({
   title,
   description,
   connected,
+  connecting,
   meta,
   required,
   children,
@@ -31,10 +61,17 @@ export function IntegrationCard({
   title: string
   description: string
   connected: boolean
+  connecting?: boolean
   meta?: string
   required?: boolean
   children: React.ReactNode
 }) {
+  const status: 'connected' | 'connecting' | 'idle' = connected
+    ? 'connected'
+    : connecting
+      ? 'connecting'
+      : 'idle'
+
   return (
     <Card size="sm" className="ring-0 border border-border">
       <CardContent>
@@ -51,8 +88,21 @@ export function IntegrationCard({
             <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
             {meta && <p className="text-xs text-muted-foreground/70 mt-0.5">{meta}</p>}
           </div>
-          <Badge variant={connected ? 'outline' : 'secondary'} className={connected ? 'border-green-500/30 text-green-500' : ''}>
-            {connected ? 'Connected' : 'Not connected'}
+          <Badge
+            variant={status === 'connected' ? 'outline' : 'secondary'}
+            className={`transition-colors duration-200 ${
+              status === 'connected'
+                ? 'border-green-500/30 text-green-500'
+                : status === 'connecting'
+                  ? 'border-border text-muted-foreground'
+                  : ''
+            }`}
+          >
+            {status === 'connected'
+              ? 'Connected'
+              : status === 'connecting'
+                ? 'Connecting…'
+                : 'Not connected'}
           </Badge>
         </div>
         {children}
@@ -88,13 +138,19 @@ export function GitHubCard({
 
   function openGitHubInstall() {
     setWaiting(true)
-    const rt = encodeURIComponent(returnTo || `/projects/${projectId}/settings`)
+    // Redirect the popup to /auth/oauth-complete so it closes itself
+    // and notifies the parent window via postMessage.
+    const rt = encodeURIComponent(returnTo || `/auth/oauth-complete?integration=github`)
     installPopupRef.current =
       window.open(
         `/api/integrations/github/install?project_id=${projectId}&return_to=${rt}`,
         '_blank',
       ) ?? null
   }
+
+  useOAuthPopupListener('github', waiting, () => {
+    void onRefresh()
+  })
 
   useEffect(() => {
     if (!waiting) return
@@ -109,19 +165,13 @@ export function GitHubCard({
         const data = await res.json()
         if (!data.connected || cancelled) return
         await onRefresh()
-        if (cancelled) return
-        setWaiting(false)
-        toast.success('GitHub connected')
-        installPopupRef.current?.close()
-        installPopupRef.current = null
-        window.focus()
       } catch {
         /* ignore */
       }
     }
 
     void checkStatus()
-    const interval = setInterval(() => void checkStatus(), 1000)
+    const interval = setInterval(() => void checkStatus(), 1500)
 
     function onVisibility() {
       if (document.visibilityState === 'visible') void checkStatus()
@@ -135,25 +185,53 @@ export function GitHubCard({
     }
   }, [waiting, projectId, onRefresh])
 
+  // When the backend confirms the integration exists, resolve the waiting
+  // state in a single effect — avoids the old double-flash (setWaiting(false)
+  // inside checkStatus, then a rerender with integration present).
+  const previouslyConnectedRef = useRef(!!integration)
+  useEffect(() => {
+    const nowConnected = !!integration
+    if (waiting && nowConnected) {
+      setWaiting(false)
+      installPopupRef.current?.close()
+      installPopupRef.current = null
+      if (!previouslyConnectedRef.current) {
+        toast.success('GitHub connected')
+        window.focus()
+      }
+    }
+    previouslyConnectedRef.current = nowConnected
+  }, [waiting, integration])
+
+  const showConnectCta = !integration && !waiting
+
   return (
     <IntegrationCard
       title="GitHub"
       description="Connect a repository for code context and test planning."
       connected={!!integration}
+      connecting={waiting && !integration}
       required
       meta={linkedRepo ? `Repository: ${linkedRepo}` : integration ? 'Select a repository below' : undefined}
     >
-      {!integration ? (
-        waiting ? (
-          <p className="text-xs text-muted-foreground">Waiting for GitHub authorization...</p>
-        ) : (
+      <div className={`relative ${integration || waiting ? 'min-h-[96px]' : ''}`}>
+        {showConnectCta && (
           <Button variant="link" size="sm" className="px-0" onClick={openGitHubInstall}>
             Connect GitHub →
           </Button>
-        )
-      ) : (
-        <GitHubRepoPicker projectId={projectId} onSaved={onRefresh} />
-      )}
+        )}
+        {waiting && !integration && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground transition-opacity duration-200">
+            <Loader2 className="size-3.5 animate-spin" />
+            <span>Waiting for GitHub authorization…</span>
+          </div>
+        )}
+        {integration && (
+          <div className="transition-opacity duration-200">
+            <GitHubRepoPicker projectId={projectId} onSaved={onRefresh} />
+          </div>
+        )}
+      </div>
     </IntegrationCard>
   )
 }
@@ -464,10 +542,14 @@ export function SlackCard({
 
   function openSlackAuth() {
     setWaiting(true)
-    const rt = encodeURIComponent(returnTo || `/projects/${projectId}/settings`)
+    const rt = encodeURIComponent(returnTo || `/auth/oauth-complete?integration=slack`)
     authPopupRef.current =
       window.open(`/api/integrations/slack/authorize?project_id=${projectId}&return_to=${rt}`, '_blank') ?? null
   }
+
+  useOAuthPopupListener('slack', waiting, () => {
+    void onRefresh()
+  })
 
   useEffect(() => {
     if (!waiting) return
@@ -484,7 +566,7 @@ export function SlackCard({
     }
 
     void refresh()
-    const interval = setInterval(() => void refresh(), 1000)
+    const interval = setInterval(() => void refresh(), 1500)
 
     function onVisibility() {
       if (document.visibilityState === 'visible') void refresh()
@@ -498,15 +580,38 @@ export function SlackCard({
     }
   }, [waiting, onRefresh])
 
+  const previouslyConnectedRef = useRef(!!integration)
   useEffect(() => {
-    if (waiting && integration) {
+    const nowConnected = !!integration
+    if (waiting && nowConnected) {
       setWaiting(false)
-      toast.success('Slack connected')
       authPopupRef.current?.close()
       authPopupRef.current = null
-      window.focus()
+      if (!previouslyConnectedRef.current) {
+        toast.success('Slack connected')
+        window.focus()
+      }
     }
+    previouslyConnectedRef.current = nowConnected
   }, [waiting, integration])
+
+  // Pre-fetch channels in the background once Slack is connected so the
+  // dropdown renders instantly when the user opens it.
+  useEffect(() => {
+    if (!integration || channels.length > 0 || loadingChannels) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(`/api/integrations/slack/channels?project_id=${projectId}`)
+        if (!res.ok || cancelled) return
+        const data = await res.json()
+        if (!cancelled) setChannels(data.channels || [])
+      } catch {
+        /* ignore */
+      }
+    })()
+    return () => { cancelled = true }
+  }, [integration, projectId, channels.length, loadingChannels])
 
   async function loadChannels() {
     setLoadingChannels(true)
@@ -541,36 +646,43 @@ export function SlackCard({
       title="Slack"
       description="Get test run reports sent to a Slack channel."
       connected={!!integration}
+      connecting={waiting && !integration}
       meta={integration ? `${integration.meta?.team_name || 'Workspace'}${channelName ? ` · #${channelName}` : ''}` : undefined}
     >
-      {!integration ? (
-        waiting ? (
-          <p className="text-xs text-muted-foreground">Waiting for Slack authorization...</p>
-        ) : (
+      <div className={`relative ${integration || waiting ? 'min-h-[40px]' : ''}`}>
+        {!integration && !waiting && (
           <Button variant="link" size="sm" className="px-0" onClick={openSlackAuth}>Connect Slack →</Button>
-        )
-      ) : !channelName ? (
-        <div>
-          {!showChannels ? (
-            <Button variant="link" size="sm" className="px-0" onClick={loadChannels} disabled={loadingChannels}>
-              {loadingChannels ? 'Loading...' : 'Select a channel →'}
-            </Button>
-          ) : (
-            <div className="mt-2 max-h-40 overflow-y-auto space-y-0.5">
-              {channels.map((ch) => (
-                <Button key={ch.id} variant="ghost" size="sm" className="w-full justify-start" onClick={() => selectChannel(ch.id, ch.name)} disabled={saving}>
-                  #{ch.name}
-                </Button>
-              ))}
-              {channels.length === 0 && <p className="text-xs text-muted-foreground px-2 py-2">No channels found.</p>}
-            </div>
-          )}
-        </div>
-      ) : (
-        <Button variant="link" size="xs" className="px-0 text-muted-foreground" onClick={loadChannels} disabled={loadingChannels}>
-          Change channel
-        </Button>
-      )}
+        )}
+        {waiting && !integration && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground transition-opacity duration-200">
+            <Loader2 className="size-3.5 animate-spin" />
+            <span>Waiting for Slack authorization…</span>
+          </div>
+        )}
+        {integration && !channelName && (
+          <div>
+            {!showChannels ? (
+              <Button variant="link" size="sm" className="px-0" onClick={loadChannels} disabled={loadingChannels}>
+                {loadingChannels ? 'Loading…' : 'Select a channel →'}
+              </Button>
+            ) : (
+              <div className="mt-2 max-h-40 overflow-y-auto space-y-0.5">
+                {channels.map((ch) => (
+                  <Button key={ch.id} variant="ghost" size="sm" className="w-full justify-start" onClick={() => selectChannel(ch.id, ch.name)} disabled={saving}>
+                    #{ch.name}
+                  </Button>
+                ))}
+                {channels.length === 0 && <p className="text-xs text-muted-foreground px-2 py-2">No channels found.</p>}
+              </div>
+            )}
+          </div>
+        )}
+        {integration && channelName && (
+          <Button variant="link" size="xs" className="px-0 text-muted-foreground" onClick={loadChannels} disabled={loadingChannels}>
+            Change channel
+          </Button>
+        )}
+      </div>
     </IntegrationCard>
   )
 }

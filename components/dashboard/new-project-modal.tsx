@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, type SyntheticEvent } from 'react'
+import { useState, useCallback, useEffect, useRef, type SyntheticEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
@@ -46,12 +46,21 @@ export function NewProjectModal() {
 
   const githubComplete = isGitHubComplete(integrations)
 
+  const lastIntegrationsKeyRef = useRef<string>('')
   const loadIntegrations = useCallback(async (id: string) => {
     try {
       const res = await fetch(`/api/projects/${id}/integrations`)
       if (res.ok) {
         const data = await res.json()
-        setIntegrations(data.integrations || [])
+        const next = (data.integrations || []) as IntegrationStatus[]
+        const key = next
+          .map((i) => `${i.id}:${i.status}:${JSON.stringify(i.meta ?? {})}`)
+          .sort()
+          .join('|')
+        if (key !== lastIntegrationsKeyRef.current) {
+          lastIntegrationsKeyRef.current = key
+          setIntegrations(next)
+        }
       }
     } catch {
     } finally {
@@ -229,7 +238,6 @@ export function NewProjectModal() {
                   projectId={projectId!}
                   integration={getStatus('github')}
                   onRefresh={handleRefresh}
-                  returnTo={`/projects/${projectId}/settings`}
                 />
                 <PostHogCard
                   projectId={projectId!}
@@ -255,7 +263,6 @@ export function NewProjectModal() {
                   projectId={projectId!}
                   integration={getStatus('slack')}
                   onRefresh={handleRefresh}
-                  returnTo={`/projects/${projectId}/settings`}
                 />
               </div>
             )}
