@@ -155,11 +155,13 @@ export function NewProjectModal() {
     try {
       await refreshProjects()
       router.push(`/projects/${projectId}`)
-      // Intentionally keep `continuing` true through the navigation — the
-      // modal is about to unmount, and we don't want the spinner to flicker
-      // back to the idle label in the meantime. `reset()` (called when the
-      // dialog closes) will clear it.
       setShowNewProjectModal(false)
+      // NOTE: `onOpenChange` does NOT fire for programmatic close (only for
+      // Escape / outside-click / close-button), so we must clear state here
+      // explicitly. Otherwise the modal stays mounted under the dashboard
+      // layout and the next "New project" click reopens it stuck on the
+      // integrations step with a spinning "Opening chat..." button.
+      reset()
     } catch (err) {
       setContinuing(false)
       toast.error(err instanceof Error ? err.message : 'Something went wrong')
