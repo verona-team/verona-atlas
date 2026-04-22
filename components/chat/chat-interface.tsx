@@ -476,10 +476,6 @@ export function ChatInterface({
         isStreaming: false,
       }))
 
-    const dbContentSet = new Set(
-      dbMessages.map((m) => `${m.role}:${(m.content ?? '').slice(0, 100)}`),
-    )
-
     const streamAsDisplay = streamMessages
       .map((m) => {
         const rawParts =
@@ -504,16 +500,62 @@ export function ChatInterface({
       })
       .filter((m) => m.content.length > 0)
 
-    const streamNotYetInDb = streamAsDisplay.filter((m) => {
-      const key = `${m.role}:${(m.content ?? '').slice(0, 100)}`
-      return !dbContentSet.has(key)
-    })
+    /**
+     * Dedup stream messages against DB messages. Comparing the first 100 chars
+     * was fragile because the model can emit a preamble on step 0 and the real
+     * answer on step 1, so the DB text and stream text sometimes start with
+     * different content. Match on any non-trivial substring overlap instead
+     * so the stream never duplicates a persisted assistant reply.
+     */
+    const isProbableDuplicate = (
+      streamItem: { role: string; content: string },
+      dbItem: { role: string; content: string },
+    ) => {
+      if (streamItem.role !== dbItem.role) return false
+      const s = streamItem.content.trim()
+      const d = dbItem.content.trim()
+      if (!s || !d) return false
+      if (s === d) return true
+      if (s.length <= 40 || d.length <= 40) {
+        return s.startsWith(d) || d.startsWith(s)
+      }
+      const head = 80
+      const tail = 80
+      if (d.slice(0, head) === s.slice(0, head)) return true
+      if (d.slice(-tail) === s.slice(-tail)) return true
+      if (s.includes(d) || d.includes(s)) return true
+      return false
+    }
+
+    const streamNotYetInDb = streamAsDisplay.filter(
+      (m) => !dbRendered.some((db) => isProbableDuplicate(m, db)),
+    )
+
+    /**
+     * Once the backend has finished streaming AND at least one assistant row
+     * exists in the DB newer than the last user row, any leftover stream
+     * assistant entries are stale and must not be rendered. This prevents the
+     * stream snapshot and the persisted DB row from both appearing as two
+     * near-identical responses when `isProbableDuplicate` fails to catch it.
+     */
+    const lastDbUserAt = (() => {
+      for (let i = dbMessages.length - 1; i >= 0; i--) {
+        if (dbMessages[i].role === 'user') return dbMessages[i].created_at
+      }
+      return null
+    })()
+    const dbHasNewerAssistant = dbMessages.some(
+      (m) =>
+        m.role === 'assistant' &&
+        (lastDbUserAt == null ||
+          new Date(m.created_at ?? 0).getTime() >= new Date(lastDbUserAt ?? 0).getTime()),
+    )
 
     if (isStreamActive) {
       return [...dbRendered, ...streamNotYetInDb]
     }
 
-    if (streamNotYetInDb.length > 0) {
+    if (!dbHasNewerAssistant && streamNotYetInDb.length > 0) {
       return [...dbRendered, ...streamNotYetInDb]
     }
 

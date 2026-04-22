@@ -1,4 +1,4 @@
-import { convertToModelMessages, tool, stepCountIs, type UIMessage } from 'ai'
+import { convertToModelMessages, tool, stepCountIs, hasToolCall, type UIMessage } from 'ai'
 import { after } from 'next/server'
 import { z } from 'zod'
 import { traceable } from 'langsmith/traceable'
@@ -227,6 +227,8 @@ ${ce.inferredUserFlows.length ? ce.inferredUserFlows.map((f, i) => `${i + 1}. ${
 ${ce.truncationWarnings.length ? `\n**Notes:** ${ce.truncationWarnings.join(' ')}` : ''}`
       : ''
 
+  const hasExistingProposals = latestProposals?.type === 'flow_proposals'
+
   const systemPrompt = `You are Verona, an AI QA strategist that helps teams plan and execute UI testing for their web applications. You are assisting with the project "${project.name}" at ${project.app_url}.
 
 # Research Report
@@ -252,15 +254,33 @@ Integrations covered: ${report.integrationsCovered.join(', ') || 'none'}
 - When the user gives feedback, acknowledge in one or two sentences and say what you will do next.
 - If the user asks about data from an integration not listed in "integrations covered", tell them to connect it in Settings
 
+# CRITICAL: How to present flows
+- The UI renders proposed flows as structured, approvable cards ONLY when you invoke the \`generate_flow_proposals\` tool. Prose descriptions of flows are NOT rendered as cards and the user CANNOT approve them.
+- NEVER describe, enumerate, number, or bullet test flows in your written response. Do not write things like "Flow 1:", "Flow 2:", "Here are the flows", or "I recommend these flows…".
+- If you need the user to see or approve flows (including the very first turn of a session, or any time they ask for suggestions, tests, recommendations, or flows to try), call \`generate_flow_proposals\` INSTEAD of writing prose. After the tool returns, reply with a short acknowledgement (one or two sentences max) that tells the user to review the cards above — do not re-describe the flows.
+- When the user approves flows and wants to start testing, call the \`start_test_run\` tool. After it returns, reply with a one-sentence confirmation.
+
 ${contextSummary ? `Previous conversation context:\n${contextSummary}\n` : ''}
 ${flowStatusSummary}
 
 ${recentRuns && recentRuns.length > 0 ? `Recent test runs:\n${JSON.stringify(recentRuns, null, 2)}\n` : ''}
 
-When the user wants to generate or refresh test flow proposals, use the generate_flow_proposals tool.
-When the user approves flows and wants to start testing, use the start_test_run tool.`
+${hasExistingProposals ? 'Flow proposals already exist for this session — refer to them instead of calling the tool again unless the user explicitly asks to refresh.' : 'No flow proposals exist yet for this session.'}`
 
   const modelMessages = await convertToModelMessages(uiMessages)
+
+  /**
+   * When there are no flow proposals yet and the user is asking for suggestions,
+   * force the model to call `generate_flow_proposals` on the first step rather
+   * than writing a prose response. Without this, the model often re-describes
+   * flows inline and the structured approval cards never appear. The trigger
+   * is the bootstrap message the client sends ("suggest UI flows to test") or
+   * any explicit request for flows/tests.
+   */
+  const wantsFlowProposals = /suggest.*flow|recommend.*flow|propose.*flow|what.*test|flows?\s+to\s+test|ui\s+flows?/i.test(
+    lastUserText,
+  )
+  const shouldForceProposalsTool = !hasExistingProposals && wantsFlowProposals
 
   const logChatTool = (
     level: 'error' | 'warn' | 'info',
@@ -559,7 +579,7 @@ When the user approves flows and wants to start testing, use the start_test_run 
         tools: {
           generate_flow_proposals: tool({
             description:
-              'Generate structured UI test flow proposals (at most 3 flows) with approval cards based on the research report. Use when the user first asks to analyze their project, or when they want to refresh proposals.',
+              'Generate structured UI test flow proposals (at most 3 flows) rendered as approvable cards. You MUST call this instead of describing flows in prose whenever the user asks for suggestions, recommendations, tests, or flows to try, or when bootstrapping a session. Never list flows in your written reply.',
             inputSchema: z.object({
               reason: z.string().describe('Brief reason for generating proposals'),
               refresh: z
@@ -583,17 +603,60 @@ When the user approves flows and wants to start testing, use the start_test_run 
             }) => ReturnType<typeof executeStartTestRun>,
           }),
         },
-        stopWhen: stepCountIs(3),
-        onFinish: async ({ text, finishReason }) => {
+        /**
+         * On the bootstrap/"suggest flows" turn, force the tool call on step 0.
+         * This eliminates prose-only responses that render without approvable
+         * cards. After the tool runs on step 1, step 2 is left to produce a
+         * short acknowledgement; `toolChoice: 'none'` prevents the model from
+         * calling the tool a second time in the same turn.
+         */
+        prepareStep: shouldForceProposalsTool
+          ? async ({ stepNumber }) => {
+              if (stepNumber === 0) {
+                return {
+                  toolChoice: { type: 'tool', toolName: 'generate_flow_proposals' as const },
+                  activeTools: ['generate_flow_proposals'],
+                }
+              }
+              return { toolChoice: 'none' as const }
+            }
+          : undefined,
+        /**
+         * Stop after a successful proposals/run tool call so the model does not
+         * run an extra step that rewrites the flow cards as prose. The step
+         * count cap is a secondary safety net.
+         */
+        stopWhen: [
+          stepCountIs(3),
+          hasToolCall('generate_flow_proposals'),
+          hasToolCall('start_test_run'),
+        ],
+        onFinish: async ({ text, finishReason, steps }) => {
           try {
             if (finishReason && finishReason !== 'stop') {
               logChatTool('warn', 'chat_stream_finish_non_stop', { finishReason })
             }
-            if (text) {
+            /**
+             * `streamText` in AI SDK v6 exposes only the FINAL step's text on
+             * `onFinish({ text })`. When the model emits text across multiple
+             * steps (e.g. preamble on step 0, final answer on step 1) the DB
+             * was getting only step 1 while the client `useChat` stream kept
+             * text from both. That mismatch made the client dedup miss and
+             * rendered the response twice. Concatenate all step texts so the
+             * DB row matches what the user saw during streaming.
+             */
+            const aggregatedText = steps
+              .map((s) => s.text ?? '')
+              .filter((t) => t.length > 0)
+              .join('\n\n')
+              .trim()
+            const finalText = aggregatedText.length > 0 ? aggregatedText : text
+
+            if (finalText) {
               const { error: assistantMsgErr } = await serviceClient.from('chat_messages').insert({
                 session_id: session.id,
                 role: 'assistant',
-                content: text,
+                content: finalText,
               })
               if (assistantMsgErr) {
                 logChatTool('error', 'chat_assistant_message_persist_failed', {
