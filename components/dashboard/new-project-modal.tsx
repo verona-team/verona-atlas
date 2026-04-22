@@ -70,7 +70,8 @@ export function NewProjectModal() {
 
   useEffect(() => {
     if (!projectId) return
-    setLoadingIntegrations(true)
+    // Background refresh only — cards have already been optimistically rendered
+    // in the empty state by `onCreateProject`, so we skip the blocking spinner.
     loadIntegrations(projectId)
   }, [projectId, loadIntegrations])
 
@@ -122,6 +123,13 @@ export function NewProjectModal() {
         if (data.warning) {
           toast.warning(data.warning, { duration: 8000 })
         }
+        // A brand-new project has no integrations yet, so we can render the
+        // empty-state cards immediately instead of waiting on the initial
+        // `/api/projects/:id/integrations` round-trip. The effect below still
+        // fires a background fetch to surface anything pre-seeded server-side.
+        lastIntegrationsKeyRef.current = ''
+        setIntegrations([])
+        setLoadingIntegrations(false)
         setProjectId(data.id)
         setStep('integrations')
         return
@@ -230,7 +238,7 @@ export function NewProjectModal() {
               </DialogDescription>
             </DialogHeader>
 
-            {loadingIntegrations ? (
+            {loadingIntegrations && integrations.length === 0 ? (
               <p className="text-sm text-muted-foreground py-4">Loading...</p>
             ) : (
               <div className="space-y-3 mt-2">

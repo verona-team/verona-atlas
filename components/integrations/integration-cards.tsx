@@ -57,6 +57,14 @@ export function IntegrationCard({
   meta,
   required,
   children,
+  /**
+   * When true, the card renders with a consistent min-height across the
+   * idle / connecting / connected states so the layout doesn't jump as the
+   * user moves through the connect flow. Cards that expand an inline form
+   * (PostHog, Sentry, ...) pass `false` so they aren't pinned to an
+   * oversized box while the form is open.
+   */
+  stablePanel = true,
 }: {
   title: string
   description: string
@@ -65,6 +73,7 @@ export function IntegrationCard({
   meta?: string
   required?: boolean
   children: React.ReactNode
+  stablePanel?: boolean
 }) {
   const status: 'connected' | 'connecting' | 'idle' = connected
     ? 'connected'
@@ -86,11 +95,16 @@ export function IntegrationCard({
               )}
             </h3>
             <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
-            {meta && <p className="text-xs text-muted-foreground/70 mt-0.5">{meta}</p>}
+            <p
+              className={`text-xs text-muted-foreground/70 mt-0.5 transition-opacity duration-200 ${meta ? 'opacity-100' : 'opacity-0 h-0'}`}
+              aria-hidden={!meta}
+            >
+              {meta || '\u00A0'}
+            </p>
           </div>
           <Badge
             variant={status === 'connected' ? 'outline' : 'secondary'}
-            className={`transition-colors duration-200 ${
+            className={`transition-colors duration-200 shrink-0 ${
               status === 'connected'
                 ? 'border-green-500/30 text-green-500'
                 : status === 'connecting'
@@ -105,7 +119,11 @@ export function IntegrationCard({
                 : 'Not connected'}
           </Badge>
         </div>
-        {children}
+        <div
+          className={`transition-[min-height] duration-200 ${stablePanel ? 'min-h-[48px]' : ''}`}
+        >
+          {children}
+        </div>
       </CardContent>
     </Card>
   )
@@ -219,14 +237,16 @@ export function GitHubCard({
       required
       meta={linkedRepo ? `Repository: ${linkedRepo}` : integration ? 'Select a repository below' : undefined}
     >
-      <div className={`relative ${integration || waiting ? 'min-h-[96px]' : ''}`}>
+      <div className="relative">
         {showConnectCta && (
-          <Button variant="link" size="sm" className="px-0" onClick={openGitHubInstall}>
-            Connect GitHub →
-          </Button>
+          <div className="h-9 flex items-center">
+            <Button variant="link" size="sm" className="px-0" onClick={openGitHubInstall}>
+              Connect GitHub →
+            </Button>
+          </div>
         )}
         {waiting && !integration && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground transition-opacity duration-200">
+          <div className="h-9 flex items-center gap-2 text-xs text-muted-foreground transition-opacity duration-200">
             <Loader2 className="size-3.5 animate-spin" />
             <span>Waiting for GitHub authorization…</span>
           </div>
@@ -295,12 +315,16 @@ export function PostHogCard({
       title="PostHog"
       description="Monitor analytics events and session recordings."
       connected={!!integration}
+      connecting={submitting && !integration}
+      stablePanel={!expanded}
       meta={integration ? `Project: ${integration.meta?.posthog_project_id}` : undefined}
     >
       {!integration && !expanded && (
-        <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>
-          Connect PostHog →
-        </Button>
+        <div className="h-9 flex items-center">
+          <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>
+            Connect PostHog →
+          </Button>
+        </div>
       )}
       {!integration && expanded && (
         <div className="space-y-3 mt-2">
@@ -368,10 +392,14 @@ export function SentryCard({
       title="Sentry"
       description="Detect backend and frontend errors during test runs."
       connected={!!integration}
+      connecting={submitting && !integration}
+      stablePanel={!expanded}
       meta={integration ? `${integration.meta?.organization_slug}/${integration.meta?.project_slug}` : undefined}
     >
       {!integration && !expanded && (
-        <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>Connect Sentry →</Button>
+        <div className="h-9 flex items-center">
+          <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>Connect Sentry →</Button>
+        </div>
       )}
       {!integration && expanded && (
         <div className="space-y-3 mt-2">
@@ -434,10 +462,14 @@ export function LangSmithCard({
       title="LangSmith"
       description="Trace LLM calls and detect failures."
       connected={!!integration}
+      connecting={submitting && !integration}
+      stablePanel={!expanded}
       meta={integration?.meta?.project_name ? `Project: ${integration.meta.project_name}` : undefined}
     >
       {!integration && !expanded && (
-        <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>Connect LangSmith →</Button>
+        <div className="h-9 flex items-center">
+          <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>Connect LangSmith →</Button>
+        </div>
       )}
       {!integration && expanded && (
         <div className="space-y-3 mt-2">
@@ -496,10 +528,14 @@ export function BraintrustCard({
       title="Braintrust"
       description="Evaluate LLM outputs and track scores."
       connected={!!integration}
+      connecting={submitting && !integration}
+      stablePanel={!expanded}
       meta={integration?.meta?.project_name ? `Project: ${integration.meta.project_name}` : undefined}
     >
       {!integration && !expanded && (
-        <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>Connect Braintrust →</Button>
+        <div className="h-9 flex items-center">
+          <Button variant="link" size="sm" className="px-0" onClick={() => setExpanded(true)}>Connect Braintrust →</Button>
+        </div>
       )}
       {!integration && expanded && (
         <div className="space-y-3 mt-2">
@@ -654,12 +690,14 @@ export function SlackCard({
       connecting={waiting && !integration}
       meta={integration ? `${integration.meta?.team_name || 'Workspace'}${channelName ? ` · #${channelName}` : ''}` : undefined}
     >
-      <div className={`relative ${integration || waiting ? 'min-h-[40px]' : ''}`}>
+      <div className="relative">
         {!integration && !waiting && (
-          <Button variant="link" size="sm" className="px-0" onClick={openSlackAuth}>Connect Slack →</Button>
+          <div className="h-9 flex items-center">
+            <Button variant="link" size="sm" className="px-0" onClick={openSlackAuth}>Connect Slack →</Button>
+          </div>
         )}
         {waiting && !integration && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground transition-opacity duration-200">
+          <div className="h-9 flex items-center gap-2 text-xs text-muted-foreground transition-opacity duration-200">
             <Loader2 className="size-3.5 animate-spin" />
             <span>Waiting for Slack authorization…</span>
           </div>
@@ -667,9 +705,11 @@ export function SlackCard({
         {integration && !channelName && (
           <div>
             {!showChannels ? (
-              <Button variant="link" size="sm" className="px-0" onClick={loadChannels} disabled={loadingChannels}>
-                {loadingChannels ? 'Loading…' : 'Select a channel →'}
-              </Button>
+              <div className="h-9 flex items-center">
+                <Button variant="link" size="sm" className="px-0" onClick={loadChannels} disabled={loadingChannels}>
+                  {loadingChannels ? 'Loading…' : 'Select a channel →'}
+                </Button>
+              </div>
             ) : (
               <div className="mt-2 max-h-40 overflow-y-auto space-y-0.5">
                 {channels.map((ch) => (
@@ -683,9 +723,11 @@ export function SlackCard({
           </div>
         )}
         {integration && channelName && (
-          <Button variant="link" size="xs" className="px-0 text-muted-foreground" onClick={loadChannels} disabled={loadingChannels}>
-            Change channel
-          </Button>
+          <div className="h-9 flex items-center">
+            <Button variant="link" size="sm" className="px-0 text-muted-foreground" onClick={loadChannels} disabled={loadingChannels}>
+              Change channel
+            </Button>
+          </div>
         )}
       </div>
     </IntegrationCard>

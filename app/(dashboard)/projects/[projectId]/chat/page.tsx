@@ -4,6 +4,7 @@ import { getServerUser } from '@/lib/supabase/server-user'
 import { getOrCreateSession } from '@/lib/chat/session'
 import { ChatInterface } from '@/components/chat/chat-interface'
 import { SettingsQueryOpener } from '@/components/dashboard/settings-query-opener'
+import { SettingsPrefetcher } from '@/components/dashboard/settings-prefetcher'
 import { getGithubIntegrationReady } from '@/lib/github-integration-guard'
 
 type PageProps = {
@@ -56,6 +57,7 @@ export default async function ChatPage({ params, searchParams }: PageProps) {
   return (
     <div className="flex h-full flex-col">
       {autoOpenSettings && <SettingsQueryOpener projectId={projectId} />}
+      <SettingsPrefetcher projectId={projectId} />
       <ChatInterface
         projectId={projectId}
         sessionId={session.id}
