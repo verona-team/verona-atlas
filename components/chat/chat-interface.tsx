@@ -88,6 +88,16 @@ const STALE_THINKING_MS = 15 * 60 * 1000
 
 const NEAR_BOTTOM_THRESHOLD_PX = 96
 
+/**
+ * The user-facing text for the auto-bootstrap turn. Lives here (rather
+ * than inline in the effect) because the same string is also rendered as
+ * a synthetic placeholder bubble on hard refresh — see the
+ * `bootstrapPlaceholder` logic in `displayMessages` below.
+ */
+function getBootstrapText(projectName: string, appUrl: string): string {
+  return `I just set up ${projectName} (${appUrl}). Analyze my project data and suggest UI flows to test.`
+}
+
 interface ChatInterfaceProps {
   projectId: string
   sessionId: string
@@ -261,7 +271,7 @@ export function ChatInterface({
       parts: [
         {
           type: 'text',
-          text: `I just set up ${projectName} (${appUrl}). Analyze my project data and suggest UI flows to test.`,
+          text: getBootstrapText(projectName, appUrl),
         },
       ],
     })
@@ -565,8 +575,56 @@ export function ChatInterface({
 
     const streamNotYetInDb = streamAsDisplay.filter((m) => !persistedClientIds.has(m.id))
 
-    return [...dbRendered, ...streamNotYetInDb]
-  }, [dbMessages, streamMessages, isStreamActive])
+    const combined = [...dbRendered, ...streamNotYetInDb]
+
+    /**
+     * Hard-refresh recovery for the auto-bootstrap turn.
+     *
+     * When a user hard-refreshes in the small window between the
+     * bootstrap POST being sent and the server upserting the user
+     * `chat_messages` row:
+     *
+     * - `initialMessages` (SSR) is empty, so `dbMessages` is empty.
+     * - `streamMessages` is also empty because `useChat` is a fresh
+     *   instance after the reload — the pre-refresh `streamMessages`
+     *   state was thrown away.
+     * - The bootstrap effect short-circuits on `backendThinking` so it
+     *   does not re-fire `sendMessage`, which would otherwise have
+     *   repainted the user turn into `streamMessages` again.
+     *
+     * Result pre-fix: the user's opening message disappeared from the
+     * UI, leaving only a thinking indicator with no context of what
+     * was asked.
+     *
+     * Fix: whenever we have no visible user turn but the backend is
+     * known to be working (or we're locally streaming), synthesize a
+     * placeholder bubble that mirrors the exact bootstrap text. Once
+     * the real DB row arrives via Supabase Realtime (or a subsequent
+     * reload picks it up via SSR), it will be rendered instead — so
+     * this placeholder cleanly dissolves.
+     */
+    const hasVisibleUserTurn = combined.some((m) => m.role === 'user')
+    if (!hasVisibleUserTurn && (backendThinking || isStreamActive)) {
+      const placeholder = {
+        id: `bootstrap-placeholder:${sessionId}`,
+        role: 'user' as const,
+        content: getBootstrapText(projectName, appUrl),
+        metadata: undefined as Record<string, Json> | undefined,
+        isStreaming: false,
+      }
+      return [placeholder, ...combined]
+    }
+
+    return combined
+  }, [
+    dbMessages,
+    streamMessages,
+    isStreamActive,
+    backendThinking,
+    sessionId,
+    projectName,
+    appUrl,
+  ])
 
   return (
     <div className="relative flex flex-col h-full">
