@@ -8,17 +8,6 @@ import { useWorkspace } from '@/lib/workspace-context'
 import { SignOutLink } from '@/components/dashboard/sign-out-link'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from '@/components/ui/tooltip'
-
-function OrgOrb() {
-  return (
-    <div className="h-4 w-4 shrink-0 rounded-full bg-gradient-to-br from-cyan-400 via-violet-500 to-fuchsia-600 shadow-[0_0_6px_rgba(139,92,246,0.35)]" />
-  )
-}
 
 export function AppSidebar() {
   const {
@@ -27,7 +16,6 @@ export function AppSidebar() {
     sidebarCollapsed,
     toggleSidebar,
     setShowNewProjectModal,
-    orgName,
     userEmail,
   } = useWorkspace()
   const pathname = usePathname()
@@ -56,25 +44,17 @@ export function AppSidebar() {
             : 'fixed inset-y-0 left-0 z-50 w-64 opacity-100 lg:relative lg:z-auto',
         )}
       >
-        {/* Top: orb + org name + collapse toggle */}
-        <div className="flex h-12 shrink-0 items-center justify-between px-3 border-b border-sidebar-border">
-          <div className="flex items-center gap-2 min-w-0">
-            <OrgOrb />
-            <span className="text-sm font-normal truncate">{orgName || 'Verona'}</span>
-          </div>
-          <Tooltip>
-            <TooltipTrigger render={
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={toggleSidebar}
-                className="text-sidebar-foreground/60 hover:text-sidebar-foreground shrink-0 ml-2"
-              />
-            }>
-              <PanelLeftClose className="h-4 w-4" />
-            </TooltipTrigger>
-            <TooltipContent>Collapse sidebar</TooltipContent>
-          </Tooltip>
+        {/* Top: collapse toggle */}
+        <div className="flex h-12 shrink-0 items-center justify-end px-3 border-b border-sidebar-border">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={toggleSidebar}
+            className="text-sidebar-foreground/60 hover:text-sidebar-foreground shrink-0"
+            aria-label="Collapse sidebar"
+          >
+            <PanelLeftClose className="h-4 w-4" />
+          </Button>
         </div>
 
         {/* New project button */}
@@ -144,18 +124,14 @@ export function SidebarToggle() {
   if (!sidebarCollapsed) return null
 
   return (
-    <Tooltip>
-      <TooltipTrigger render={
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={toggleSidebar}
-          className="text-muted-foreground hover:text-foreground"
-        />
-      }>
-        <PanelLeft className="h-4 w-4" />
-      </TooltipTrigger>
-      <TooltipContent>Toggle sidebar</TooltipContent>
-    </Tooltip>
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      onClick={toggleSidebar}
+      className="text-muted-foreground hover:text-foreground"
+      aria-label="Expand sidebar"
+    >
+      <PanelLeft className="h-4 w-4" />
+    </Button>
   )
 }

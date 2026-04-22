@@ -251,6 +251,7 @@ Integrations covered: ${report.integrationsCovered.join(', ') || 'none'}
 - When proposing or discussing flows, tie briefly to specific findings or repo context when it helps—one clause per point, not essays.
 - When the user gives feedback, acknowledge in one or two sentences and say what you will do next.
 - If the user asks about data from an integration not listed in "integrations covered", tell them to connect it in Settings
+- Never use emojis in your responses. Do not include any emoji characters or pictographs under any circumstances, even for lists, status, or emphasis. Use plain text only.
 
 ${contextSummary ? `Previous conversation context:\n${contextSummary}\n` : ''}
 ${flowStatusSummary}

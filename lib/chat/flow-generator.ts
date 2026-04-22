@@ -75,7 +75,9 @@ Based on this research, generate at most 3 concrete UI test flows—only the hig
 - Include detailed step-by-step instructions an AI browser agent can execute
 - Be prioritized by severity of the underlying finding
 
-Step types: navigate (go to URL), action (click/type/interact), assertion (verify something), extract (get data), wait (pause)`,
+Step types: navigate (go to URL), action (click/type/interact), assertion (verify something), extract (get data), wait (pause)
+
+Do not include any emoji characters in the analysis, flow names, descriptions, rationales, or steps. Use plain text only.`,
   })
 
   return output
