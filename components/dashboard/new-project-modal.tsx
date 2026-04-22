@@ -42,7 +42,6 @@ export function NewProjectModal() {
   // Phase 2: integrations
   const [projectId, setProjectId] = useState<string | null>(null)
   const [integrations, setIntegrations] = useState<IntegrationStatus[]>([])
-  const [loadingIntegrations, setLoadingIntegrations] = useState(false)
 
   const githubComplete = isGitHubComplete(integrations)
 
@@ -50,28 +49,28 @@ export function NewProjectModal() {
   const loadIntegrations = useCallback(async (id: string) => {
     try {
       const res = await fetch(`/api/projects/${id}/integrations`)
-      if (res.ok) {
-        const data = await res.json()
-        const next = (data.integrations || []) as IntegrationStatus[]
-        const key = next
-          .map((i) => `${i.id}:${i.status}:${JSON.stringify(i.meta ?? {})}`)
-          .sort()
-          .join('|')
-        if (key !== lastIntegrationsKeyRef.current) {
-          lastIntegrationsKeyRef.current = key
-          setIntegrations(next)
-        }
+      if (!res.ok) return
+      const data = await res.json()
+      const next = (data.integrations || []) as IntegrationStatus[]
+      const key = next
+        .map((i) => `${i.id}:${i.status}:${JSON.stringify(i.meta ?? {})}`)
+        .sort()
+        .join('|')
+      if (key !== lastIntegrationsKeyRef.current) {
+        lastIntegrationsKeyRef.current = key
+        setIntegrations(next)
       }
     } catch {
-    } finally {
-      setLoadingIntegrations(false)
+      /* ignore — the cards are already rendered in an empty state, and
+         visibility/focus listeners below will retry when the user is
+         engaged with the tab again */
     }
   }, [])
 
   useEffect(() => {
     if (!projectId) return
-    // Background refresh only — cards have already been optimistically rendered
-    // in the empty state by `onCreateProject`, so we skip the blocking spinner.
+    // Background refresh only — cards already render in the empty state
+    // directly from `onCreateProject`, so no render gate is needed here.
     loadIntegrations(projectId)
   }, [projectId, loadIntegrations])
 
@@ -123,13 +122,11 @@ export function NewProjectModal() {
         if (data.warning) {
           toast.warning(data.warning, { duration: 8000 })
         }
-        // A brand-new project has no integrations yet, so we can render the
-        // empty-state cards immediately instead of waiting on the initial
-        // `/api/projects/:id/integrations` round-trip. The effect below still
-        // fires a background fetch to surface anything pre-seeded server-side.
+        // A brand-new project has no integrations yet, so render the
+        // empty-state cards immediately. The effect below still fires a
+        // background refresh to surface anything pre-seeded server-side.
         lastIntegrationsKeyRef.current = ''
         setIntegrations([])
-        setLoadingIntegrations(false)
         setProjectId(data.id)
         setStep('integrations')
         return
@@ -238,42 +235,38 @@ export function NewProjectModal() {
               </DialogDescription>
             </DialogHeader>
 
-            {loadingIntegrations && integrations.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4">Loading...</p>
-            ) : (
-              <div className="space-y-3 mt-2">
-                <GitHubCard
-                  projectId={projectId!}
-                  integration={getStatus('github')}
-                  onRefresh={handleRefresh}
-                />
-                <PostHogCard
-                  projectId={projectId!}
-                  integration={getStatus('posthog')}
-                  onRefresh={handleRefresh}
-                />
-                <SentryCard
-                  projectId={projectId!}
-                  integration={getStatus('sentry')}
-                  onRefresh={handleRefresh}
-                />
-                <LangSmithCard
-                  projectId={projectId!}
-                  integration={getStatus('langsmith')}
-                  onRefresh={handleRefresh}
-                />
-                <BraintrustCard
-                  projectId={projectId!}
-                  integration={getStatus('braintrust')}
-                  onRefresh={handleRefresh}
-                />
-                <SlackCard
-                  projectId={projectId!}
-                  integration={getStatus('slack')}
-                  onRefresh={handleRefresh}
-                />
-              </div>
-            )}
+            <div className="space-y-3 mt-2">
+              <GitHubCard
+                projectId={projectId!}
+                integration={getStatus('github')}
+                onRefresh={handleRefresh}
+              />
+              <PostHogCard
+                projectId={projectId!}
+                integration={getStatus('posthog')}
+                onRefresh={handleRefresh}
+              />
+              <SentryCard
+                projectId={projectId!}
+                integration={getStatus('sentry')}
+                onRefresh={handleRefresh}
+              />
+              <LangSmithCard
+                projectId={projectId!}
+                integration={getStatus('langsmith')}
+                onRefresh={handleRefresh}
+              />
+              <BraintrustCard
+                projectId={projectId!}
+                integration={getStatus('braintrust')}
+                onRefresh={handleRefresh}
+              />
+              <SlackCard
+                projectId={projectId!}
+                integration={getStatus('slack')}
+                onRefresh={handleRefresh}
+              />
+            </div>
 
             <div className="pt-3">
               <Button
