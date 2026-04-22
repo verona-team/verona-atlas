@@ -1,4 +1,5 @@
 import {
+  consumeStream,
   convertToModelMessages,
   createIdGenerator,
   tool,
@@ -135,12 +136,6 @@ export async function POST(request: Request) {
     const session = await getOrCreateSession(serviceClient, projectId)
     logSessionId = session.id
 
-    await setSessionStatus(serviceClient, session.id, 'thinking')
-
-    after(async () => {
-      await setSessionStatus(serviceClient, session.id, 'idle')
-    })
-
   /** Set when flow proposal DB insert fails so onFinish can persist a visible error. */
   let flowProposalInsertError: string | null = null
 
@@ -154,6 +149,66 @@ export async function POST(request: Request) {
         .join('') ?? ''
 
     if (lastUserText) {
+      /**
+       * Check for a duplicate POST of the same user turn BEFORE touching
+       * session status or doing any expensive setup (research agent, model
+       * call). This is how we survive "user closed the tab mid-turn, then
+       * came back and the bootstrap effect re-fired." The client uses a
+       * deterministic `messageId` for the bootstrap
+       * (`bootstrap:<sessionId>:<nonce>`) and any re-send of a regular user
+       * turn would also reuse its original `id`, so a row with the same
+       * `(session_id, client_message_id)` is a reliable signal that this
+       * turn is already running (thanks to the durable `result.consumeStream()`
+       * in the main branch below) or has already finished.
+       *
+       * When we detect a duplicate we return immediately with an empty
+       * UI-message SSE response. Crucially, we do this without calling
+       * `setSessionStatus('thinking')` or scheduling an `after` to flip it
+       * back — that would clobber the legitimate in-flight turn's status.
+       * The client's existing Supabase Realtime subscription on
+       * `chat_messages` + `chat_sessions` will deliver the final assistant
+       * row and status transitions when the original turn finishes.
+       */
+      const { data: existingUserMsg } = await serviceClient
+        .from('chat_messages')
+        .select('id')
+        .eq('session_id', session.id)
+        .eq('client_message_id', lastMessage.id)
+        .maybeSingle()
+
+      if (existingUserMsg) {
+        chatServerLog('info', 'chat_duplicate_turn_short_circuit', {
+          projectId,
+          sessionId: session.id,
+          userId: user.id,
+          clientMessageId: lastMessage.id,
+        })
+        return new Response(
+          // Minimal valid UI-message SSE body: a start/finish pair with no
+          // content. This satisfies the AI SDK stream parser on the client
+          // without producing any visible message parts.
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              const enc = new TextEncoder()
+              controller.enqueue(enc.encode('data: {"type":"start"}\n\n'))
+              controller.enqueue(enc.encode('data: {"type":"finish"}\n\n'))
+              controller.enqueue(enc.encode('data: [DONE]\n\n'))
+              controller.close()
+            },
+          }),
+          {
+            status: 200,
+            headers: {
+              'content-type': 'text/event-stream',
+              'cache-control': 'no-cache',
+              connection: 'keep-alive',
+              'x-vercel-ai-ui-message-stream': 'v1',
+              'x-accel-buffering': 'no',
+            },
+          },
+        )
+      }
+
       /**
        * Store the UIMessage id the client assigned (useChat's `messages[i].id`).
        * The client uses this id to dedup its in-flight `streamMessages` against
@@ -180,6 +235,24 @@ export async function POST(request: Request) {
       }
     }
   }
+
+    await setSessionStatus(serviceClient, session.id, 'thinking')
+
+    /**
+     * Belt-and-suspenders reset of session status. The `onFinish` callback
+     * on the UI message stream is the primary place this flips back to
+     * `idle`, but if something blows up before `onFinish` runs (e.g. the
+     * model never starts because an integration lookup throws) this
+     * `after()` callback is the safety net. It is intentionally
+     * non-conditional: worst case it's a redundant write that matches
+     * whatever `onFinish` already set. Crucially, this only runs for the
+     * main branch — duplicate-turn short-circuits return above, so they
+     * never schedule an `after` that could clobber the original turn's
+     * `thinking` status.
+     */
+    after(async () => {
+      await setSessionStatus(serviceClient, session.id, 'idle')
+    })
 
   const { contextSummary } = await buildChatContext(serviceClient, session.id)
 
@@ -647,6 +720,31 @@ ${recentRuns && recentRuns.length > 0 ? `\nRecent test runs:\n${JSON.stringify(r
       })
 
       /**
+       * Durability for tab-close / hard-refresh mid-turn:
+       *
+       * 1. `result.consumeStream()` drains the model stream server-side even
+       *    when the client Response is cancelled. Without this, Next.js
+       *    cancelling the Response (when the browser disconnects) would
+       *    backpressure `streamText` and abort the provider call, so tool
+       *    execution + the assistant reply would never finish.
+       * 2. `consumeSseStream: consumeStream` below forces the SSE pipe to be
+       *    fully consumed too, which guarantees `onFinish` fires (and
+       *    therefore the assistant DB row gets persisted) even on abort.
+       *    See `node_modules/ai/docs/09-troubleshooting/14-stream-abort-handling.mdx`.
+       *
+       * The combo means: close the tab while Verona is mid-turn → the
+       * backend keeps calling tools, keeps streaming the model, and writes
+       * the final assistant message to `chat_messages` when it is done.
+       * The next client mount picks it up via Supabase Realtime (and the
+       * SSR initial fetch as a fallback).
+       */
+      result.consumeStream({
+        onError: (err) => {
+          logChatTool('warn', 'chat_consume_stream_error', { err })
+        },
+      })
+
+      /**
        * Persist the assistant turn from `toUIMessageStreamResponse.onFinish`
        * rather than `streamText.onFinish`. The UI-message stream callback
        * hands us `responseMessage` — the same `UIMessage` the client
@@ -659,6 +757,7 @@ ${recentRuns && recentRuns.length > 0 ? `\nRecent test runs:\n${JSON.stringify(r
       return result.toUIMessageStreamResponse({
         originalMessages: uiMessages,
         generateMessageId: createIdGenerator({ prefix: 'va', size: 16 }),
+        consumeSseStream: consumeStream,
         onError: (error) => {
           logChatTool('error', 'chat_ui_message_stream_error', { err: error })
           return error instanceof Error ? error.message : 'Chat stream error'
