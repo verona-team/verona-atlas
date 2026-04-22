@@ -27,11 +27,6 @@ function getTextFromParts(parts: Array<{ type: string; text?: string }>): string
     .join('')
 }
 
-/**
- * Assistant turns are often tool-only (no `text` parts): the model calls
- * `generate_flow_proposals` and streams no prose. Surface tool output until
- * the DB row (with flow cards) arrives.
- */
 /** Realtime UPDATE payloads may include only changed columns; merge so we never drop `content`. */
 function mergeChatMessageRow(prev: ChatMessage, patch: ChatMessage): ChatMessage {
   const defined = Object.fromEntries(
@@ -44,6 +39,15 @@ function mergeChatMessageRow(prev: ChatMessage, patch: ChatMessage): ChatMessage
   return merged
 }
 
+/**
+ * Extract the text we want to render in the assistant bubble for an in-flight
+ * stream message. For text-only turns this is the concatenated text parts.
+ *
+ * For tool-only turns we return '' on success — the tool inserts its own DB
+ * row (e.g. a `flow_proposals` row with approvable cards) that renders
+ * separately. We still surface a short line for failures so the user isn't
+ * left looking at a spinner that never completes.
+ */
 function getVisibleTextFromMessageParts(
   role: string,
   parts: Array<{
@@ -54,11 +58,8 @@ function getVisibleTextFromMessageParts(
     output?: unknown
   }>,
 ): string {
-  if (role !== 'assistant') {
-    return getTextFromParts(parts)
-  }
   const plain = getTextFromParts(parts)
-  if (plain.length > 0) return plain
+  if (role !== 'assistant' || plain.length > 0) return plain
 
   for (const p of parts) {
     if (p.type === 'dynamic-tool' || p.type.startsWith('tool-')) {
@@ -69,12 +70,6 @@ function getVisibleTextFromMessageParts(
         const o = p.output as Record<string, unknown>
         if (o.success === false && typeof o.error === 'string') {
           return `Could not save proposals: ${o.error}`
-        }
-        if (typeof o.analysis === 'string' && o.analysis.length > 0) {
-          return o.analysis
-        }
-        if (o.success === true && typeof o.flowCount === 'number') {
-          return `Prepared ${o.flowCount} test flow proposal(s) for you.`
         }
       }
     }
@@ -476,10 +471,6 @@ export function ChatInterface({
         isStreaming: false,
       }))
 
-    const dbContentSet = new Set(
-      dbMessages.map((m) => `${m.role}:${(m.content ?? '').slice(0, 100)}`),
-    )
-
     const streamAsDisplay = streamMessages
       .map((m) => {
         const rawParts =
@@ -504,20 +495,23 @@ export function ChatInterface({
       })
       .filter((m) => m.content.length > 0)
 
-    const streamNotYetInDb = streamAsDisplay.filter((m) => {
-      const key = `${m.role}:${(m.content ?? '').slice(0, 100)}`
-      return !dbContentSet.has(key)
-    })
+    /**
+     * Dedup stream messages against DB messages by id. The server persists
+     * each assistant turn with `client_message_id` set to the same UIMessage
+     * id the client holds in `streamMessages`, so a stream message is
+     * considered already persisted iff a DB row has a matching
+     * `client_message_id`. Same story for the user turn. No fuzzy text
+     * comparisons, no timestamp fallbacks.
+     */
+    const persistedClientIds = new Set(
+      dbMessages
+        .map((m) => m.client_message_id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0),
+    )
 
-    if (isStreamActive) {
-      return [...dbRendered, ...streamNotYetInDb]
-    }
+    const streamNotYetInDb = streamAsDisplay.filter((m) => !persistedClientIds.has(m.id))
 
-    if (streamNotYetInDb.length > 0) {
-      return [...dbRendered, ...streamNotYetInDb]
-    }
-
-    return dbRendered
+    return [...dbRendered, ...streamNotYetInDb]
   }, [dbMessages, streamMessages, isStreamActive])
 
   return (

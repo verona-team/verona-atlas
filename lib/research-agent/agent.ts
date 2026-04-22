@@ -230,47 +230,56 @@ async function runResearchLoopCore(ctx: AgentContext): Promise<IntegrationResear
     .map(([type, docs]) => `## ${type.toUpperCase()} API Documentation\n\n${docs}`)
     .join('\n\n---\n\n')
 
-  const systemPrompt = `You are a QA research agent for the web application at ${ctx.appUrl}. Your job is to investigate the user's connected integrations and gather information that will help determine which UI flows are most important to test.
+  const systemPrompt = `You are a QA research agent investigating connected integrations for ${ctx.appUrl}. Your goal: surface specific, evidence-backed signals a human QA lead could turn into UI test flows.
 
-You have access to the following integrations: ${integrationList.join(', ')}
+Connected integrations: ${integrationList.join(', ')}
 
-IMPORTANT: Authentication headers are automatically injected for all API requests to the allowed hosts. You do NOT need to set Authorization headers yourself. Just make fetch requests to the API endpoints and auth will be handled.
+# Execution environment
 
-Available environment variables (use these for API-specific configuration like project IDs):
+- You invoke code via the \`execute_code\` tool. It runs JavaScript (ES modules, Node 24, built-in \`fetch\`) in a sandbox with network access only to the allowed integration hosts.
+- Authentication headers are auto-injected for allowed hosts. Do NOT set Authorization headers yourself.
+- Run code executions SEQUENTIALLY (one at a time) — parallel calls collide on sandbox stdout.
+- Use \`console.log(JSON.stringify(...))\` to return data. Keep each call focused on one question.
+
+Available env vars (use for project IDs, org slugs, etc.):
 ${envVarDocs}
 
-Write JavaScript code (ES modules, Node 24 with built-in fetch) to query these APIs. Use console.log() to output results as JSON. Each code execution should be focused on one integration or one specific query.
+# Investigation approach
 
-IMPORTANT RULES:
-- Preflight data has already been collected for each integration (see below). Review it first and focus your tool calls on DEEPER investigation — drill into specific findings, correlate data across sources, and fill gaps.
-- Do NOT re-fetch data that the preflight scripts already collected unless you need more detail.
-- Run code executions SEQUENTIALLY (one at a time) to avoid stdout collision in the sandbox.
+1. Preflight data (below) has already collected the obvious first-layer facts for each integration. Read it first.
+2. Then use \`execute_code\` ONLY to go deeper: drill into specific findings, correlate across sources, fill gaps. Do NOT re-fetch what preflight already provides.
+3. Favour a few targeted, well-chosen follow-ups over many shallow queries. If preflight is already sufficient for a given integration, move on.
 
-Investigation priorities:
-- For GitHub: analyze the preflight commit/PR data, then drill into specific large PRs for file-level changes, look for patterns in bug fix commits, check for open issues
-- For PostHog: analyze the preflight rage click and traffic data, then drill into specific session recordings for high-rage-click pages, look for autocapture interaction patterns
-- For Sentry: analyze the preflight error data, then drill into top issues for stack traces and affected URLs
-- For LangSmith: analyze the preflight run data, then drill into error details, token usage patterns, and latency outliers
-- For Braintrust: analyze the preflight experiment data, then check for score regressions
+# Per-integration drill-in suggestions
 
-After gathering data from all available integrations, you will be asked to produce a structured report.`
+- GitHub: biggest recent PRs → which files/modules; patterns across bug-fix commits; open issues tagged with bugs or regressions.
+- PostHog: top rage-click URLs → pull a matching session recording's clickstream; repeated exception messages → affected URLs + user counts.
+- Sentry: top unresolved issues → stack traces + affected URLs; events in the last 24h to catch fresh regressions.
+- LangSmith: error runs → error messages; latency outliers; which chains/prompts are failing.
+- Braintrust: experiments with recent score regressions → which metric dropped.
+
+# What "good" looks like
+
+Every finding you surface should have at least one concrete anchor (commit SHA, PR #, URL path, error message, count, session ID) so a downstream reader can verify it.
+
+When you have enough signal, stop calling tools. You'll then be asked for a structured report.`
 
   const researchGen = await generateText({
     model,
     system: systemPrompt,
     messages: [{
       role: 'user',
-      content: `Investigate all connected integrations (${integrationList.join(', ')}) and gather data useful for QA test planning. Use the execute_code tool to run JavaScript against the APIs.
+      content: `Investigate ${integrationList.join(', ')} for QA test planning signals on ${ctx.appUrl}.
 
-## Preflight Data (already collected)
+## Preflight data (already collected — start here)
 
 ${preflightSummary}
 
-## API Documentation
+## API reference (for your follow-up queries)
 
 ${apiDocs}
 
-Review the preflight data above. Then use execute_code for DEEPER investigation — drill into specific findings, correlate across integrations, and fill any gaps. Do NOT re-fetch what the preflight already provides.`,
+Drill into the most interesting signals the preflight surfaced. Correlate across integrations when it helps (e.g. a PostHog rage-click URL that matches a Sentry error, or a freshly merged PR that touches a page with rising error rates). Do NOT re-fetch what preflight already provides.`,
     }],
     tools: {
       execute_code: tool({
@@ -342,24 +351,28 @@ Review the preflight data above. Then use execute_code for DEEPER investigation 
   const { output: report } = await generateText({
     model,
     output: Output.object({ schema: integrationResearchReportSchema }),
-    prompt: `Based on the following research investigation of the web application at ${ctx.appUrl}, produce a structured QA research report.
+    prompt: `Synthesize a structured QA research report from the investigation notes below. The report is the canonical handoff to a downstream flow-proposer; be specific and evidence-backed, not narrative.
 
-The research agent investigated these integrations: ${integrationList.join(', ')}
+App under test: ${ctx.appUrl}
+Integrations investigated: ${integrationList.join(', ')}
 
-Research notes and findings:
-${researchNotes}
+# Output requirements
 
-Produce a comprehensive report with:
-1. An executive summary of all findings
-2. Individual findings categorized by source and severity (optional field \`rawData\`: a JSON string of compact supporting facts, e.g. commit SHAs or counts — omit if none)
-3. Specific UI flow recommendations based on the data
-4. Which integrations were covered vs skipped
+- \`summary\`: 3–6 sentences. Lead with the single biggest risk, then the next 1–2 themes. No preamble. No "this report covers…".
+- \`findings\`: one entry per distinct, actionable signal. Each needs \`source\`, \`category\`, \`severity\`, a one- or two-sentence \`details\` that ends with a concrete anchor (commit SHA, PR #, URL, error count, session ID). Use \`rawData\` (JSON string) ONLY when the anchor doesn't fit naturally in prose (e.g. a list of commit SHAs); omit otherwise.
+- \`recommendedFlows\`: short phrases naming user-facing flows a QA human could recognize ("Autosave under concurrent editing", "Magic-link expiration recovery"). Prefer 5–10 strong candidates over 20 weak ones. Each must be traceable to at least one finding.
+- \`integrationsCovered\` / \`integrationsSkipped\`: honest account of what produced usable data vs what errored or returned nothing.
 
-Focus the recommended flows on:
-- Areas with recent code changes (from GitHub)
-- Error-prone pages and flows (from PostHog/Sentry)
-- High-traffic user journeys that need regression testing
-- AI/LLM features with failures (from LangSmith/Braintrust)`,
+# Prioritization for recommended flows
+
+1. Regressions on recently merged PRs — especially large diffs, bug-fix series, or infra overhauls.
+2. Pages with concrete user pain (rage clicks, exceptions, drop-off).
+3. High-traffic journeys that would be embarrassing to break.
+4. AI/LLM features with failing runs or score regressions.
+
+# Research notes
+
+${researchNotes}`,
   })
 
   return report
