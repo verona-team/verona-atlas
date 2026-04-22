@@ -33,9 +33,12 @@ export function SettingsPanel() {
     if (!settingsProjectId) return
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
+        // Don't close the panel if an AlertDialog (or other dialog) is open
+        if (document.querySelector('[data-slot="alert-dialog-overlay"]')) return
         e.preventDefault()
         closeSettings()
       }
+    }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
