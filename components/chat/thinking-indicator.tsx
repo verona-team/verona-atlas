@@ -25,24 +25,17 @@ const VERBS = [
   'Sifting',
 ]
 
-function formatElapsed(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return `${m}m ${s}s`
-}
-
 interface ThinkingIndicatorProps {
-  startedAt: number
   className?: string
 }
 
-export function ThinkingIndicator({ startedAt, className = '' }: ThinkingIndicatorProps) {
-  // Seed initial verb from `startedAt` to keep render pure. Subsequent verbs
-  // are chosen randomly inside the interval (a side-effect context).
-  const initialVerb = Math.abs(Math.floor(startedAt / 1000)) % VERBS.length
-  const [verbIdx, setVerbIdx] = useState(initialVerb)
-  const [elapsed, setElapsed] = useState(() => Math.max(0, Math.floor((Date.now() - startedAt) / 1000)))
+export function ThinkingIndicator({ className = '' }: ThinkingIndicatorProps) {
+  // Seed the initial verb randomly on mount. The indicator no longer tracks
+  // absolute elapsed time — on a hard refresh we'd lose the original start
+  // timestamp and the counter would confusingly reset to 0s, so it's gone.
+  const [verbIdx, setVerbIdx] = useState(() =>
+    Math.floor(Math.random() * VERBS.length),
+  )
   const [dots, setDots] = useState('')
 
   useEffect(() => {
@@ -57,20 +50,15 @@ export function ThinkingIndicator({ startedAt, className = '' }: ThinkingIndicat
       })
     }, 2200)
 
-    const timeId = setInterval(() => {
-      setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)))
-    }, 1000)
-
     const dotsId = setInterval(() => {
       setDots((d) => (d.length >= 3 ? '' : d + '·'))
     }, 400)
 
     return () => {
       clearInterval(verbId)
-      clearInterval(timeId)
       clearInterval(dotsId)
     }
-  }, [startedAt])
+  }, [])
 
   return (
     <div
@@ -84,10 +72,9 @@ export function ThinkingIndicator({ startedAt, className = '' }: ThinkingIndicat
       />
       <span className="font-mono tabular-nums text-foreground/70">
         {VERBS[verbIdx]}
-        <span className="inline-block w-4 text-left text-muted-foreground/60">{dots}</span>
-      </span>
-      <span className="text-muted-foreground/50 font-mono tabular-nums">
-        · {formatElapsed(elapsed)}
+        <span className="inline-block w-4 text-left text-muted-foreground/60">
+          {dots}
+        </span>
       </span>
     </div>
   )
