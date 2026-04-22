@@ -1,4 +1,4 @@
-import { notFound, redirect } from 'next/navigation'
+import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { getServerUser } from '@/lib/supabase/server-user'
 import { getOrCreateSession } from '@/lib/chat/session'
@@ -38,11 +38,6 @@ export default async function ChatPage({ params, searchParams }: PageProps) {
   if (!project) notFound()
 
   const gh = await getGithubIntegrationReady(supabase, projectId)
-  if (!gh.ok && settings !== '1') {
-    redirect(`/projects/${projectId}/chat?settings=1`)
-  }
-  const shouldOpenSettings = settings === '1'
-
   const session = await getOrCreateSession(supabase, projectId)
 
   const { data: messages } = await supabase
@@ -51,9 +46,16 @@ export default async function ChatPage({ params, searchParams }: PageProps) {
     .eq('session_id', session.id)
     .order('created_at', { ascending: true })
 
+  // Settings is a client-side overlay, so we never redirect away from the chat
+  // when GitHub isn't ready or when `?settings=1` is present. Instead we just
+  // tell the client to open the overlay. This keeps the chat page mounted and
+  // avoids a server/client loop where stripping the query param would re-trigger
+  // the server guard.
+  const autoOpenSettings = settings === '1' || !gh.ok
+
   return (
     <div className="flex h-full flex-col">
-      {shouldOpenSettings && <SettingsQueryOpener projectId={projectId} />}
+      {autoOpenSettings && <SettingsQueryOpener projectId={projectId} />}
       <ChatInterface
         projectId={projectId}
         sessionId={session.id}
