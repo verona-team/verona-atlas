@@ -5,6 +5,12 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useWorkspace } from '@/lib/workspace-context'
+import {
+  getSettingsCache,
+  invalidateSettingsCache,
+  prefetchSettings,
+  subscribeSettingsCache,
+} from '@/lib/settings-prefetch'
 import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -42,25 +48,32 @@ export function SettingsContent({ projectId }: { projectId: string }) {
   const toastShown = useRef(false)
   const { refreshProjects, closeSettings } = useWorkspace()
 
-  const [project, setProject] = useState<ProjectData | null>(null)
-  const [integrations, setIntegrations] = useState<IntegrationData[]>([])
-  const [loading, setLoading] = useState(true)
-  const lastIntegrationsKeyRef = useRef<string>('')
+  // Seed from the prefetch cache if the chat page has already warmed it.
+  const cachedOnMount = getSettingsCache(projectId)
+  const [project, setProject] = useState<ProjectData | null>(
+    cachedOnMount?.project ?? null,
+  )
+  const [integrations, setIntegrations] = useState<IntegrationData[]>(
+    cachedOnMount?.integrations ?? [],
+  )
+  const [loading, setLoading] = useState(
+    !cachedOnMount || cachedOnMount.fetchedAt === 0,
+  )
+  const lastIntegrationsKeyRef = useRef<string>(
+    (cachedOnMount?.integrations ?? [])
+      .map((i) => `${i.id}:${i.status}:${JSON.stringify(i.meta ?? {})}`)
+      .sort()
+      .join('|'),
+  )
 
   const loadData = useCallback(async () => {
     try {
-      const [projRes, intRes] = await Promise.all([
-        fetch(`/api/projects/${projectId}`),
-        fetch(`/api/projects/${projectId}/integrations`),
-      ])
-
-      if (projRes.ok) {
-        const projData = await projRes.json()
-        setProject(projData)
-      }
-      if (intRes.ok) {
-        const intData = await intRes.json()
-        const next = (intData.integrations || []) as IntegrationData[]
+      invalidateSettingsCache(projectId)
+      await prefetchSettings(projectId, { force: true })
+      const entry = getSettingsCache(projectId)
+      if (entry) {
+        if (entry.project) setProject(entry.project)
+        const next = entry.integrations
         const key = next
           .map((i) => `${i.id}:${i.status}:${JSON.stringify(i.meta ?? {})}`)
           .sort()
@@ -76,9 +89,32 @@ export function SettingsContent({ projectId }: { projectId: string }) {
     }
   }, [projectId])
 
+  // Initial load: if cache has fresh data, we're already seeded and not
+  // loading. Otherwise kick off a fetch. Either way, also refresh in the
+  // background so mutations made while we were in the chat are reflected.
   useEffect(() => {
     loadData()
   }, [loadData])
+
+  // Reflect cache updates pushed by other subscribers — e.g. the
+  // `SettingsPrefetcher` on the chat page completing its background fetch
+  // while this panel is mounted.
+  useEffect(() => {
+    return subscribeSettingsCache(projectId, () => {
+      const entry = getSettingsCache(projectId)
+      if (!entry) return
+      if (entry.project) setProject(entry.project)
+      const next = entry.integrations
+      const key = next
+        .map((i) => `${i.id}:${i.status}:${JSON.stringify(i.meta ?? {})}`)
+        .sort()
+        .join('|')
+      if (key !== lastIntegrationsKeyRef.current) {
+        lastIntegrationsKeyRef.current = key
+        setIntegrations(next)
+      }
+    })
+  }, [projectId])
 
   useEffect(() => {
     if (toastShown.current) return
@@ -116,7 +152,8 @@ export function SettingsContent({ projectId }: { projectId: string }) {
       const res = await fetch(`/api/integrations/${integrationId}`, { method: 'DELETE' })
       if (res.ok) {
         toast.success(`${typeName} disconnected`)
-        loadData()
+        invalidateSettingsCache(projectId)
+        void loadData()
       } else {
         toast.error('Failed to disconnect')
       }

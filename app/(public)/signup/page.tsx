@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { Loader2 } from 'lucide-react'
 import { signUp } from '@/app/actions/auth'
@@ -14,14 +14,24 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false)
   const [confirmEmail, setConfirmEmail] = useState<string | null>(null)
 
-  async function handleSubmit(formData: FormData) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (loading) return
     setLoading(true)
-    const result = await signUp(formData)
-    if (result?.error) {
-      toast.error(result.error)
+    const formData = new FormData(e.currentTarget)
+    try {
+      const result = await signUp(formData)
+      if (result?.error) {
+        toast.error(result.error)
+        setLoading(false)
+      } else if (result?.success) {
+        setConfirmEmail(result.email ?? (formData.get('email') as string))
+      } else {
+        setLoading(false)
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Something went wrong')
       setLoading(false)
-    } else if (result?.success) {
-      setConfirmEmail(result.email ?? formData.get('email') as string)
     }
   }
 
@@ -82,7 +92,7 @@ export default function SignupPage() {
           </CardHeader>
 
           <CardContent className="px-6 sm:px-10">
-            <form action={handleSubmit} className="space-y-5" aria-busy={loading}>
+            <form onSubmit={handleSubmit} className="space-y-5" aria-busy={loading}>
               <div className="space-y-2">
                 <Label htmlFor="orgName">Organization Name</Label>
                 <Input
