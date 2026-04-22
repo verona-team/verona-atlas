@@ -1,4 +1,11 @@
-import { convertToModelMessages, tool, stepCountIs, hasToolCall, type UIMessage } from 'ai'
+import {
+  convertToModelMessages,
+  createIdGenerator,
+  tool,
+  stepCountIs,
+  hasToolCall,
+  type UIMessage,
+} from 'ai'
 import { after } from 'next/server'
 import { z } from 'zod'
 import { traceable } from 'langsmith/traceable'
@@ -147,11 +154,22 @@ export async function POST(request: Request) {
         .join('') ?? ''
 
     if (lastUserText) {
-      const { error: userMsgErr } = await serviceClient.from('chat_messages').insert({
-        session_id: session.id,
-        role: 'user',
-        content: lastUserText,
-      })
+      /**
+       * Store the UIMessage id the client assigned (useChat's `messages[i].id`).
+       * The client uses this id to dedup its in-flight `streamMessages` against
+       * the persisted DB row — no fuzzy text comparison required. We upsert on
+       * (session_id, client_message_id) so a retry from the same user message
+       * does not create a duplicate row.
+       */
+      const { error: userMsgErr } = await serviceClient.from('chat_messages').upsert(
+        {
+          session_id: session.id,
+          role: 'user',
+          content: lastUserText,
+          client_message_id: lastMessage.id,
+        },
+        { onConflict: 'session_id,client_message_id', ignoreDuplicates: true },
+      )
       if (userMsgErr) {
         chatServerLog('warn', 'chat_user_message_persist_failed', {
           err: userMsgErr,
@@ -620,33 +638,53 @@ ${recentRuns && recentRuns.length > 0 ? `\nRecent test runs:\n${JSON.stringify(r
           hasToolCall('generate_flow_proposals'),
           hasToolCall('start_test_run'),
         ],
-        onFinish: async ({ text, finishReason, steps }) => {
-          try {
-            if (finishReason && finishReason !== 'stop') {
-              logChatTool('warn', 'chat_stream_finish_non_stop', { finishReason })
-            }
-            /**
-             * `streamText` in AI SDK v6 exposes only the FINAL step's text on
-             * `onFinish({ text })`. When the model emits text across multiple
-             * steps (e.g. preamble on step 0, final answer on step 1) the DB
-             * was getting only step 1 while the client `useChat` stream kept
-             * text from both. That mismatch made the client dedup miss and
-             * rendered the response twice. Concatenate all step texts so the
-             * DB row matches what the user saw during streaming.
-             */
-            const aggregatedText = steps
-              .map((s) => s.text ?? '')
-              .filter((t) => t.length > 0)
-              .join('\n\n')
-              .trim()
-            const finalText = aggregatedText.length > 0 ? aggregatedText : text
+        onFinish: ({ finishReason }) => {
+          if (finishReason && finishReason !== 'stop') {
+            logChatTool('warn', 'chat_stream_finish_non_stop', { finishReason })
+          }
+        },
+      })
 
-            if (finalText) {
-              const { error: assistantMsgErr } = await serviceClient.from('chat_messages').insert({
-                session_id: session.id,
-                role: 'assistant',
-                content: finalText,
-              })
+      /**
+       * Persist the assistant turn from `toUIMessageStreamResponse.onFinish`
+       * rather than `streamText.onFinish`. The UI-message stream callback
+       * hands us `responseMessage` — the same `UIMessage` the client
+       * receives in its `useChat` state. Its `id` is stable (we control it
+       * via `generateMessageId`) and its `parts` already aggregate text
+       * across every step. Storing that id in `chat_messages.client_message_id`
+       * lets the client dedup its in-flight `streamMessages` against the
+       * persisted DB row with pure id equality — no fuzzy text comparison.
+       */
+      return result.toUIMessageStreamResponse({
+        originalMessages: uiMessages,
+        generateMessageId: createIdGenerator({ prefix: 'va', size: 16 }),
+        onError: (error) => {
+          logChatTool('error', 'chat_ui_message_stream_error', { err: error })
+          return error instanceof Error ? error.message : 'Chat stream error'
+        },
+        onFinish: async ({ responseMessage }) => {
+          try {
+            const assistantText = (responseMessage.parts ?? [])
+              .filter(
+                (p): p is { type: 'text'; text: string } =>
+                  p.type === 'text' && typeof (p as { text?: unknown }).text === 'string',
+              )
+              .map((p) => p.text)
+              .join('')
+              .trim()
+
+            if (assistantText) {
+              const { error: assistantMsgErr } = await serviceClient
+                .from('chat_messages')
+                .upsert(
+                  {
+                    session_id: session.id,
+                    role: 'assistant',
+                    content: assistantText,
+                    client_message_id: responseMessage.id,
+                  },
+                  { onConflict: 'session_id,client_message_id', ignoreDuplicates: true },
+                )
               if (assistantMsgErr) {
                 logChatTool('error', 'chat_assistant_message_persist_failed', {
                   err: assistantMsgErr,
@@ -679,13 +717,6 @@ ${recentRuns && recentRuns.length > 0 ? `\nRecent test runs:\n${JSON.stringify(r
               logChatTool('error', 'chat_on_finish_set_session_error_failed', { err: statusErr })
             }
           }
-        },
-      })
-
-      return result.toUIMessageStreamResponse({
-        onError: (error) => {
-          logChatTool('error', 'chat_ui_message_stream_error', { err: error })
-          return error instanceof Error ? error.message : 'Chat stream error'
         },
       })
     },

@@ -82,6 +82,7 @@ export type Database = {
       }
       chat_messages: {
         Row: {
+          client_message_id: string | null
           content: string
           created_at: string | null
           id: string
@@ -90,6 +91,7 @@ export type Database = {
           session_id: string
         }
         Insert: {
+          client_message_id?: string | null
           content: string
           created_at?: string | null
           id?: string
@@ -98,6 +100,7 @@ export type Database = {
           session_id: string
         }
         Update: {
+          client_message_id?: string | null
           content?: string
           created_at?: string | null
           id?: string
@@ -468,6 +471,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      delete_auth_user_app_data: {
+        Args: { target_user_id: string }
+        Returns: undefined
+      }
       get_user_org_ids: { Args: never; Returns: string[] }
       is_org_owner: { Args: { target_org_id: string }; Returns: boolean }
     }

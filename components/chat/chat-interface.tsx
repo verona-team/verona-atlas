@@ -27,11 +27,6 @@ function getTextFromParts(parts: Array<{ type: string; text?: string }>): string
     .join('')
 }
 
-/**
- * Assistant turns are often tool-only (no `text` parts): the model calls
- * `generate_flow_proposals` and streams no prose. Surface tool output until
- * the DB row (with flow cards) arrives.
- */
 /** Realtime UPDATE payloads may include only changed columns; merge so we never drop `content`. */
 function mergeChatMessageRow(prev: ChatMessage, patch: ChatMessage): ChatMessage {
   const defined = Object.fromEntries(
@@ -44,6 +39,15 @@ function mergeChatMessageRow(prev: ChatMessage, patch: ChatMessage): ChatMessage
   return merged
 }
 
+/**
+ * Extract the text we want to render in the assistant bubble for an in-flight
+ * stream message. For text-only turns this is the concatenated text parts.
+ *
+ * For tool-only turns we return '' on success — the tool inserts its own DB
+ * row (e.g. a `flow_proposals` row with approvable cards) that renders
+ * separately. We still surface a short line for failures so the user isn't
+ * left looking at a spinner that never completes.
+ */
 function getVisibleTextFromMessageParts(
   role: string,
   parts: Array<{
@@ -54,11 +58,8 @@ function getVisibleTextFromMessageParts(
     output?: unknown
   }>,
 ): string {
-  if (role !== 'assistant') {
-    return getTextFromParts(parts)
-  }
   const plain = getTextFromParts(parts)
-  if (plain.length > 0) return plain
+  if (role !== 'assistant' || plain.length > 0) return plain
 
   for (const p of parts) {
     if (p.type === 'dynamic-tool' || p.type.startsWith('tool-')) {
@@ -69,12 +70,6 @@ function getVisibleTextFromMessageParts(
         const o = p.output as Record<string, unknown>
         if (o.success === false && typeof o.error === 'string') {
           return `Could not save proposals: ${o.error}`
-        }
-        if (typeof o.analysis === 'string' && o.analysis.length > 0) {
-          return o.analysis
-        }
-        if (o.success === true && typeof o.flowCount === 'number') {
-          return `Prepared ${o.flowCount} test flow proposal(s) for you.`
         }
       }
     }
@@ -501,65 +496,22 @@ export function ChatInterface({
       .filter((m) => m.content.length > 0)
 
     /**
-     * Dedup stream messages against DB messages. Comparing the first 100 chars
-     * was fragile because the model can emit a preamble on step 0 and the real
-     * answer on step 1, so the DB text and stream text sometimes start with
-     * different content. Match on any non-trivial substring overlap instead
-     * so the stream never duplicates a persisted assistant reply.
+     * Dedup stream messages against DB messages by id. The server persists
+     * each assistant turn with `client_message_id` set to the same UIMessage
+     * id the client holds in `streamMessages`, so a stream message is
+     * considered already persisted iff a DB row has a matching
+     * `client_message_id`. Same story for the user turn. No fuzzy text
+     * comparisons, no timestamp fallbacks.
      */
-    const isProbableDuplicate = (
-      streamItem: { role: string; content: string },
-      dbItem: { role: string; content: string },
-    ) => {
-      if (streamItem.role !== dbItem.role) return false
-      const s = streamItem.content.trim()
-      const d = dbItem.content.trim()
-      if (!s || !d) return false
-      if (s === d) return true
-      if (s.length <= 40 || d.length <= 40) {
-        return s.startsWith(d) || d.startsWith(s)
-      }
-      const head = 80
-      const tail = 80
-      if (d.slice(0, head) === s.slice(0, head)) return true
-      if (d.slice(-tail) === s.slice(-tail)) return true
-      if (s.includes(d) || d.includes(s)) return true
-      return false
-    }
-
-    const streamNotYetInDb = streamAsDisplay.filter(
-      (m) => !dbRendered.some((db) => isProbableDuplicate(m, db)),
+    const persistedClientIds = new Set(
+      dbMessages
+        .map((m) => m.client_message_id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0),
     )
 
-    /**
-     * Once the backend has finished streaming AND at least one assistant row
-     * exists in the DB newer than the last user row, any leftover stream
-     * assistant entries are stale and must not be rendered. This prevents the
-     * stream snapshot and the persisted DB row from both appearing as two
-     * near-identical responses when `isProbableDuplicate` fails to catch it.
-     */
-    const lastDbUserAt = (() => {
-      for (let i = dbMessages.length - 1; i >= 0; i--) {
-        if (dbMessages[i].role === 'user') return dbMessages[i].created_at
-      }
-      return null
-    })()
-    const dbHasNewerAssistant = dbMessages.some(
-      (m) =>
-        m.role === 'assistant' &&
-        (lastDbUserAt == null ||
-          new Date(m.created_at ?? 0).getTime() >= new Date(lastDbUserAt ?? 0).getTime()),
-    )
+    const streamNotYetInDb = streamAsDisplay.filter((m) => !persistedClientIds.has(m.id))
 
-    if (isStreamActive) {
-      return [...dbRendered, ...streamNotYetInDb]
-    }
-
-    if (!dbHasNewerAssistant && streamNotYetInDb.length > 0) {
-      return [...dbRendered, ...streamNotYetInDb]
-    }
-
-    return dbRendered
+    return [...dbRendered, ...streamNotYetInDb]
   }, [dbMessages, streamMessages, isStreamActive])
 
   return (
