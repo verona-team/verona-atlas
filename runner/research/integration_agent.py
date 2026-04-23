@@ -516,7 +516,7 @@ async def _run_research_loop(
     notes: list[str] = []
 
     try:
-        sb = create_research_sandbox(env)
+        sb = await create_research_sandbox(env)
     except Exception as e:
         chat_log(
             "warn",
@@ -583,7 +583,7 @@ async def _run_research_loop(
 
         # Phase B: run the code in the sandbox.
         assert sb is not None  # create succeeded (else we bailed earlier)
-        result: ExecResult = execute_in_sandbox(sb, code_output.code)
+        result: ExecResult = await execute_in_sandbox(sb, code_output.code)
 
         # Remember for the code writer's next call.
         previous_exec = PreviousExec(
@@ -741,7 +741,7 @@ async def _run_research_loop(
         return notes
 
     finally:
-        teardown_sandbox(sb)
+        await teardown_sandbox(sb)
 
 
 async def _synthesize_report(
