@@ -8,9 +8,7 @@ import {
   useMemo,
   type SyntheticEvent,
 } from 'react'
-import { useChat } from '@ai-sdk/react'
 import { useWorkspace } from '@/lib/workspace-context'
-import { DefaultChatTransport } from 'ai'
 import { ArrowUp, ArrowDown, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { MessageBubble } from './message-bubble'
@@ -27,14 +25,10 @@ import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { useGithubReady } from '@/lib/settings-prefetch'
 
-function getTextFromParts(parts: Array<{ type: string; text?: string }>): string {
-  return parts
-    .filter((p) => p.type === 'text' && p.text)
-    .map((p) => p.text!)
-    .join('')
-}
-
-/** Realtime UPDATE payloads may include only changed columns; merge so we never drop `content`. */
+/**
+ * Supabase UPDATE payloads may include only changed columns; merge so we
+ * never drop `content` when a late status-only update arrives.
+ */
 function mergeChatMessageRow(prev: ChatMessage, patch: ChatMessage): ChatMessage {
   const defined = Object.fromEntries(
     Object.entries(patch).filter(([, v]) => v !== undefined),
@@ -46,56 +40,30 @@ function mergeChatMessageRow(prev: ChatMessage, patch: ChatMessage): ChatMessage
   return merged
 }
 
-/**
- * Extract the text we want to render in the assistant bubble for an in-flight
- * stream message. For text-only turns this is the concatenated text parts.
- *
- * For tool-only turns we return '' on success — the tool inserts its own DB
- * row (e.g. a `flow_proposals` row with approvable cards) that renders
- * separately. We still surface a short line for failures so the user isn't
- * left looking at a spinner that never completes.
- */
-function getVisibleTextFromMessageParts(
-  role: string,
-  parts: Array<{
-    type: string
-    text?: string
-    state?: string
-    errorText?: string
-    output?: unknown
-  }>,
-): string {
-  const plain = getTextFromParts(parts)
-  if (role !== 'assistant' || plain.length > 0) return plain
-
-  for (const p of parts) {
-    if (p.type === 'dynamic-tool' || p.type.startsWith('tool-')) {
-      if (p.state === 'output-error' && p.errorText) {
-        return `Something went wrong: ${p.errorText}`
-      }
-      if (p.state === 'output-available' && p.output && typeof p.output === 'object') {
-        const o = p.output as Record<string, unknown>
-        if (o.success === false && typeof o.error === 'string') {
-          return `Could not save proposals: ${o.error}`
-        }
-      }
-    }
-  }
-  return ''
-}
-
 const STALE_THINKING_MS = 15 * 60 * 1000
-
 const NEAR_BOTTOM_THRESHOLD_PX = 96
 
 /**
- * The user-facing text for the auto-bootstrap turn. Lives here (rather
- * than inline in the effect) because the same string is also rendered as
- * a synthetic placeholder bubble on hard refresh — see the
- * `bootstrapPlaceholder` logic in `displayMessages` below.
+ * The user-facing text for the auto-bootstrap turn. Still used as both
+ * the outgoing message text AND a synthetic placeholder bubble during the
+ * tiny window between POST and DB-row Realtime arrival.
  */
 function getBootstrapText(projectName: string, appUrl: string): string {
   return `I just set up ${projectName} (${appUrl}). Analyze my project data and suggest UI flows to test.`
+}
+
+/**
+ * Generate a UIMessage-style id. Only the first character needs to be a
+ * letter so JSON parsers never accidentally interpret it as a number;
+ * otherwise any stable unique id is fine. We prefix with `u` so user-side
+ * ids are trivially distinguishable from Python-side assistant ids (`va`).
+ */
+function generateClientMessageId(): string {
+  return (
+    'u' +
+    Math.random().toString(36).slice(2, 10) +
+    Math.random().toString(36).slice(2, 10)
+  )
 }
 
 interface ChatInterfaceProps {
@@ -108,10 +76,9 @@ interface ChatInterfaceProps {
   appUrl: string
   /**
    * Whether the project's GitHub integration is configured and ready. When
-   * `false` we skip the auto-bootstrap message (otherwise it would hit the
-   * server's `GITHUB_SETUP_REQUIRED` guard and toast-spam its way through
-   * two retries). Bootstrap resumes once this flips to `true`, typically
-   * after the user connects GitHub in the settings overlay.
+   * `false` we skip the auto-bootstrap message (otherwise the server would
+   * return GITHUB_SETUP_REQUIRED and toast-spam the user while the settings
+   * overlay is already open for them to fix it).
    */
   githubReady: boolean
 }
@@ -127,20 +94,29 @@ export function ChatInterface({
   githubReady: initialGithubReady,
 }: ChatInterfaceProps) {
   const { openSettings } = useWorkspace()
-  // `useGithubReady` subscribes to `lib/settings-prefetch`, so the input
-  // flips from blocked → unblocked the instant the user connects GitHub
-  // in the settings overlay, without waiting for a route-level refresh.
   const githubReady = useGithubReady(projectId, initialGithubReady)
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottomRef = useRef(true)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [input, setInput] = useState('')
-  const [flowStatesOverride, setFlowStatesOverride] = useState<Record<string, 'pending' | 'approved' | 'rejected'> | null>(null)
+  const [flowStatesOverride, setFlowStatesOverride] = useState<
+    Record<string, 'pending' | 'approved' | 'rejected'> | null
+  >(null)
   const [dbMessages, setDbMessages] = useState<ChatMessage[]>(initialMessages)
+  /**
+   * Optimistic user-message bubbles, keyed by the `client_message_id` we
+   * generated for the request. We show them immediately on submit so the
+   * chat feels responsive, then drop them the moment the matching DB row
+   * lands via Realtime (matched on client_message_id).
+   */
+  const [pendingUserMessages, setPendingUserMessages] = useState<
+    { clientId: string; text: string }[]
+  >([])
   const [bootstrapNonce, setBootstrapNonce] = useState(0)
   const lastBootstrapKeyRef = useRef<string | null>(null)
   const bootstrapFailureCountRef = useRef(0)
   const dbEmptyRef = useRef(initialMessages.length === 0)
+  const [isPosting, setIsPosting] = useState(false)
 
   const computeSessionThinking = useCallback(
     (status: string, updatedAt: string | null) => {
@@ -175,55 +151,70 @@ export function ChatInterface({
     return { flowStates: states, proposalMessageId: msgId }
   }, [dbMessages, flowStatesOverride])
 
-  const chatFetch = useCallback(
-    async (input: RequestInfo | URL, init?: RequestInit) => {
-      const res = await fetch(input, init)
-      if (res.status === 400) {
-        const ct = res.headers.get('content-type') ?? ''
-        if (ct.includes('application/json')) {
-          const data = (await res.clone().json().catch(() => null)) as {
-            code?: string
-            error?: string
-          } | null
-          if (data?.code === 'GITHUB_SETUP_REQUIRED' && data.error) {
-            toast.error(data.error)
-            openSettings(projectId)
-            return res
-          }
+  /**
+   * Send a message to the backend. Lives in one place so the bootstrap
+   * effect and the input form can share it. Fire-and-forget from the
+   * caller's perspective — we optimistically show the user bubble, then
+   * let Realtime reconcile when the DB row lands.
+   */
+  const sendChatMessage = useCallback(
+    async (
+      text: string,
+      options?: { clientId?: string },
+    ): Promise<{ ok: boolean; code?: string }> => {
+      const clientId = options?.clientId ?? generateClientMessageId()
+      setPendingUserMessages((prev) => [...prev, { clientId, text }])
+      setIsPosting(true)
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId,
+            message: { id: clientId, text },
+          }),
+        })
+
+        if (res.status === 202) {
+          return { ok: true }
         }
+
+        // Try to surface the structured server error.
+        let errorMessage = 'Could not reach Verona. Check your connection and try again.'
+        let code: string | undefined
+        try {
+          const ct = res.headers.get('content-type') ?? ''
+          if (ct.includes('application/json')) {
+            const data = (await res.json()) as { error?: string; code?: string }
+            if (data?.error) errorMessage = data.error
+            if (data?.code) code = data.code
+          }
+        } catch {
+          /* ignore */
+        }
+
+        if (code === 'GITHUB_SETUP_REQUIRED') {
+          toast.error(errorMessage)
+          openSettings(projectId)
+        } else {
+          toast.error(errorMessage)
+        }
+        // Drop the optimistic bubble on hard failure — the message didn't land.
+        setPendingUserMessages((prev) => prev.filter((m) => m.clientId !== clientId))
+        return { ok: false, code }
+      } catch (err) {
+        console.error('Chat request failed:', err)
+        toast.error('Could not reach Verona. Check your connection and try again.')
+        setPendingUserMessages((prev) => prev.filter((m) => m.clientId !== clientId))
+        return { ok: false }
+      } finally {
+        setIsPosting(false)
       }
-      return res
     },
     [projectId, openSettings],
   )
 
-  const { messages: streamMessages, sendMessage, status } = useChat({
-    id: `project-${projectId}`,
-    transport: new DefaultChatTransport({
-      api: '/api/chat',
-      body: { projectId },
-      fetch: chatFetch,
-    }),
-    onError: (err) => {
-      console.error('Chat request failed:', err)
-      toast.error('Could not reach Verona. Check your connection and try again.')
-      if (
-        dbEmptyRef.current &&
-        bootstrapFailureCountRef.current < 2
-      ) {
-        bootstrapFailureCountRef.current += 1
-        lastBootstrapKeyRef.current = null
-        setBootstrapNonce((n) => n + 1)
-      } else if (dbEmptyRef.current) {
-        toast.error('Failed to start the analysis. Type a message below to retry.')
-      }
-    },
-  })
-
-  // Reset the bootstrap retry counter when GitHub becomes ready. Without this,
-  // a user who landed on the chat pre-setup would have exhausted their retries
-  // (2) against GITHUB_SETUP_REQUIRED and auto-bootstrap would never re-fire
-  // after they connect GitHub. We key the reset on the false → true transition.
+  // Reset the bootstrap retry counter when GitHub becomes ready.
   const prevGithubReadyRef = useRef(githubReady)
   useEffect(() => {
     if (!prevGithubReadyRef.current && githubReady) {
@@ -238,12 +229,7 @@ export function ChatInterface({
       bootstrapFailureCountRef.current = 0
       return
     }
-
-    // Do not auto-bootstrap before GitHub is configured: the server would
-    // short-circuit with GITHUB_SETUP_REQUIRED, which just toast-spams the
-    // user while the settings overlay is already open for them to fix it.
     if (!githubReady) return
-
     if (backendThinking) return
 
     const key = `${sessionId}:${bootstrapNonce}`
@@ -252,29 +238,30 @@ export function ChatInterface({
 
     /**
      * Deterministic message id so a refresh / tab-close that re-fires
-     * this effect upserts into the same `chat_messages` row on the
-     * server (unique on `session_id, client_message_id`) instead of
-     * creating a duplicate bootstrap. The server also uses the id
-     * match to detect the re-fire as an already-in-flight turn and
-     * short-circuit with an empty SSE response, letting the original
-     * turn finish without a parallel second run. The nonce is appended
-     * so an explicit retry (onError bumps `bootstrapNonce`) gets a
+     * this effect upserts into the same `chat_messages` row on the server
+     * (unique on `session_id, client_message_id`), and the Modal-side
+     * duplicate guard short-circuits without spawning a second turn.
+     * The nonce is appended so an explicit retry after a failure gets a
      * fresh id.
-     *
-     * NB: we use the `{ id, parts }` form rather than `messageId` —
-     * `sendMessage`'s `messageId` option looks up an existing message
-     * to replace (regenerate path) and throws when it isn't found.
      */
-    void sendMessage({
-      id: `bootstrap:${sessionId}:${bootstrapNonce}`,
-      role: 'user',
-      parts: [
-        {
-          type: 'text',
-          text: getBootstrapText(projectName, appUrl),
-        },
-      ],
-    })
+    const bootstrapClientId = `bootstrap:${sessionId}:${bootstrapNonce}`
+    const bootstrapText = getBootstrapText(projectName, appUrl)
+
+    void sendChatMessage(bootstrapText, { clientId: bootstrapClientId }).then(
+      (result) => {
+        if (!result.ok) {
+          if (
+            dbEmptyRef.current &&
+            bootstrapFailureCountRef.current < 2 &&
+            result.code !== 'GITHUB_SETUP_REQUIRED'
+          ) {
+            bootstrapFailureCountRef.current += 1
+            lastBootstrapKeyRef.current = null
+            setBootstrapNonce((n) => n + 1)
+          }
+        }
+      },
+    )
   }, [
     dbMessages.length,
     bootstrapNonce,
@@ -283,9 +270,10 @@ export function ChatInterface({
     sessionId,
     projectName,
     appUrl,
-    sendMessage,
+    sendChatMessage,
   ])
 
+  // Realtime subscription to chat_messages — the only source of visible bubbles.
   useEffect(() => {
     const supabase = createClient()
     const channel = supabase
@@ -309,6 +297,14 @@ export function ChatInterface({
             return [...prev, safe]
           })
 
+          // Reconcile optimistic bubbles: if the server-persisted row
+          // matches one we were tracking, drop the placeholder.
+          if (newMsg.client_message_id) {
+            setPendingUserMessages((prev) =>
+              prev.filter((m) => m.clientId !== newMsg.client_message_id),
+            )
+          }
+
           if ((newMsg.metadata as Record<string, Json> | null)?.type === 'flow_proposals') {
             setFlowStatesOverride(null)
           }
@@ -329,7 +325,6 @@ export function ChatInterface({
               m.id === updated.id ? mergeChatMessageRow(m, updated) : m,
             ),
           )
-
           if ((updated.metadata as Record<string, Json> | null)?.flow_states) {
             setFlowStatesOverride(null)
           }
@@ -342,6 +337,7 @@ export function ChatInterface({
     }
   }, [sessionId])
 
+  // Session status Realtime — drives the `thinking` indicator.
   useEffect(() => {
     const supabase = createClient()
     const channel = supabase
@@ -370,9 +366,11 @@ export function ChatInterface({
     }
   }, [sessionId, computeSessionThinking])
 
+  // Realtime-fallback poll: occasionally re-fetch chat messages by REST
+  // in case a Realtime message was dropped (e.g. during a brief WS hiccup).
+  // Kept as a safety net — shouldn't be needed in the happy path, but
+  // inexpensive and invisible when Realtime is healthy.
   useEffect(() => {
-    if (status !== 'ready') return
-
     const mergeFromServer = (rows: ChatMessage[]) => {
       setDbMessages((prev) => {
         const byId = new Map(prev.map((m) => [m.id, m]))
@@ -381,7 +379,8 @@ export function ChatInterface({
         }
         return Array.from(byId.values()).sort(
           (a, b) =>
-            new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime(),
+            new Date(a.created_at ?? 0).getTime() -
+            new Date(b.created_at ?? 0).getTime(),
         )
       })
     }
@@ -399,11 +398,12 @@ export function ChatInterface({
       }
     }
 
-    const timeouts = [400, 2000, 6000, 15000].map((ms) =>
+    // Run a few catch-up fetches after mount; nothing fancy.
+    const timeouts = [2000, 8000, 20000].map((ms) =>
       window.setTimeout(() => void load(), ms),
     )
     return () => timeouts.forEach(clearTimeout)
-  }, [status, sessionId])
+  }, [sessionId])
 
   const [showJumpToBottom, setShowJumpToBottom] = useState(false)
 
@@ -439,7 +439,7 @@ export function ChatInterface({
 
   useEffect(() => {
     scrollPaneToBottomIfStuck()
-  }, [streamMessages, dbMessages, scrollPaneToBottomIfStuck])
+  }, [dbMessages, pendingUserMessages, scrollPaneToBottomIfStuck])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -455,7 +455,6 @@ export function ChatInterface({
     async (flowId: string) => {
       if (!proposalMessageId) return
       setFlowStatesOverride((prev) => ({ ...prev, [flowId]: 'approved' }))
-
       await fetch('/api/chat/flows', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -473,7 +472,6 @@ export function ChatInterface({
     async (flowId: string) => {
       if (!proposalMessageId) return
       setFlowStatesOverride((prev) => ({ ...prev, [flowId]: 'rejected' }))
-
       await fetch('/api/chat/flows', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -488,25 +486,29 @@ export function ChatInterface({
   )
 
   const trySend = useCallback(() => {
-    // Client-side gate — the server enforces the same invariant via
-    // `GITHUB_SETUP_REQUIRED`, but blocking here avoids a wasted round-trip
-    // and the accompanying toast cascade. When the user connects GitHub in
-    // the settings overlay, `useGithubReady` flips this to true and the
-    // input is live again.
     if (!githubReady) {
       toast.error('Connect GitHub to start chatting with Verona.')
       openSettings(projectId)
       return
     }
-    if (!input.trim() || status !== 'ready') return
+    const trimmed = input.trim()
+    if (!trimmed || isPosting) return
     stickToBottomRef.current = true
-    sendMessage({ text: input })
+    void sendChatMessage(trimmed)
     setInput('')
     requestAnimationFrame(() => {
       scrollPaneToBottomIfStuck()
       requestAnimationFrame(() => scrollPaneToBottomIfStuck())
     })
-  }, [githubReady, input, openSettings, projectId, scrollPaneToBottomIfStuck, sendMessage, status])
+  }, [
+    githubReady,
+    input,
+    isPosting,
+    openSettings,
+    projectId,
+    scrollPaneToBottomIfStuck,
+    sendChatMessage,
+  ])
 
   const handleSubmit = (e: SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -521,8 +523,7 @@ export function ChatInterface({
   }
 
   const approvedCount = Object.values(flowStates).filter((s) => s === 'approved').length
-  const isStreamActive = status === 'submitted' || status === 'streaming'
-  const isProcessing = isStreamActive || backendThinking
+  const isProcessing = isPosting || backendThinking
 
   const displayMessages = useMemo(() => {
     const dbRendered = dbMessages
@@ -532,105 +533,25 @@ export function ChatInterface({
         role: m.role as 'user' | 'assistant',
         content: m.content ?? '',
         metadata: m.metadata as Record<string, Json> | undefined,
-        isStreaming: false,
       }))
 
-    const streamAsDisplay = streamMessages
-      .map((m) => {
-        const rawParts =
-          (m as { parts: Array<{ type: string; text?: string }> }).parts ?? []
-        const text = getVisibleTextFromMessageParts(
-          m.role,
-          rawParts as Array<{
-            type: string
-            text?: string
-            state?: string
-            errorText?: string
-            output?: unknown
-          }>,
-        )
-        return {
-          id: m.id,
-          role: m.role as 'user' | 'assistant',
-          content: text,
-          metadata: undefined as Record<string, Json> | undefined,
-          isStreaming: isStreamActive && m.role === 'assistant',
-        }
-      })
-      .filter((m) => m.content.length > 0)
-
-    /**
-     * Dedup stream messages against DB messages by id. The server persists
-     * each assistant turn with `client_message_id` set to the same UIMessage
-     * id the client holds in `streamMessages`, so a stream message is
-     * considered already persisted iff a DB row has a matching
-     * `client_message_id`. Same story for the user turn. No fuzzy text
-     * comparisons, no timestamp fallbacks.
-     */
+    // Optimistic user bubbles not yet reflected in DB via Realtime.
     const persistedClientIds = new Set(
       dbMessages
         .map((m) => m.client_message_id)
         .filter((id): id is string => typeof id === 'string' && id.length > 0),
     )
-
-    const streamNotYetInDb = streamAsDisplay.filter((m) => !persistedClientIds.has(m.id))
-
-    const combined = [...dbRendered, ...streamNotYetInDb]
-
-    /**
-     * Hard-refresh recovery for the auto-bootstrap turn.
-     *
-     * When a user hard-refreshes in the small window between the
-     * bootstrap POST being sent and the server upserting the user
-     * `chat_messages` row:
-     *
-     * - `initialMessages` (SSR) is empty, so `dbMessages` is empty.
-     * - `streamMessages` is also empty because `useChat` is a fresh
-     *   instance after the reload — the pre-refresh `streamMessages`
-     *   state was thrown away.
-     * - The bootstrap effect short-circuits on `backendThinking` so it
-     *   does not re-fire `sendMessage`, which would otherwise have
-     *   repainted the user turn into `streamMessages` again.
-     *
-     * Result pre-fix: the user's opening message disappeared from the
-     * UI, leaving only a thinking indicator with no context of what
-     * was asked.
-     *
-     * Fix: while the backend is known to be working on the very first
-     * turn of the session (no DB history at all and no visible
-     * in-flight user turn in `streamMessages`), synthesize a
-     * placeholder bubble that mirrors the exact bootstrap text. Once
-     * the real DB row arrives via Supabase Realtime (or a subsequent
-     * reload picks it up via SSR) the `hasVisibleUserTurn` branch
-     * above takes over and this placeholder cleanly dissolves. We
-     * scope this to `dbMessages.length === 0` so a follow-up user
-     * turn on an existing conversation does not accidentally render
-     * the bootstrap wording.
-     */
-    const hasVisibleUserTurn = combined.some((m) => m.role === 'user')
-    const isFirstTurnInFlight =
-      dbMessages.length === 0 && (backendThinking || isStreamActive)
-    if (!hasVisibleUserTurn && isFirstTurnInFlight) {
-      const placeholder = {
-        id: `bootstrap-placeholder:${sessionId}`,
+    const pendingBubbles = pendingUserMessages
+      .filter((m) => !persistedClientIds.has(m.clientId))
+      .map((m) => ({
+        id: `pending:${m.clientId}`,
         role: 'user' as const,
-        content: getBootstrapText(projectName, appUrl),
+        content: m.text,
         metadata: undefined as Record<string, Json> | undefined,
-        isStreaming: false,
-      }
-      return [placeholder, ...combined]
-    }
+      }))
 
-    return combined
-  }, [
-    dbMessages,
-    streamMessages,
-    isStreamActive,
-    backendThinking,
-    sessionId,
-    projectName,
-    appUrl,
-  ])
+    return [...dbRendered, ...pendingBubbles]
+  }, [dbMessages, pendingUserMessages])
 
   return (
     <div className="relative flex flex-col h-full">
@@ -650,31 +571,27 @@ export function ChatInterface({
             </div>
           )}
 
-          {displayMessages.map((msg, i) => {
-            const isLast = i === displayMessages.length - 1
-            return (
-              <MessageBubble
-                key={msg.id}
-                projectId={projectId}
-                role={msg.role}
-                content={msg.content}
-                metadata={msg.metadata}
-                flowStates={flowStates}
-                onApproveFlow={handleApproveFlow}
-                onRejectFlow={handleRejectFlow}
-                isStreaming={isLast && msg.isStreaming && isProcessing}
-              />
-            )
-          })}
+          {displayMessages.map((msg) => (
+            <MessageBubble
+              key={msg.id}
+              projectId={projectId}
+              role={msg.role}
+              content={msg.content}
+              metadata={msg.metadata}
+              flowStates={flowStates}
+              onApproveFlow={handleApproveFlow}
+              onRejectFlow={handleRejectFlow}
+              isStreaming={false}
+            />
+          ))}
 
           {/**
-           * Keep the thinking indicator visible for the entire processing
-           * window — including the gap after the assistant's opening text
-           * streams in but before its tool call (e.g. `generate_flow_proposals`)
-           * finishes executing. Without this, users see the streamed intro,
-           * the indicator disappears, and they assume the turn is done even
-           * though the backend is still working. See:
-           * https://github.com/verona-team/atlas/issues (chat loading state)
+           * Thinking indicator is driven entirely by backend state
+           * (chat_sessions.status). This means: the turn runs on Modal, the
+           * Python worker writes `status='thinking'` at start and `status='idle'`
+           * on exit, Supabase Realtime pushes the change, the client flips
+           * the indicator. Hard-refresh: the page SSR'd with whatever status
+           * was current, so the spinner appears if a turn is still in flight.
            */}
           {isProcessing && <ThinkingIndicator />}
         </div>
@@ -730,17 +647,6 @@ export function ChatInterface({
   )
 }
 
-/**
- * The chat composer. Pulled out into its own component mainly so we can
- * conditionally wrap the whole composer in a `<Tooltip>` when GitHub is
- * missing — without adding another layer of nesting to the main render.
- *
- * Why a shared tooltip instead of one per control: when GitHub isn't
- * connected, both the textarea and the send button are effectively
- * blocked for the same reason. Showing a single tooltip anywhere the
- * user hovers in the composer is both less noisy and less surprising
- * than per-element tooltips that appear/disappear as the cursor moves.
- */
 function ChatInputForm({
   githubReady,
   isProcessing,
@@ -809,15 +715,9 @@ function ChatInputForm({
 
   if (githubReady) return form
 
-  // `<TooltipTrigger render>` forwards the trigger props onto the form
-  // element so hover/focus anywhere inside the composer opens the same
-  // tooltip. Using `render` (base-ui pattern) instead of `asChild` since
-  // that's how the shadcn wrapper exports it.
   return (
     <Tooltip>
-      <TooltipTrigger render={<div className="block" />}>
-        {form}
-      </TooltipTrigger>
+      <TooltipTrigger render={<div className="block" />}>{form}</TooltipTrigger>
       <TooltipContent side="top" align="center" className="max-w-[260px] text-center leading-snug">
         Connect GitHub in settings before chatting with Verona.
       </TooltipContent>
