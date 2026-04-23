@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.64",
-    "@ai-sdk/react": "^3.0.144",
     "@anthropic-ai/sdk": "^0.80.0",
     "@base-ui/react": "^1.3.0",
     "@octokit/app": "^16.1.2",
