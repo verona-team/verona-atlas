@@ -83,11 +83,24 @@ export function NewProjectModal() {
         loadIntegrations(projectId!)
       }
     }
+    // NOTE: `focus` must use a *named* handler so the same reference is
+    // passed to `removeEventListener`. Previously each side of the effect
+    // constructed a fresh `() => loadIntegrations(projectId!)` arrow — two
+    // different function identities — which made cleanup a no-op. Each
+    // time the user created another project the old listener stayed bound
+    // to `window` with a closure over the prior `projectId`, so when the
+    // GitHub OAuth popup closed and the browser refocused the opener
+    // window, the leaked listener fetched the *previous* project's
+    // integrations and briefly painted those (e.g. "PostHog connected")
+    // into this modal's state.
+    function handleFocus() {
+      loadIntegrations(projectId!)
+    }
     document.addEventListener('visibilitychange', handleVisibilityChange)
-    window.addEventListener('focus', () => loadIntegrations(projectId!))
+    window.addEventListener('focus', handleFocus)
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
-      window.removeEventListener('focus', () => loadIntegrations(projectId!))
+      window.removeEventListener('focus', handleFocus)
     }
   }, [projectId, loadIntegrations])
 
