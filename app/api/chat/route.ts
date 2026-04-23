@@ -127,38 +127,12 @@ export async function POST(request: NextRequest) {
     const service = createServiceRoleClient()
     const session = await getOrCreateSession(service, projectId)
 
-    // Upsert the user message row BEFORE checking the active-call guard:
-    // if the client hard-refreshed and re-fired bootstrap with the same
-    // client_message_id, the upsert is a no-op (unique on session_id +
-    // client_message_id). That guarantees the Python worker can always
-    // find its own user row.
-    const { error: userMsgErr } = await service
-      .from('chat_messages')
-      .upsert(
-        {
-          session_id: session.id,
-          role: 'user',
-          content: text,
-          client_message_id: message.id,
-        },
-        {
-          onConflict: 'session_id,client_message_id',
-          ignoreDuplicates: true,
-        },
-      )
-    if (userMsgErr) {
-      chatServerLog('warn', 'chat_user_message_persist_failed', {
-        err: userMsgErr,
-        projectId,
-        sessionId: session.id,
-        userId: user.id,
-      })
-    }
-
     // -------- Duplicate-turn / already-in-flight guard --------
-    // If a Modal call is already running for this session AND it hasn't
-    // blown past the max expected duration, we short-circuit with its id
-    // rather than spawning a parallel second turn.
+    // Check BEFORE persisting the user message so that a genuinely new
+    // message (different client_message_id) is never written to the DB if
+    // we're going to reject the spawn anyway. Writing an orphaned row here
+    // would leave a message the running Modal worker doesn't know about and
+    // that no new worker will be spawned to process.
     const { data: existingSession } = await service
       .from('chat_sessions')
       .select('active_chat_call_id, active_chat_call_started_at')
@@ -185,6 +159,33 @@ export async function POST(request: NextRequest) {
         { ok: true, functionCallId: existingCallId, reused: true },
         { status: 202 },
       )
+    }
+
+    // Upsert the user message row. The unique constraint on
+    // (session_id, client_message_id) makes this a no-op if the client
+    // hard-refreshed and re-fired with the same id, so no duplicate is
+    // written. The Python worker relies on finding this row when it starts.
+    const { error: userMsgErr } = await service
+      .from('chat_messages')
+      .upsert(
+        {
+          session_id: session.id,
+          role: 'user',
+          content: text,
+          client_message_id: message.id,
+        },
+        {
+          onConflict: 'session_id,client_message_id',
+          ignoreDuplicates: true,
+        },
+      )
+    if (userMsgErr) {
+      chatServerLog('warn', 'chat_user_message_persist_failed', {
+        err: userMsgErr,
+        projectId,
+        sessionId: session.id,
+        userId: user.id,
+      })
     }
 
     // -------- Mark session thinking + spawn Modal --------
