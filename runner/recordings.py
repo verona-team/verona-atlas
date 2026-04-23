@@ -9,6 +9,8 @@ from typing import Optional
 
 import httpx
 
+from runner.logging import test_log
+
 
 async def save_session_recording(
     supabase,
@@ -22,18 +24,29 @@ async def save_session_recording(
     """
     bb_api_key = os.environ.get("BROWSERBASE_API_KEY")
     if not bb_api_key or not session_id:
-        print(f"[RECORDING] Skipping — api_key={'present' if bb_api_key else 'MISSING'} session_id={session_id or 'MISSING'}")
+        test_log(
+            "warn",
+            "recording_skipped_missing_config",
+            test_run_id=test_run_id,
+            template_name=template_name,
+            has_api_key=bool(bb_api_key),
+            has_session_id=bool(session_id),
+        )
         return None
 
     t0 = time.time()
-    print(f"[RECORDING] save_session_recording — session={session_id} template={template_name!r}")
-    print(f"[RECORDING]   waiting 5s for recording to finalize...")
+    test_log(
+        "info",
+        "recording_save_begin",
+        test_run_id=test_run_id,
+        template_name=template_name,
+        browserbase_session_id=session_id,
+    )
 
     try:
         await asyncio.sleep(5)
 
         url = f"https://api.browserbase.com/v1/sessions/{session_id}/recording"
-        print(f"[RECORDING]   fetching recording from Browserbase API...")
         fetch_t0 = time.time()
 
         async with httpx.AsyncClient(timeout=60) as client:
@@ -46,27 +59,53 @@ async def save_session_recording(
             )
 
             fetch_elapsed = time.time() - fetch_t0
-            print(f"[RECORDING]   Browserbase API response: status={response.status_code} ({fetch_elapsed:.1f}s)")
 
             if response.status_code != 200:
-                print(f"[RECORDING]   WARNING: non-200 status — body preview: {response.text[:300]}")
+                test_log(
+                    "warn",
+                    "recording_fetch_non_200",
+                    test_run_id=test_run_id,
+                    template_name=template_name,
+                    browserbase_session_id=session_id,
+                    status_code=response.status_code,
+                    elapsed_s=round(fetch_elapsed, 3),
+                    body_preview=response.text[:300],
+                )
                 return None
 
             recording_data = response.json()
 
+            test_log(
+                "debug",
+                "recording_fetch_ok",
+                test_run_id=test_run_id,
+                browserbase_session_id=session_id,
+                elapsed_s=round(fetch_elapsed, 3),
+            )
+
         if not recording_data:
-            print("[RECORDING]   WARNING: empty recording data from Browserbase")
+            test_log(
+                "warn",
+                "recording_empty_data",
+                test_run_id=test_run_id,
+                browserbase_session_id=session_id,
+            )
             return None
 
         data_size = len(json.dumps(recording_data))
-        print(f"[RECORDING]   recording data received: {data_size} bytes")
 
         safe_name = template_name.replace(" ", "_").replace("/", "_")[:50]
         file_path = f"{test_run_id}/{safe_name}_{session_id}.json"
         recording_bytes = json.dumps(recording_data).encode("utf-8")
 
-        print(f"[RECORDING]   uploading to Supabase Storage: test-recordings/{file_path}")
         upload_t0 = time.time()
+        test_log(
+            "debug",
+            "recording_upload_begin",
+            test_run_id=test_run_id,
+            file_path=file_path,
+            bytes=data_size,
+        )
         supabase.storage.from_("test-recordings").upload(
             path=file_path,
             file=recording_bytes,
@@ -77,12 +116,28 @@ async def save_session_recording(
         public_url = f"{supabase_url}/storage/v1/object/public/test-recordings/{file_path}"
 
         total_elapsed = time.time() - t0
-        print(f"[RECORDING]   upload complete ({time.time() - upload_t0:.1f}s)")
-        print(f"[RECORDING]   public_url = {public_url}")
-        print(f"[RECORDING] save_session_recording — done ({total_elapsed:.1f}s)")
+        test_log(
+            "info",
+            "recording_save_ok",
+            test_run_id=test_run_id,
+            template_name=template_name,
+            browserbase_session_id=session_id,
+            upload_elapsed_s=round(time.time() - upload_t0, 3),
+            total_elapsed_s=round(total_elapsed, 3),
+            public_url=public_url,
+        )
         return public_url
 
     except Exception as e:
         total_elapsed = time.time() - t0
-        print(f"[RECORDING] ERROR: Failed after {total_elapsed:.1f}s — {type(e).__name__}: {e}")
+        test_log(
+            "error",
+            "recording_save_failed",
+            test_run_id=test_run_id,
+            template_name=template_name,
+            browserbase_session_id=session_id,
+            total_elapsed_s=round(total_elapsed, 3),
+            err_type=type(e).__name__,
+            err=str(e),
+        )
         return None

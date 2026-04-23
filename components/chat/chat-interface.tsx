@@ -66,6 +66,89 @@ function generateClientMessageId(): string {
   )
 }
 
+/**
+ * Pending-message persistence across hard refreshes.
+ *
+ * The server's `chat_messages` upsert is the first real write during a
+ * chat POST, but it still takes a few tens of ms to commit. If the user
+ * hard-refreshes in that window, React state is wiped AND the DB row
+ * isn't visible yet — so the bubble "disappears" even though the POST
+ * goes on to complete server-side. We persist pending bubbles in
+ * localStorage keyed by `client_message_id`, hydrate on mount, and let
+ * the normal reconciliation paths (Realtime INSERT, fallback poll) drop
+ * them the instant a matching DB row shows up.
+ *
+ * TTL guards against the truly-failed-POST case (no DB row ever arrives)
+ * from leaving a ghost bubble sitting forever.
+ */
+type StoredPendingMessage = {
+  clientId: string
+  text: string
+  createdAt: number
+}
+
+const PENDING_TTL_MS = 10 * 60 * 1000
+const pendingStorageKey = (sessionId: string) => `chat-pending:${sessionId}`
+
+function loadPendingFromStorage(sessionId: string): StoredPendingMessage[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(pendingStorageKey(sessionId))
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    const now = Date.now()
+    return parsed.filter(
+      (p): p is StoredPendingMessage =>
+        !!p &&
+        typeof (p as StoredPendingMessage).clientId === 'string' &&
+        typeof (p as StoredPendingMessage).text === 'string' &&
+        typeof (p as StoredPendingMessage).createdAt === 'number' &&
+        now - (p as StoredPendingMessage).createdAt < PENDING_TTL_MS,
+    )
+  } catch {
+    return []
+  }
+}
+
+function savePendingToStorage(
+  sessionId: string,
+  entries: StoredPendingMessage[],
+): void {
+  if (typeof window === 'undefined') return
+  try {
+    if (entries.length === 0) {
+      window.localStorage.removeItem(pendingStorageKey(sessionId))
+    } else {
+      window.localStorage.setItem(
+        pendingStorageKey(sessionId),
+        JSON.stringify(entries),
+      )
+    }
+  } catch {
+    // Quota exceeded / private mode / disabled storage — non-fatal; the
+    // pending bubble is still visible in memory, it just won't survive
+    // a refresh.
+  }
+}
+
+function addPendingToStorage(
+  sessionId: string,
+  entry: StoredPendingMessage,
+): void {
+  const current = loadPendingFromStorage(sessionId)
+  const without = current.filter((p) => p.clientId !== entry.clientId)
+  savePendingToStorage(sessionId, [...without, entry])
+}
+
+function removePendingFromStorage(sessionId: string, clientId: string): void {
+  const current = loadPendingFromStorage(sessionId)
+  const next = current.filter((p) => p.clientId !== clientId)
+  if (next.length !== current.length) {
+    savePendingToStorage(sessionId, next)
+  }
+}
+
 interface ChatInterfaceProps {
   projectId: string
   sessionId: string
@@ -108,6 +191,11 @@ export function ChatInterface({
    * generated for the request. We show them immediately on submit so the
    * chat feels responsive, then drop them the moment the matching DB row
    * lands via Realtime (matched on client_message_id).
+   *
+   * Hydrated from localStorage in a mount effect below so a hard refresh
+   * during the POST-upsert window doesn't lose the bubble. Seeding here
+   * as `[]` keeps SSR and the initial client render identical, avoiding
+   * hydration mismatches.
    */
   const [pendingUserMessages, setPendingUserMessages] = useState<
     { clientId: string; text: string }[]
@@ -134,6 +222,67 @@ export function ChatInterface({
   useEffect(() => {
     dbEmptyRef.current = dbMessages.length === 0
   }, [dbMessages.length])
+
+  // Hydrate pending bubbles from localStorage on mount so a hard refresh
+  // during the POST-upsert window restores the optimistic bubble. We
+  // filter against `initialMessages` (the SSR snapshot) so any entry the
+  // server has already persisted is dropped — the DB-backed bubble will
+  // render it instead. Runs once per session.
+  useEffect(() => {
+    const persistedClientIds = new Set(
+      initialMessages
+        .map((m) => m.client_message_id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0),
+    )
+    const stored = loadPendingFromStorage(sessionId)
+    const stillPending = stored.filter(
+      (p) => !persistedClientIds.has(p.clientId),
+    )
+
+    // Sync storage back so already-persisted / expired entries are pruned.
+    if (stillPending.length !== stored.length) {
+      savePendingToStorage(sessionId, stillPending)
+    }
+
+    if (stillPending.length > 0) {
+      setPendingUserMessages((prev) => {
+        const existing = new Set(prev.map((m) => m.clientId))
+        const additions = stillPending
+          .filter((p) => !existing.has(p.clientId))
+          .map((p) => ({ clientId: p.clientId, text: p.text }))
+        return additions.length === 0 ? prev : [...prev, ...additions]
+      })
+    }
+    // `initialMessages` is a server-provided prop and stable per navigation;
+    // we intentionally don't re-run when it changes mid-session, because
+    // the Realtime + poll paths handle subsequent reconciliation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId])
+
+  // Centralized reconciliation: whenever `dbMessages` changes, drop any
+  // pending bubble (and localStorage entry) whose `client_message_id` is
+  // now persisted. This covers every path by which a DB row becomes
+  // visible — Realtime INSERT, fallback poll, SSR seed — without each
+  // path needing its own cleanup logic.
+  useEffect(() => {
+    const persistedClientIds = new Set(
+      dbMessages
+        .map((m) => m.client_message_id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0),
+    )
+    if (persistedClientIds.size === 0) return
+
+    const stored = loadPendingFromStorage(sessionId)
+    const remaining = stored.filter((p) => !persistedClientIds.has(p.clientId))
+    if (remaining.length !== stored.length) {
+      savePendingToStorage(sessionId, remaining)
+    }
+
+    setPendingUserMessages((prev) => {
+      const next = prev.filter((m) => !persistedClientIds.has(m.clientId))
+      return next.length === prev.length ? prev : next
+    })
+  }, [dbMessages, sessionId])
 
   const { flowStates, proposalMessageId } = useMemo(() => {
     let states: Record<string, 'pending' | 'approved' | 'rejected'> = {}
@@ -164,6 +313,16 @@ export function ChatInterface({
     ): Promise<{ ok: boolean; code?: string }> => {
       const clientId = options?.clientId ?? generateClientMessageId()
       setPendingUserMessages((prev) => [...prev, { clientId, text }])
+      // Persist the pending bubble so a hard refresh during the POST —
+      // particularly before the server commits its `chat_messages`
+      // upsert — can rehydrate the bubble on the next mount. Cleaned up
+      // by the dbMessages-reconciliation effect once the DB row is
+      // visible, or below if the POST fails outright.
+      addPendingToStorage(sessionId, {
+        clientId,
+        text,
+        createdAt: Date.now(),
+      })
       setIsPosting(true)
       try {
         const res = await fetch('/api/chat', {
@@ -176,6 +335,14 @@ export function ChatInterface({
         })
 
         if (res.status === 202) {
+          // The server wrote `status='thinking'` on `chat_sessions` just before
+          // spawning the Modal worker. Flip the spinner on locally so the UI
+          // doesn't rely on Realtime to deliver that UPDATE — the WS channel
+          // may still be joining on first mount, and Realtime does not replay
+          // events that occurred before SUBSCRIBED. Realtime is still the
+          // authoritative source for flipping back to `idle` when the turn
+          // completes; by then the channel has long since joined.
+          setBackendThinking(true)
           return { ok: true }
         }
 
@@ -206,19 +373,22 @@ export function ChatInterface({
           toast.error(errorMessage)
         }
         // Drop the optimistic bubble — the message didn't land in the DB
-        // regardless of which non-202 path we took.
+        // regardless of which non-202 path we took. Also clear storage so
+        // a refresh doesn't rehydrate a ghost bubble.
         setPendingUserMessages((prev) => prev.filter((m) => m.clientId !== clientId))
+        removePendingFromStorage(sessionId, clientId)
         return { ok: false, code }
       } catch (err) {
         console.error('Chat request failed:', err)
         toast.error('Could not reach Verona. Check your connection and try again.')
         setPendingUserMessages((prev) => prev.filter((m) => m.clientId !== clientId))
+        removePendingFromStorage(sessionId, clientId)
         return { ok: false }
       } finally {
         setIsPosting(false)
       }
     },
-    [projectId, openSettings],
+    [projectId, openSettings, sessionId],
   )
 
   // Reset the bootstrap retry counter when GitHub becomes ready.
@@ -353,8 +523,33 @@ export function ChatInterface({
   }, [sessionId])
 
   // Session status Realtime — drives the `thinking` indicator.
+  //
+  // Realtime does NOT replay events that occurred before the channel reached
+  // SUBSCRIBED. Between page mount and WS handshake completion there is a
+  // window (typically a few hundred ms, longer on cold connections) where any
+  // UPDATE to `chat_sessions` is silently dropped. To stay consistent across
+  // that window we:
+  //   1. Listen to live UPDATEs as before.
+  //   2. On SUBSCRIBED, do a one-shot catch-up read of the row to pick up
+  //      anything that changed between SSR and channel-join — covers refresh
+  //      mid-turn, a turn that finished very quickly, WS reconnects, and
+  //      another tab flipping the session.
   useEffect(() => {
     const supabase = createClient()
+    let cancelled = false
+
+    const refetchStatus = async () => {
+      const { data } = await supabase
+        .from('chat_sessions')
+        .select('status, status_updated_at')
+        .eq('id', sessionId)
+        .maybeSingle()
+      if (cancelled || !data) return
+      setBackendThinking(
+        computeSessionThinking(data.status ?? 'idle', data.status_updated_at ?? null),
+      )
+    }
+
     const channel = supabase
       .channel(`session-status-${sessionId}`)
       .on(
@@ -374,9 +569,14 @@ export function ChatInterface({
           }
         },
       )
-      .subscribe()
+      .subscribe((state) => {
+        if (state === 'SUBSCRIBED') {
+          void refetchStatus()
+        }
+      })
 
     return () => {
+      cancelled = true
       supabase.removeChannel(channel)
     }
   }, [sessionId, computeSessionThinking])

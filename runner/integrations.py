@@ -9,6 +9,7 @@ import jwt
 import httpx
 from datetime import datetime, timezone, timedelta
 from runner.encryption import decrypt
+from runner.logging import test_log
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +50,14 @@ async def fetch_recent_commits(config: dict, since_days: int = 7) -> list[dict]:
                         "author": c["commit"]["author"]["name"],
                         "repo": repo,
                     })
+            else:
+                test_log(
+                    "warn",
+                    "integrations_github_commits_non_200",
+                    repo=repo,
+                    status_code=response.status_code,
+                    body_preview=response.text[:200],
+                )
     return all_commits
 
 
@@ -96,6 +105,12 @@ async def fetch_posthog_sessions(config: dict, limit: int = 30) -> list[dict]:
             params={"limit": limit},
         )
         if response.status_code != 200:
+            test_log(
+                "warn",
+                "integrations_posthog_sessions_non_200",
+                status_code=response.status_code,
+                body_preview=response.text[:200],
+            )
             return []
         return response.json().get("results", [])
 
@@ -134,6 +149,12 @@ async def fetch_posthog_errors(config: dict, since_days: int = 7) -> list[dict]:
             },
         )
         if response.status_code != 200:
+            test_log(
+                "warn",
+                "integrations_posthog_errors_non_200",
+                status_code=response.status_code,
+                body_preview=response.text[:200],
+            )
             return []
         return response.json().get("results", [])
 
@@ -172,6 +193,12 @@ async def fetch_posthog_realtime_errors(config: dict, since_minutes: int = 5) ->
             },
         )
         if response.status_code != 200:
+            test_log(
+                "warn",
+                "integrations_posthog_realtime_errors_non_200",
+                status_code=response.status_code,
+                body_preview=response.text[:200],
+            )
             return []
 
         rows = response.json().get("results", [])
@@ -214,6 +241,14 @@ async def fetch_sentry_issues(config: dict, since_days: int = 7) -> list[dict]:
             },
         )
         if response.status_code != 200:
+            test_log(
+                "warn",
+                "integrations_sentry_issues_non_200",
+                status_code=response.status_code,
+                org_slug=org_slug,
+                project_slug=project_slug,
+                body_preview=response.text[:200],
+            )
             return []
 
         return [
@@ -248,6 +283,14 @@ async def fetch_sentry_realtime_events(config: dict, since_minutes: int = 5) -> 
             params={"full": "true"},
         )
         if response.status_code != 200:
+            test_log(
+                "warn",
+                "integrations_sentry_events_non_200",
+                status_code=response.status_code,
+                org_slug=org_slug,
+                project_slug=project_slug,
+                body_preview=response.text[:200],
+            )
             return []
 
         events = response.json()
@@ -296,6 +339,12 @@ async def fetch_langsmith_traces(config: dict, since_minutes: int = 10) -> list[
             json=body,
         )
         if response.status_code != 200:
+            test_log(
+                "warn",
+                "integrations_langsmith_traces_non_200",
+                status_code=response.status_code,
+                body_preview=response.text[:200],
+            )
             return []
 
         runs = response.json().get("runs", [])
@@ -338,6 +387,12 @@ async def fetch_langsmith_errors(config: dict, since_minutes: int = 10) -> list[
             json=body,
         )
         if response.status_code != 200:
+            test_log(
+                "warn",
+                "integrations_langsmith_errors_non_200",
+                status_code=response.status_code,
+                body_preview=response.text[:200],
+            )
             return []
 
         runs = response.json().get("runs", [])
@@ -389,6 +444,12 @@ async def fetch_braintrust_logs(config: dict, since_minutes: int = 10) -> list[d
             },
         )
         if response.status_code != 200:
+            test_log(
+                "warn",
+                "integrations_braintrust_logs_non_200",
+                status_code=response.status_code,
+                body_preview=response.text[:200],
+            )
             return []
 
         events = response.json().get("events", [])
@@ -429,6 +490,13 @@ async def _resolve_braintrust_project_id(api_key: str, api_url: str, project_nam
             params={"project_name": project_name, "limit": 1},
         )
         if response.status_code != 200:
+            test_log(
+                "warn",
+                "integrations_braintrust_project_lookup_non_200",
+                status_code=response.status_code,
+                project_name=project_name,
+                body_preview=response.text[:200],
+            )
             return None
 
         objects = response.json().get("objects", [])

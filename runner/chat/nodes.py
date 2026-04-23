@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import traceback
 from typing import Any, Literal
 
@@ -81,10 +82,23 @@ async def ensure_research(state: ChatTurnState) -> dict[str, Any]:
         turn_id=state.get("turn_id"),
     )
 
+    t0 = time.time()
     report: ResearchReport = await run_research_agent(
         sb, project_id=project_id, app_url=app_url
     )
     report_json = report.model_dump(mode="json")
+    chat_log(
+        "info",
+        "chat_ensure_research_ok",
+        project_id=project_id,
+        session_id=state["session_id"],
+        turn_id=state.get("turn_id"),
+        elapsed_s=round(time.time() - t0, 3),
+        finding_count=len(report_json.get("findings") or []),
+        recommended_flow_count=len(report_json.get("recommendedFlows") or []),
+        integrations_covered=report_json.get("integrationsCovered") or [],
+        integrations_skipped=report_json.get("integrationsSkipped") or [],
+    )
 
     try:
         sb.table("chat_sessions").update(
@@ -123,6 +137,17 @@ async def agent_turn(state: ChatTurnState) -> dict[str, Any]:
 
     model = get_opus().bind_tools(ALL_TOOLS)
 
+    chat_log(
+        "info",
+        "chat_agent_llm_begin",
+        project_id=state.get("project_id"),
+        session_id=state.get("session_id"),
+        turn_id=state.get("turn_id"),
+        message_count=len(messages),
+        llm_calls_so_far=state.get("llm_calls") or 0,
+    )
+    t0 = time.time()
+
     try:
         response: AIMessage = await model.ainvoke(messages)
     except Exception as e:
@@ -131,9 +156,31 @@ async def agent_turn(state: ChatTurnState) -> dict[str, Any]:
             "chat_agent_llm_failed",
             project_id=state.get("project_id"),
             session_id=state.get("session_id"),
+            turn_id=state.get("turn_id"),
+            elapsed_s=round(time.time() - t0, 3),
             err=repr(e),
         )
         raise
+
+    tool_calls = getattr(response, "tool_calls", None) or []
+    chat_log(
+        "info",
+        "chat_agent_llm_ok",
+        project_id=state.get("project_id"),
+        session_id=state.get("session_id"),
+        turn_id=state.get("turn_id"),
+        elapsed_s=round(time.time() - t0, 3),
+        tool_call_count=len(tool_calls),
+        tool_names=[tc.get("name") for tc in tool_calls],
+        has_text_content=bool(
+            response.content
+            if isinstance(response.content, str)
+            else any(
+                isinstance(b, dict) and b.get("type") == "text"
+                for b in (response.content or [])
+            )
+        ),
+    )
 
     return {
         "messages": [response],

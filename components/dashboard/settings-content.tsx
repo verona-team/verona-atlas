@@ -12,6 +12,11 @@ import {
   subscribeSettingsCache,
 } from '@/lib/settings-prefetch'
 import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
+import {
+  ADVANCED_INTEGRATION_TYPES,
+  AdvancedIntegrationsSection,
+  type AdvancedIntegrationType,
+} from '@/components/integrations/integration-cards'
 import { SlackChannelPicker } from '@/components/integrations/slack-channel-picker'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -148,6 +153,13 @@ export function SettingsContent({ projectId }: { projectId: string }) {
   const getIntegration = (type: string) =>
     integrations.find((i) => i.type === type && i.status === 'active')
 
+  // How many of the Sentry / LangSmith / Braintrust integrations the user
+  // already has connected. Drives the "N connected" pill on the collapsed
+  // trigger and the auto-expand default in `AdvancedIntegrationsSection`.
+  const advancedConnectedCount = ADVANCED_INTEGRATION_TYPES.filter((t) =>
+    Boolean(getIntegration(t as AdvancedIntegrationType)),
+  ).length
+
   async function disconnect(integrationId: string, typeName: string) {
     try {
       const res = await fetch(`/api/integrations/${integrationId}`, { method: 'DELETE' })
@@ -196,43 +208,6 @@ export function SettingsContent({ projectId }: { projectId: string }) {
           </SettingsIntegrationCard>
 
           <SettingsIntegrationCard
-            type="sentry"
-            title="Sentry"
-            integration={getIntegration('sentry')}
-            onDisconnect={disconnect}
-            connectUrl={`/projects/new?projectId=${projectId}`}
-          >
-            <MetaDetail
-              label="Project"
-              value={
-                getIntegration('sentry')?.meta
-                  ? `${getIntegration('sentry')!.meta.organization_slug}/${getIntegration('sentry')!.meta.project_slug}`
-                  : undefined
-              }
-            />
-          </SettingsIntegrationCard>
-
-          <SettingsIntegrationCard
-            type="langsmith"
-            title="LangSmith"
-            integration={getIntegration('langsmith')}
-            onDisconnect={disconnect}
-            connectUrl={`/projects/new?projectId=${projectId}`}
-          >
-            <MetaDetail label="Project" value={getIntegration('langsmith')?.meta?.project_name} />
-          </SettingsIntegrationCard>
-
-          <SettingsIntegrationCard
-            type="braintrust"
-            title="Braintrust"
-            integration={getIntegration('braintrust')}
-            onDisconnect={disconnect}
-            connectUrl={`/projects/new?projectId=${projectId}`}
-          >
-            <MetaDetail label="Project" value={getIntegration('braintrust')?.meta?.project_name} />
-          </SettingsIntegrationCard>
-
-          <SettingsIntegrationCard
             type="slack"
             title="Slack"
             integration={getIntegration('slack')}
@@ -243,6 +218,45 @@ export function SettingsContent({ projectId }: { projectId: string }) {
           >
             <SlackDetails integration={getIntegration('slack')} projectId={projectId} onRefresh={loadData} />
           </SettingsIntegrationCard>
+
+          <AdvancedIntegrationsSection connectedCount={advancedConnectedCount}>
+            <SettingsIntegrationCard
+              type="sentry"
+              title="Sentry"
+              integration={getIntegration('sentry')}
+              onDisconnect={disconnect}
+              connectUrl={`/projects/new?projectId=${projectId}`}
+            >
+              <MetaDetail
+                label="Project"
+                value={
+                  getIntegration('sentry')?.meta
+                    ? `${getIntegration('sentry')!.meta.organization_slug}/${getIntegration('sentry')!.meta.project_slug}`
+                    : undefined
+                }
+              />
+            </SettingsIntegrationCard>
+
+            <SettingsIntegrationCard
+              type="langsmith"
+              title="LangSmith"
+              integration={getIntegration('langsmith')}
+              onDisconnect={disconnect}
+              connectUrl={`/projects/new?projectId=${projectId}`}
+            >
+              <MetaDetail label="Project" value={getIntegration('langsmith')?.meta?.project_name} />
+            </SettingsIntegrationCard>
+
+            <SettingsIntegrationCard
+              type="braintrust"
+              title="Braintrust"
+              integration={getIntegration('braintrust')}
+              onDisconnect={disconnect}
+              connectUrl={`/projects/new?projectId=${projectId}`}
+            >
+              <MetaDetail label="Project" value={getIntegration('braintrust')?.meta?.project_name} />
+            </SettingsIntegrationCard>
+          </AdvancedIntegrationsSection>
         </div>
       </div>
 

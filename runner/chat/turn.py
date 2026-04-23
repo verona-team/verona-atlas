@@ -17,6 +17,7 @@ This module is intentionally small. The real work lives in
 from __future__ import annotations
 
 import secrets
+import time
 import traceback
 
 from .logging import chat_log
@@ -47,6 +48,7 @@ async def run_chat_turn(
     """
     sb = get_supabase()
     turn_id = f"turn_{secrets.token_hex(6)}"
+    turn_t0 = time.time()
 
     chat_log(
         "info",
@@ -63,6 +65,7 @@ async def run_chat_turn(
         from .graph import agent_app
         from .state import build_initial_state
 
+        state_t0 = time.time()
         initial_state = await build_initial_state(
             sb,
             session_id=session_id,
@@ -71,20 +74,44 @@ async def run_chat_turn(
             user_message_text=user_message_text,
             turn_id=turn_id,
         )
+        chat_log(
+            "info",
+            "chat_turn_state_built",
+            project_id=project_id,
+            session_id=session_id,
+            turn_id=turn_id,
+            elapsed_s=round(time.time() - state_t0, 3),
+            message_count=len(initial_state.get("messages") or []),
+            has_research_report=bool(initial_state.get("research_report")),
+            has_context_summary=bool(initial_state.get("context_summary")),
+            has_latest_flow_proposals=bool(initial_state.get("latest_flow_proposals")),
+            recent_run_count=len(initial_state.get("recent_runs") or []),
+            github_ready=bool((initial_state.get("github_ready") or {}).get("ok")),
+        )
 
         # `astream` with `stream_mode="updates"` lets us log per-node progress
         # to stdout (which shows up in Modal logs + LangSmith traces). We don't
         # forward anything to the client — all client-visible side effects are
         # DB writes performed inside nodes.
+        #
+        # `updates` yields one chunk per completed node, so we approximate
+        # per-node timing as "wall clock between this update and the previous
+        # one". This catches a node that pins on a slow LLM call without
+        # needing a checkpointer or a separate `values` stream mode.
+        last_update_t = time.time()
         async for chunk in agent_app.astream(initial_state, stream_mode="updates"):
+            now = time.time()
+            since_last = round(now - last_update_t, 3)
+            last_update_t = now
             for node_name, update in chunk.items():
                 chat_log(
-                    "debug",
+                    "info",
                     "chat_graph_node_update",
                     project_id=project_id,
                     session_id=session_id,
                     turn_id=turn_id,
                     node=node_name,
+                    approx_node_elapsed_s=since_last,
                     update_keys=list(update.keys()) if isinstance(update, dict) else None,
                 )
 
@@ -94,6 +121,7 @@ async def run_chat_turn(
             project_id=project_id,
             session_id=session_id,
             turn_id=turn_id,
+            elapsed_s=round(time.time() - turn_t0, 3),
         )
 
     except Exception as exc:

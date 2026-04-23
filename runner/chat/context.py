@@ -9,6 +9,7 @@ Uses Claude Sonnet 4.6 (cheap + fast for summarization).
 """
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from supabase import Client
@@ -70,6 +71,15 @@ async def maybe_summarize_older_messages(sb: Client, session_id: str) -> None:
     to_summarize = all_messages[:-RECENT_MESSAGE_LIMIT] if len(all_messages) > RECENT_MESSAGE_LIMIT else []
     if not to_summarize:
         return
+
+    chat_log(
+        "info",
+        "chat_summarize_begin",
+        session_id=session_id,
+        total_messages=len(all_messages),
+        to_summarize_count=len(to_summarize),
+    )
+    t0 = time.time()
 
     try:
         session_resp = (
@@ -158,3 +168,13 @@ async def maybe_summarize_older_messages(sb: Client, session_id: str) -> None:
             err=repr(e),
             rollup_count=len(ids_to_delete) if "ids_to_delete" in locals() else 0,
         )
+
+    chat_log(
+        "info",
+        "chat_summarize_ok",
+        session_id=session_id,
+        elapsed_s=round(time.time() - t0, 3),
+        summarized_count=len(to_summarize),
+        summary_char_len=len(new_summary),
+        deleted_count=len(ids_to_delete) if "ids_to_delete" in locals() else 0,
+    )
