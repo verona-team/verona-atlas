@@ -4,8 +4,10 @@ Pulls real-time data from all connected observability platforms
 before and after test execution to detect errors introduced during tests.
 """
 import asyncio
+import time
 from typing import Any
 
+from runner.logging import test_log
 from runner.integrations import (
     fetch_posthog_realtime_errors,
     fetch_sentry_realtime_events,
@@ -49,20 +51,45 @@ async def collect_observability_data(
         tasks["braintrust_errors"] = fetch_braintrust_errors(config, window_minutes)
 
     if not tasks:
+        test_log(
+            "debug",
+            "observability_collect_noop",
+            window_minutes=window_minutes,
+        )
         return {}
 
     keys = list(tasks.keys())
     coros = list(tasks.values())
+    t0 = time.time()
+    test_log(
+        "info",
+        "observability_collect_begin",
+        window_minutes=window_minutes,
+        sources=keys,
+    )
     results = await asyncio.gather(*coros, return_exceptions=True)
 
     data: dict[str, list[dict]] = {}
     for key, result in zip(keys, results):
         if isinstance(result, Exception):
-            print(f"Warning: observability fetch failed for {key}: {result}")
+            test_log(
+                "warn",
+                "observability_fetch_failed",
+                source=key,
+                err_type=type(result).__name__,
+                err=str(result),
+            )
             data[key] = []
         else:
             data[key] = result
 
+    test_log(
+        "info",
+        "observability_collect_ok",
+        window_minutes=window_minutes,
+        elapsed_s=round(time.time() - t0, 3),
+        counts={k: len(v) for k, v in data.items()},
+    )
     return data
 
 

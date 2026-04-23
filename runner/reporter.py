@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 from anthropic import Anthropic
 from runner.encryption import decrypt
+from runner.logging import test_log
 
 
 async def send_report(
@@ -20,6 +21,15 @@ async def send_report(
     summary: dict,
 ):
     """Generate AI analysis and send Slack report."""
+
+    test_log(
+        "info",
+        "reporter_send_report_begin",
+        test_run_id=test_run_id,
+        project_id=project.get("id"),
+        result_count=len(results),
+        has_slack=bool(integrations.get("slack")),
+    )
 
     observability_data = _aggregate_observability(results)
 
@@ -124,7 +134,12 @@ Keep it under 500 words."""
         content = message.content[0]
         return content.text if content.type == "text" else ""
     except Exception as e:
-        print(f"Warning: Failed to generate AI summary: {e}")
+        test_log(
+            "warn",
+            "reporter_ai_summary_failed",
+            err_type=type(e).__name__,
+            err=str(e),
+        )
         return ""
 
 
@@ -242,4 +257,15 @@ async def send_slack_report(
         )
         data = response.json()
         if not data.get("ok"):
-            print(f"Warning: Slack message failed: {data.get('error')}")
+            test_log(
+                "warn",
+                "reporter_slack_post_failed",
+                slack_error=data.get("error"),
+                status_code=response.status_code,
+            )
+        else:
+            test_log(
+                "info",
+                "reporter_slack_post_ok",
+                channel_id=channel_id,
+            )

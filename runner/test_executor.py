@@ -20,6 +20,7 @@ from anthropic import Anthropic
 from agentmail import AgentMail
 
 from runner.browser import stagehand_agent_model_config
+from runner.logging import test_log
 from runner.prompts import (
     OUTER_AGENT_MODEL,
     STAGEHAND_AGENT_MODEL,
@@ -45,7 +46,12 @@ async def capture_page_state(page) -> dict:
         elif isinstance(raw, str):
             screenshot_b64 = raw
     except Exception as e:
-        print(f"[EXECUTOR] WARNING: screenshot capture failed: {type(e).__name__}: {e}")
+        test_log(
+            "warn",
+            "executor_screenshot_capture_failed",
+            err_type=type(e).__name__,
+            err=str(e),
+        )
 
     return {
         "url": url,
@@ -83,14 +89,33 @@ async def execute_browser_action(session, page, instruction: str) -> dict:
         if not result_data.success:
             success = False
             error = result_data.message or "Agent execute reported failure"
-            print(f"[EXECUTOR]     execute returned success=false ({elapsed:.1f}s): {error}")
+            test_log(
+                "warn",
+                "executor_browser_action_reported_failure",
+                elapsed_s=round(elapsed, 3),
+                error=error,
+                instruction=instruction[:200],
+            )
         else:
-            print(f"[EXECUTOR]     execute succeeded ({elapsed:.1f}s): {(agent_output or '')[:120]}")
+            test_log(
+                "info",
+                "executor_browser_action_ok",
+                elapsed_s=round(elapsed, 3),
+                agent_output_preview=(agent_output or "")[:200],
+                instruction=instruction[:200],
+            )
     except Exception as e:
         elapsed = time.time() - t0
         success = False
         error = str(e)
-        print(f"[EXECUTOR]     execute EXCEPTION ({elapsed:.1f}s): {type(e).__name__}: {e}")
+        test_log(
+            "error",
+            "executor_browser_action_exception",
+            elapsed_s=round(elapsed, 3),
+            err_type=type(e).__name__,
+            err=str(e),
+            instruction=instruction[:200],
+        )
 
     await asyncio.sleep(1)
     page_state = await capture_page_state(page)
@@ -117,12 +142,26 @@ async def execute_navigate_to_url(page, url: str) -> dict:
         response = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
         elapsed = time.time() - t0
         status = response.status if response else None
-        print(f"[EXECUTOR]     navigate succeeded ({elapsed:.1f}s): status={status} url={page.url}")
+        test_log(
+            "info",
+            "executor_navigate_ok",
+            elapsed_s=round(elapsed, 3),
+            http_status=status,
+            requested_url=url,
+            final_url=page.url,
+        )
     except Exception as e:
         elapsed = time.time() - t0
         success = False
         error = str(e)
-        print(f"[EXECUTOR]     navigate EXCEPTION ({elapsed:.1f}s): {type(e).__name__}: {e}")
+        test_log(
+            "error",
+            "executor_navigate_exception",
+            elapsed_s=round(elapsed, 3),
+            err_type=type(e).__name__,
+            err=str(e),
+            requested_url=url,
+        )
 
     await asyncio.sleep(1)
     page_state = await capture_page_state(page)
@@ -150,17 +189,35 @@ async def execute_observe_dom(session, query: str) -> dict:
                 {"description": r.description, "selector": r.selector}
                 for r in results
             ])
-            print(f"[EXECUTOR]     observe found {len(results)} element(s) ({elapsed:.1f}s)")
+            test_log(
+                "info",
+                "executor_observe_ok",
+                elapsed_s=round(elapsed, 3),
+                element_count=len(results),
+                query=query[:200],
+            )
         else:
             observations_str = "No matching elements found."
-            print(f"[EXECUTOR]     observe found 0 elements ({elapsed:.1f}s)")
+            test_log(
+                "info",
+                "executor_observe_empty",
+                elapsed_s=round(elapsed, 3),
+                query=query[:200],
+            )
         return {
             "found": found,
             "observations": observations_str,
         }
     except Exception as e:
         elapsed = time.time() - t0
-        print(f"[EXECUTOR]     observe EXCEPTION ({elapsed:.1f}s): {type(e).__name__}: {e}")
+        test_log(
+            "error",
+            "executor_observe_exception",
+            elapsed_s=round(elapsed, 3),
+            err_type=type(e).__name__,
+            err=str(e),
+            query=query[:200],
+        )
         return {
             "found": False,
             "observations": f"Observation failed: {e}",
@@ -230,7 +287,13 @@ async def execute_check_email(
             list_resp = agentmail.inboxes.messages.list(inbox_id=agentmail_inbox_id, limit=10)
             rows = list_resp.messages or []
         except Exception as e:
-            print(f"[EXECUTOR]     check_email poll #{poll_count}: list failed: {type(e).__name__}: {e}")
+            test_log(
+                "warn",
+                "executor_check_email_list_failed",
+                poll_number=poll_count,
+                err_type=type(e).__name__,
+                err=str(e),
+            )
             await asyncio.sleep(2)
             continue
 
@@ -286,7 +349,13 @@ async def execute_check_email(
             break
 
         elapsed = time.time() - poll_start
-        print(f"[EXECUTOR]     check_email poll #{poll_count}: no messages yet ({elapsed:.0f}s / {timeout_seconds}s)")
+        test_log(
+            "debug",
+            "executor_check_email_poll_empty",
+            poll_number=poll_count,
+            elapsed_s=round(elapsed, 1),
+            timeout_seconds=timeout_seconds,
+        )
         await asyncio.sleep(2)
 
     if not found_messages:
@@ -296,7 +365,12 @@ async def execute_check_email(
             "summary": f"No new messages received within {timeout_seconds}s ({poll_count} polls).",
         }
 
-    print(f"[EXECUTOR]     check_email: found {len(found_messages)} message(s) after {poll_count} poll(s)")
+    test_log(
+        "info",
+        "executor_check_email_ok",
+        message_count=len(found_messages),
+        poll_count=poll_count,
+    )
     return {
         "success": True,
         "messages": found_messages,
@@ -388,14 +462,20 @@ async def execute_template(
     auth_extra = 15 if not existing_credentials and agentmail_address else 8
     max_iterations = max(len(steps) * 10, 10) + auth_extra
 
-    print(f"[EXECUTOR] execute_template — {tpl_name!r}")
-    print(f"[EXECUTOR]   app_url        = {app_url}")
-    print(f"[EXECUTOR]   steps          = {len(steps)}")
-    print(f"[EXECUTOR]   max_iterations = {max_iterations}")
-    print(f"[EXECUTOR]   outer model    = {OUTER_AGENT_MODEL}")
-    print(f"[EXECUTOR]   inner model    = {STAGEHAND_AGENT_MODEL}")
-    print(f"[EXECUTOR]   has_credentials = {existing_credentials is not None}")
-    print(f"[EXECUTOR]   agentmail      = {agentmail_address or 'none'}")
+    test_log(
+        "info",
+        "executor_template_begin",
+        template_name=tpl_name,
+        template_id=template.get("id"),
+        project_id=project.get("id"),
+        app_url=app_url,
+        step_count=len(steps),
+        max_iterations=max_iterations,
+        outer_model=OUTER_AGENT_MODEL,
+        inner_model=STAGEHAND_AGENT_MODEL,
+        has_credentials=existing_credentials is not None,
+        agentmail_address=agentmail_address,
+    )
 
     anthropic = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
     system_prompt = build_system_prompt(
@@ -409,10 +489,14 @@ async def execute_template(
 
     test_start_time = datetime.now(timezone.utc)
 
-    print("[EXECUTOR] Capturing initial page state...")
     initial_state = await capture_page_state(page)
-    print(f"[EXECUTOR]   initial url        = {initial_state['url']}")
-    print(f"[EXECUTOR]   has screenshot     = {bool(initial_state['screenshot_base64'])}")
+    test_log(
+        "info",
+        "executor_initial_page_state",
+        template_name=tpl_name,
+        initial_url=initial_state["url"],
+        has_screenshot=bool(initial_state["screenshot_base64"]),
+    )
 
     initial_content: list[dict] = [
         {"type": "text", "text": (
@@ -457,7 +541,14 @@ async def execute_template(
         iterations_used = iteration + 1
         messages = _compress_messages(messages, keep_recent_images=12)
 
-        print(f"[EXECUTOR] --- Iteration {iteration}/{max_iterations - 1} (messages={len(messages)}) ---")
+        test_log(
+            "debug",
+            "executor_iteration_begin",
+            template_name=tpl_name,
+            iteration=iteration,
+            max_iterations=max_iterations,
+            message_count=len(messages),
+        )
 
         # Call outer agent (Claude Opus)
         llm_t0 = time.time()
@@ -470,12 +561,28 @@ async def execute_template(
                 messages=messages,
             )
             llm_elapsed = time.time() - llm_t0
-            print(f"[EXECUTOR]   LLM call: {llm_elapsed:.1f}s  stop_reason={response.stop_reason}  "
-                  f"usage=in:{response.usage.input_tokens}/out:{response.usage.output_tokens}")
+            test_log(
+                "info",
+                "executor_llm_call_ok",
+                template_name=tpl_name,
+                iteration=iteration,
+                elapsed_s=round(llm_elapsed, 3),
+                stop_reason=response.stop_reason,
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+            )
         except Exception as e:
             llm_elapsed = time.time() - llm_t0
             llm_error = str(e)
-            print(f"[EXECUTOR]   LLM EXCEPTION ({llm_elapsed:.1f}s): {type(e).__name__}: {e}")
+            test_log(
+                "error",
+                "executor_llm_call_failed",
+                template_name=tpl_name,
+                iteration=iteration,
+                elapsed_s=round(llm_elapsed, 3),
+                err_type=type(e).__name__,
+                err=str(e),
+            )
             actions.append({
                 "iteration": iteration,
                 "tool": "llm_error",
@@ -493,13 +600,25 @@ async def execute_template(
                 if hasattr(b, "text")
             ]
             test_summary = " ".join(text_parts) if text_parts else "Agent ended without explicit completion."
-            print(f"[EXECUTOR]   Agent ended turn (no tool call). Summary preview: {test_summary[:150]}")
+            test_log(
+                "info",
+                "executor_agent_end_turn",
+                template_name=tpl_name,
+                iteration=iteration,
+                summary_preview=test_summary[:200],
+            )
             completed = True
             break
 
         tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
         if not tool_use_blocks:
-            print("[EXECUTOR]   No tool_use blocks and stop_reason != end_turn — treating as completed")
+            test_log(
+                "warn",
+                "executor_no_tool_use_blocks",
+                template_name=tpl_name,
+                iteration=iteration,
+                stop_reason=response.stop_reason,
+            )
             completed = True
             break
 
@@ -519,7 +638,14 @@ async def execute_template(
 
             if tool_name == "browser_action":
                 instruction = tool_input.get("instruction", "")
-                print(f"[EXECUTOR]   tool: browser_action — {instruction[:120]}")
+                test_log(
+                    "info",
+                    "executor_tool_call",
+                    template_name=tpl_name,
+                    iteration=iteration,
+                    tool=tool_name,
+                    instruction=instruction[:200],
+                )
 
                 result = await execute_browser_action(session, page, instruction)
                 action_record["success"] = result["success"]
@@ -554,7 +680,14 @@ async def execute_template(
 
             elif tool_name == "navigate_to_url":
                 nav_url = tool_input.get("url", "")
-                print(f"[EXECUTOR]   tool: navigate_to_url — {nav_url[:120]}")
+                test_log(
+                    "info",
+                    "executor_tool_call",
+                    template_name=tpl_name,
+                    iteration=iteration,
+                    tool=tool_name,
+                    url=nav_url[:200],
+                )
 
                 result = await execute_navigate_to_url(page, nav_url)
                 action_record["success"] = result["success"]
@@ -589,7 +722,14 @@ async def execute_template(
 
             elif tool_name == "observe_dom":
                 query = tool_input.get("query", "")
-                print(f"[EXECUTOR]   tool: observe_dom — {query[:120]}")
+                test_log(
+                    "info",
+                    "executor_tool_call",
+                    template_name=tpl_name,
+                    iteration=iteration,
+                    tool=tool_name,
+                    query=query[:200],
+                )
 
                 result = await execute_observe_dom(session, query)
                 action_record["found"] = result["found"]
@@ -604,14 +744,26 @@ async def execute_template(
             elif tool_name == "save_credentials":
                 cred_email = tool_input.get("email", "")
                 cred_password = tool_input.get("password", "")
-                print(f"[EXECUTOR]   tool: save_credentials — email={cred_email}")
+                test_log(
+                    "info",
+                    "executor_tool_call",
+                    template_name=tpl_name,
+                    iteration=iteration,
+                    tool=tool_name,
+                    email=cred_email,
+                )
 
                 if on_credentials_saved and cred_email and cred_password:
                     try:
                         await on_credentials_saved(cred_email, cred_password)
                         credentials_saved = True
                         action_record["success"] = True
-                        print("[EXECUTOR]     credentials saved successfully")
+                        test_log(
+                            "info",
+                            "executor_save_credentials_ok",
+                            template_name=tpl_name,
+                            email=cred_email,
+                        )
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": tool_id,
@@ -620,7 +772,13 @@ async def execute_template(
                     except Exception as e:
                         action_record["success"] = False
                         action_record["error"] = str(e)
-                        print(f"[EXECUTOR]     save_credentials FAILED: {type(e).__name__}: {e}")
+                        test_log(
+                            "error",
+                            "executor_save_credentials_failed",
+                            template_name=tpl_name,
+                            err_type=type(e).__name__,
+                            err=str(e),
+                        )
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": tool_id,
@@ -639,7 +797,14 @@ async def execute_template(
 
             elif tool_name == "check_email":
                 timeout_secs = tool_input.get("timeout_seconds", 30)
-                print(f"[EXECUTOR]   tool: check_email — timeout={timeout_secs}s")
+                test_log(
+                    "info",
+                    "executor_tool_call",
+                    template_name=tpl_name,
+                    iteration=iteration,
+                    tool=tool_name,
+                    timeout_seconds=timeout_secs,
+                )
 
                 result = await execute_check_email(
                     agentmail_inbox_id,
@@ -680,10 +845,22 @@ async def execute_template(
                 test_summary = tool_input.get("summary", "")
                 bugs_found = tool_input.get("bugs_found", [])
 
-                print(f"[EXECUTOR]   tool: complete_test — passed={test_passed}  bugs={len(bugs_found)}")
-                print(f"[EXECUTOR]     summary: {test_summary[:200]}")
-                for bug in bugs_found:
-                    print(f"[EXECUTOR]     bug: [{bug.get('severity', '?')}] {bug.get('description', '?')[:120]}")
+                test_log(
+                    "info",
+                    "executor_complete_test",
+                    template_name=tpl_name,
+                    iteration=iteration,
+                    passed=test_passed,
+                    bug_count=len(bugs_found),
+                    summary_preview=test_summary[:300],
+                    bugs=[
+                        {
+                            "severity": b.get("severity"),
+                            "description": (b.get("description") or "")[:200],
+                        }
+                        for b in bugs_found
+                    ],
+                )
 
                 tool_results.append({
                     "type": "tool_result",
@@ -697,7 +874,13 @@ async def execute_template(
                 break
 
             else:
-                print(f"[EXECUTOR]   tool: UNKNOWN — {tool_name}")
+                test_log(
+                    "warn",
+                    "executor_tool_call_unknown",
+                    template_name=tpl_name,
+                    iteration=iteration,
+                    tool=tool_name,
+                )
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tool_id,
@@ -716,20 +899,35 @@ async def execute_template(
 
     if llm_error is not None:
         test_summary = f"Outer LLM call failed: {llm_error}"
-        print(f"[EXECUTOR] WARNING: LLM failure — {llm_error}")
+        test_log(
+            "warn",
+            "executor_loop_exit_llm_error",
+            template_name=tpl_name,
+            err=llm_error,
+        )
     elif not completed:
         test_summary = f"Test execution hit the iteration limit ({max_iterations}). The test flow may be incomplete."
-        print(f"[EXECUTOR] WARNING: Hit iteration limit ({max_iterations})")
+        test_log(
+            "warn",
+            "executor_loop_exit_iteration_limit",
+            template_name=tpl_name,
+            max_iterations=max_iterations,
+        )
 
-    print(f"[EXECUTOR] execute_template — finished")
-    print(f"[EXECUTOR]   loop time    = {loop_elapsed:.1f}s")
-    print(f"[EXECUTOR]   iterations   = {iterations_used}/{max_iterations}")
-    print(f"[EXECUTOR]   passed       = {test_passed}")
-    print(f"[EXECUTOR]   completed    = {completed}")
-    print(f"[EXECUTOR]   actions      = {len(actions)}")
-    print(f"[EXECUTOR]   screenshots  = {len(screenshots)}")
-    print(f"[EXECUTOR]   bugs         = {len(bugs_found)}")
-    print(f"[EXECUTOR]   creds_saved  = {credentials_saved}")
+    test_log(
+        "info",
+        "executor_template_ok",
+        template_name=tpl_name,
+        elapsed_s=round(loop_elapsed, 3),
+        iterations_used=iterations_used,
+        max_iterations=max_iterations,
+        passed=test_passed,
+        completed=completed,
+        action_count=len(actions),
+        screenshot_count=len(screenshots),
+        bug_count=len(bugs_found),
+        credentials_saved=credentials_saved,
+    )
 
     return {
         "passed": test_passed,

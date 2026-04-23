@@ -15,6 +15,7 @@ import httpx
 from stagehand import AsyncStagehand
 from playwright.async_api import async_playwright
 
+from runner.logging import test_log
 from runner.prompts import STAGEHAND_SESSION_MODEL
 
 
@@ -90,26 +91,31 @@ async def create_stagehand_session() -> dict[str, Any]:
       - page:       Playwright Page ready for interaction
     """
     t0 = time.time()
-    print("[BROWSER] create_stagehand_session — starting")
+    test_log("info", "browser_session_create_begin")
 
     bb_api_key = os.environ.get("BROWSERBASE_API_KEY", "")
     bb_project_id = os.environ.get("BROWSERBASE_PROJECT_ID", "")
     anthropic_api_key, anthropic_key_source = _resolve_anthropic_key_for_stagehand_client()
 
     if not bb_api_key:
-        print("[BROWSER] ERROR: BROWSERBASE_API_KEY is missing or empty")
+        test_log("error", "browser_session_missing_env", missing="BROWSERBASE_API_KEY")
         raise ValueError("BROWSERBASE_API_KEY environment variable is required")
     if not bb_project_id:
-        print("[BROWSER] ERROR: BROWSERBASE_PROJECT_ID is missing or empty")
+        test_log("error", "browser_session_missing_env", missing="BROWSERBASE_PROJECT_ID")
         raise ValueError("BROWSERBASE_PROJECT_ID environment variable is required")
     if not anthropic_api_key:
-        print("[BROWSER] ERROR: ANTHROPIC_API_KEY missing or empty (required for Stagehand and the outer QA agent)")
+        test_log("error", "browser_session_missing_env", missing="ANTHROPIC_API_KEY")
         raise ValueError("ANTHROPIC_API_KEY is required for Stagehand")
 
-    print(f"[BROWSER]   BROWSERBASE_PROJECT_ID = {bb_project_id}")
-    print(f"[BROWSER]   BROWSERBASE_API_KEY    = {bb_api_key[:8]}...{bb_api_key[-4:]}")
-    print(f"[BROWSER]   Anthropic key for Stagehand = from {anthropic_key_source} (len={len(anthropic_api_key)})")
-    print(f"[BROWSER]   session model          = {STAGEHAND_SESSION_MODEL}")
+    test_log(
+        "debug",
+        "browser_session_config",
+        browserbase_project_id=bb_project_id,
+        browserbase_api_key_preview=f"{bb_api_key[:8]}...{bb_api_key[-4:]}",
+        anthropic_key_source=anthropic_key_source,
+        anthropic_key_len=len(anthropic_api_key),
+        session_model=STAGEHAND_SESSION_MODEL,
+    )
 
     client: AsyncStagehand | None = None
     session: Any = None
@@ -117,8 +123,7 @@ async def create_stagehand_session() -> dict[str, Any]:
     browser: Any = None
 
     try:
-        # Step 1: Create API client
-        print("[BROWSER] Step 1/4: Creating AsyncStagehand client...")
+        test_log("debug", "browser_session_step", step="create_client")
         t1 = time.time()
         # Stagehand SDK names this argument `model_api_key`; value is ANTHROPIC_API_KEY only.
         client = AsyncStagehand(
@@ -126,40 +131,63 @@ async def create_stagehand_session() -> dict[str, Any]:
             browserbase_project_id=bb_project_id,
             model_api_key=anthropic_api_key,
         )
-        print(f"[BROWSER] Step 1/4: Client created ({time.time() - t1:.2f}s)")
+        test_log(
+            "debug",
+            "browser_session_step_ok",
+            step="create_client",
+            elapsed_s=round(time.time() - t1, 3),
+        )
 
-        # Step 2: Start Stagehand session (creates Browserbase cloud browser)
-        print("[BROWSER] Step 2/4: Starting Stagehand session (Browserbase cloud browser)...")
+        test_log("debug", "browser_session_step", step="start_stagehand_session")
         t2 = time.time()
         session = await client.sessions.start(model_name=STAGEHAND_SESSION_MODEL)
         session_id = session.id
-        print(f"[BROWSER] Step 2/4: Session started ({time.time() - t2:.2f}s)")
-        print(f"[BROWSER]   session_id = {session_id}")
-        print(f"[BROWSER]   live view  = https://www.browserbase.com/sessions/{session_id}")
+        test_log(
+            "info",
+            "browser_session_step_ok",
+            step="start_stagehand_session",
+            elapsed_s=round(time.time() - t2, 3),
+            browserbase_session_id=session_id,
+            live_view_url=f"https://www.browserbase.com/sessions/{session_id}",
+        )
 
-        # Step 3: Connect Playwright to Browserbase session via CDP
-        print("[BROWSER] Step 3/4: Connecting Playwright via CDP...")
+        test_log("debug", "browser_session_step", step="connect_playwright_cdp")
         t3 = time.time()
         pw = await async_playwright().start()
         cdp_url = f"wss://connect.browserbase.com?apiKey={bb_api_key}&sessionId={session_id}"
         browser = await pw.chromium.connect_over_cdp(cdp_url)
-        print(f"[BROWSER] Step 3/4: Playwright CDP connected ({time.time() - t3:.2f}s)")
+        test_log(
+            "debug",
+            "browser_session_step_ok",
+            step="connect_playwright_cdp",
+            elapsed_s=round(time.time() - t3, 3),
+        )
 
-        # Step 4: Acquire page from browser context
-        print("[BROWSER] Step 4/4: Acquiring page from browser context...")
+        test_log("debug", "browser_session_step", step="acquire_page")
         context = browser.contexts[0]
         page = context.pages[0] if context.pages else await context.new_page()
-        print(f"[BROWSER] Step 4/4: Page acquired — url={page.url}")
+        test_log(
+            "debug",
+            "browser_session_step_ok",
+            step="acquire_page",
+            url=page.url,
+        )
 
     except BaseException as exc:
         elapsed = time.time() - t0
-        print(f"[BROWSER] ERROR: Session creation failed after {elapsed:.2f}s")
-        print(f"[BROWSER]   exception: {type(exc).__name__}: {exc}")
-        print(f"[BROWSER]   allocated: client={'yes' if client else 'no'}, session={'yes' if session else 'no'}, "
-              f"playwright={'yes' if pw else 'no'}, browser={'yes' if browser else 'no'}")
-        print("[BROWSER]   cleaning up partial resources...")
+        test_log(
+            "error",
+            "browser_session_create_failed",
+            elapsed_s=round(elapsed, 3),
+            err_type=type(exc).__name__,
+            err=str(exc),
+            allocated_client=client is not None,
+            allocated_session=session is not None,
+            allocated_playwright=pw is not None,
+            allocated_browser=browser is not None,
+        )
         await _cleanup_partial(client, session, browser, pw)
-        print("[BROWSER]   partial cleanup done")
+        test_log("info", "browser_session_partial_cleanup_done")
         raise
 
     # Best-effort: fetch the embeddable live-view URL so the UI can show
@@ -167,7 +195,12 @@ async def create_stagehand_session() -> dict[str, Any]:
     live_view_urls = await fetch_live_view_urls(session_id, bb_api_key)
 
     elapsed = time.time() - t0
-    print(f"[BROWSER] create_stagehand_session — completed in {elapsed:.2f}s")
+    test_log(
+        "info",
+        "browser_session_create_ok",
+        elapsed_s=round(elapsed, 3),
+        browserbase_session_id=session_id,
+    )
     return {
         "client": client,
         "session": session,
@@ -206,21 +239,35 @@ async def fetch_live_view_urls(session_id: str, bb_api_key: str) -> dict[str, st
                 },
             )
         if response.status_code != 200:
-            print(
-                f"[BROWSER] live-view fetch non-200 ({response.status_code}) — "
-                f"body preview: {response.text[:200]}"
+            test_log(
+                "warn",
+                "browser_live_view_fetch_non_200",
+                status_code=response.status_code,
+                body_preview=response.text[:200],
+                browserbase_session_id=session_id,
             )
             return {}
         data = response.json()
     except Exception as e:
-        print(f"[BROWSER] live-view fetch failed: {type(e).__name__}: {e}")
+        test_log(
+            "warn",
+            "browser_live_view_fetch_failed",
+            err_type=type(e).__name__,
+            err=str(e),
+            browserbase_session_id=session_id,
+        )
         return {}
 
     fullscreen = data.get("debuggerFullscreenUrl") or ""
     debugger_url = data.get("debuggerUrl") or ""
     embed_url = f"{fullscreen}&navbar=false" if fullscreen else ""
 
-    print(f"[BROWSER]   live-view embed URL = {embed_url or '(none)'}")
+    test_log(
+        "info",
+        "browser_live_view_fetch_ok",
+        browserbase_session_id=session_id,
+        has_embed_url=bool(embed_url),
+    )
     return {
         "embed_url": embed_url or None,
         "debugger_url": debugger_url or None,
@@ -238,27 +285,51 @@ async def _cleanup_partial(
     if browser is not None:
         try:
             await browser.close()
-            print("[BROWSER]   cleanup: browser closed")
+            test_log("debug", "browser_cleanup_step_ok", step="browser_close")
         except Exception as e:
-            print(f"[BROWSER]   cleanup: browser.close() failed: {e}")
+            test_log(
+                "warn",
+                "browser_cleanup_step_failed",
+                step="browser_close",
+                err_type=type(e).__name__,
+                err=str(e),
+            )
     if playwright_inst is not None:
         try:
             await playwright_inst.stop()
-            print("[BROWSER]   cleanup: playwright stopped")
+            test_log("debug", "browser_cleanup_step_ok", step="playwright_stop")
         except Exception as e:
-            print(f"[BROWSER]   cleanup: playwright.stop() failed: {e}")
+            test_log(
+                "warn",
+                "browser_cleanup_step_failed",
+                step="playwright_stop",
+                err_type=type(e).__name__,
+                err=str(e),
+            )
     if session is not None:
         try:
             await session.end()
-            print("[BROWSER]   cleanup: session ended")
+            test_log("debug", "browser_cleanup_step_ok", step="session_end")
         except Exception as e:
-            print(f"[BROWSER]   cleanup: session.end() failed: {e}")
+            test_log(
+                "warn",
+                "browser_cleanup_step_failed",
+                step="session_end",
+                err_type=type(e).__name__,
+                err=str(e),
+            )
     if client is not None:
         try:
             await client.close()
-            print("[BROWSER]   cleanup: client closed")
+            test_log("debug", "browser_cleanup_step_ok", step="client_close")
         except Exception as e:
-            print(f"[BROWSER]   cleanup: client.close() failed: {e}")
+            test_log(
+                "warn",
+                "browser_cleanup_step_failed",
+                step="client_close",
+                err_type=type(e).__name__,
+                err=str(e),
+            )
 
 
 async def cleanup_session(
@@ -272,7 +343,11 @@ async def cleanup_session(
     Accepts None for any argument so callers don't need to guard against
     partial initialisation.
     """
-    print("[BROWSER] cleanup_session — tearing down resources...")
     t0 = time.time()
+    test_log("info", "browser_cleanup_begin")
     await _cleanup_partial(client, session, browser, playwright_inst)
-    print(f"[BROWSER] cleanup_session — done ({time.time() - t0:.2f}s)")
+    test_log(
+        "info",
+        "browser_cleanup_ok",
+        elapsed_s=round(time.time() - t0, 3),
+    )
