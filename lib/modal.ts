@@ -29,20 +29,33 @@ export async function triggerTestRun(testRunId: string, projectId: string): Prom
  * duplicate POSTs can short-circuit and so the turn can be correlated with
  * its Modal invocation.
  *
- * The `userMessageClientId` here is the `UIMessage.id` the client assigned
- * to the user's `chat_messages` row (unique per `(session_id, client_message_id)`).
- * Passing it through lets the Python runner verify the row it's about to
- * respond to actually exists, and gives us a natural idempotency key for
- * retries or duplicate spawns.
+ * Parameters:
+ *   - `userMessageClientId`: the `UIMessage.id` the client assigned. Used
+ *     by the Python worker for idempotency/trace correlation and to
+ *     dedup its own current-turn row out of the historical context read.
+ *   - `userMessageText`: the actual text of the user's message. Passed
+ *     directly rather than having Python re-SELECT it from `chat_messages`
+ *     after the route's upsert — that previously caused a
+ *     read-your-writes race where the Python worker's read saw an empty
+ *     list and Claude 400'd with "at least one message is required".
+ *     The route-side upsert is still authoritative for durability across
+ *     refreshes; this argument just gives the worker the current turn's
+ *     content without needing the replica to have observed it yet.
  */
 export async function triggerChatTurn(
   sessionId: string,
   projectId: string,
   userMessageClientId: string,
+  userMessageText: string,
 ): Promise<string> {
   const client = getClient()
   const fn = await client.functions.fromName("atlas-runner", "process_chat_turn")
-  const call = await fn.spawn([sessionId, projectId, userMessageClientId])
+  const call = await fn.spawn([
+    sessionId,
+    projectId,
+    userMessageClientId,
+    userMessageText,
+  ])
   return call.functionCallId
 }
 

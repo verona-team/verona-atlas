@@ -27,6 +27,7 @@ async def run_chat_turn(
     session_id: str,
     project_id: str,
     user_message_client_id: str,
+    user_message_text: str,
 ) -> None:
     """Execute one chat turn against the durable LangGraph agent.
 
@@ -35,6 +36,14 @@ async def run_chat_turn(
     - May insert `flow_proposals` / `test_run_started` metadata rows.
     - Transitions `chat_sessions.status` through thinking -> idle/error.
     - Clears `active_chat_call_id` on exit.
+
+    `user_message_text` is the content of the turn we're responding to,
+    passed down from the API route. We do NOT re-fetch it from the DB —
+    that created a read-your-writes race where the Python worker's
+    SELECT against `chat_messages` sometimes returned before the row the
+    route had just committed was visible to this reader, leaving the
+    message history empty and causing the Claude call to 400 with
+    "at least one message is required".
     """
     sb = get_supabase()
     turn_id = f"turn_{secrets.token_hex(6)}"
@@ -59,6 +68,7 @@ async def run_chat_turn(
             session_id=session_id,
             project_id=project_id,
             user_message_client_id=user_message_client_id,
+            user_message_text=user_message_text,
             turn_id=turn_id,
         )
 
