@@ -168,6 +168,24 @@ export function NewProjectModal() {
     if (!githubComplete || !projectId || continuing) return
     setContinuing(true)
     try {
+      // Arm the deferred bootstrap BEFORE navigating — the chat page reads
+      // `projects.bootstrap_dispatched_at` via SSR to decide whether to
+      // render the setup CTA or the live `ChatInterface`. Pressing the
+      // modal's own Continue button is an explicit "I'm done, start the
+      // agent" intent, so we flip the flag here rather than surfacing the
+      // CTA again on arrival.
+      const dispatchRes = await fetch(
+        `/api/projects/${projectId}/dispatch-bootstrap`,
+        { method: 'POST' },
+      )
+      if (!dispatchRes.ok) {
+        const body = await dispatchRes.json().catch(() => ({}))
+        throw new Error(
+          typeof body.error === 'string'
+            ? body.error
+            : 'Could not start chat. Please try again.',
+        )
+      }
       await refreshProjects()
       router.push(`/projects/${projectId}`)
       setShowNewProjectModal(false)
@@ -183,28 +201,49 @@ export function NewProjectModal() {
     }
   }
 
+  async function handleSoftClose() {
+    // Close mid-setup (outside click / Escape / X button on the integrations
+    // step). Instead of blocking on GitHub or silently dropping the user on
+    // whatever page they were on, we route them to the newly created
+    // project's chat route — which, because `bootstrap_dispatched_at` is
+    // still NULL, renders `<ProjectSetupCTA />`. That gives them a
+    // persistent landing surface to finish connecting integrations at their
+    // own pace without firing the bootstrap message on their behalf.
+    const newProjectId = projectId
+    setShowNewProjectModal(false)
+    reset()
+    if (newProjectId) {
+      await refreshProjects()
+      router.push(`/projects/${newProjectId}`)
+    }
+  }
+
   return (
     <Dialog
       open={showNewProjectModal}
       onOpenChange={(open) => {
-        if (!open && continuing) {
+        if (open) return
+        if (continuing) {
           // Navigation is already in flight — don't let the user close the
           // modal and lose the loading feedback.
           return
         }
-        if (!open && step === 'integrations' && !githubComplete) {
-          toast.error('Connect GitHub and select a repository to continue.')
+        if (step === 'integrations') {
+          void handleSoftClose()
           return
         }
-        if (!open) {
-          setShowNewProjectModal(false)
-          reset()
-        }
+        setShowNewProjectModal(false)
+        reset()
       }}
     >
       <DialogContent
         className="sm:max-w-2xl max-h-[85vh] overflow-y-auto"
-        showCloseButton={step === 'details' && !projectId}
+        // On the integrations step the user can now dismiss via outside-
+        // click / Escape / X and land on the project's setup CTA page,
+        // where they can keep connecting integrations without firing the
+        // bootstrap turn. The `details` step still hides the X before a
+        // project exists since there's nothing to land on yet.
+        showCloseButton={step === 'integrations' || !projectId}
       >
         {step === 'details' ? (
           <>
@@ -324,7 +363,8 @@ export function NewProjectModal() {
               </Button>
               {!githubComplete && !continuing && (
                 <p className="text-xs text-muted-foreground mt-2 text-center">
-                  Connect GitHub and select a repository to continue.
+                  GitHub is required to chat. You can close this and finish
+                  setup later.
                 </p>
               )}
             </div>
