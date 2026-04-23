@@ -133,15 +133,22 @@ async def build_initial_state(
     project = project_rows[0]
 
     # Recent messages (last 30) — convert into langchain Messages for the LLM.
+    #
+    # We order DESC and reverse locally (rather than ASC + limit 30 on the
+    # DB), because "ASC limit 30" returns the OLDEST 30 — which for any
+    # session with >30 messages means the LLM sees ancient context and
+    # never the user's latest turn. Postgres has no "take the newest N
+    # in chronological order" in one query, so: DESC + limit + reverse
+    # in app code. Matches the TS original (lib/chat/context.ts).
     msgs_resp = (
         sb.table("chat_messages")
         .select("id, role, content, metadata, client_message_id, created_at")
         .eq("session_id", session_id)
-        .order("created_at", desc=False)
+        .order("created_at", desc=True)
         .limit(30)
         .execute()
     )
-    raw_msgs: list[dict[str, Any]] = msgs_resp.data or []
+    raw_msgs: list[dict[str, Any]] = list(reversed(msgs_resp.data or []))
 
     lc_messages: list[AnyMessage] = []
     user_msg_seen = False

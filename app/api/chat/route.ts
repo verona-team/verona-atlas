@@ -56,11 +56,18 @@ function extractMessageText(msg: IncomingMessage): string {
 }
 
 /**
- * How long we treat an existing `active_chat_call_id` as "still in flight".
- * Must be <= the Modal function's timeout (currently 3600s) so we never
- * hold the UI hostage behind a dead call.
+ * How long we treat a session whose `status='thinking'` as still actually
+ * running. Must be <= the Modal function's timeout (currently 3600s) so we
+ * never hold the UI hostage behind a dead worker that never cleaned up
+ * its own status.
+ *
+ * We use `status` (not `active_chat_call_id`) as the source of truth for
+ * "is a turn in flight." The call id is prone to a write-after-finalize
+ * race: the API route writes it AFTER spawn returns, but a fast Modal
+ * worker can finalize (and null the id) in between. Reserving
+ * active_chat_call_id as purely observational avoids that race.
  */
-const ACTIVE_CALL_MAX_AGE_MS = 60 * 60 * 1000
+const THINKING_MAX_AGE_MS = 60 * 60 * 1000
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
@@ -127,44 +134,86 @@ export async function POST(request: NextRequest) {
     const service = createServiceRoleClient()
     const session = await getOrCreateSession(service, projectId)
 
-    // -------- Duplicate-turn / already-in-flight guard --------
-    // Check BEFORE persisting the user message so that a genuinely new
-    // message (different client_message_id) is never written to the DB if
-    // we're going to reject the spawn anyway. Writing an orphaned row here
-    // would leave a message the running Modal worker doesn't know about and
-    // that no new worker will be spawned to process.
+    // -------- Load current session state for the dedup guard --------
+    // We use `status == 'thinking'` as the source of truth for "a turn is
+    // currently in flight." See the THINKING_MAX_AGE_MS doc for why this
+    // beats gating on active_chat_call_id (which is susceptible to a
+    // write-after-finalize race).
     const { data: existingSession } = await service
       .from('chat_sessions')
-      .select('active_chat_call_id, active_chat_call_started_at')
+      .select('status, status_updated_at, active_chat_call_id')
       .eq('id', session.id)
       .single()
 
-    const existingCallId = existingSession?.active_chat_call_id ?? null
-    const existingStartedAt = existingSession?.active_chat_call_started_at
-      ? new Date(existingSession.active_chat_call_started_at).getTime()
+    const statusUpdatedAtMs = existingSession?.status_updated_at
+      ? new Date(existingSession.status_updated_at).getTime()
       : null
-    const existingCallIsAlive =
-      !!existingCallId &&
-      !!existingStartedAt &&
-      Date.now() - existingStartedAt < ACTIVE_CALL_MAX_AGE_MS
+    const turnInFlight =
+      existingSession?.status === 'thinking' &&
+      !!statusUpdatedAtMs &&
+      Date.now() - statusUpdatedAtMs < THINKING_MAX_AGE_MS
 
-    if (existingCallIsAlive) {
-      chatServerLog('info', 'chat_duplicate_spawn_short_circuit', {
+    if (turnInFlight) {
+      // Two sub-cases:
+      //
+      //   (a) Same client_message_id as the one the in-flight worker is
+      //       already processing. This is the hard-refresh / bootstrap re-fire
+      //       pattern — the row the worker needs already exists (it was
+      //       upserted by the ORIGINAL POST that spawned the worker). Short-
+      //       circuit with 202 reused:true so the client doesn't retry and
+      //       the re-fire is a genuine no-op.
+      //
+      //   (b) Different client_message_id — the user typed a follow-up while
+      //       the previous turn is still running. We MUST NOT silently 202
+      //       with a stale call id (the message would never be processed and
+      //       the client's optimistic bubble would be a ghost). Instead return
+      //       409 TURN_IN_FLIGHT so the client knows to drop the bubble and
+      //       prompt the user to wait.
+      const { data: existingUserMsg } = await service
+        .from('chat_messages')
+        .select('id')
+        .eq('session_id', session.id)
+        .eq('client_message_id', message.id)
+        .maybeSingle()
+
+      if (existingUserMsg) {
+        chatServerLog('info', 'chat_duplicate_spawn_short_circuit', {
+          projectId,
+          sessionId: session.id,
+          userId: user.id,
+          clientMessageId: message.id,
+          existingCallId: existingSession?.active_chat_call_id ?? null,
+        })
+        return NextResponse.json(
+          {
+            ok: true,
+            functionCallId: existingSession?.active_chat_call_id ?? null,
+            reused: true,
+          },
+          { status: 202 },
+        )
+      }
+
+      chatServerLog('info', 'chat_turn_in_flight_rejected', {
         projectId,
         sessionId: session.id,
         userId: user.id,
-        existingCallId,
+        clientMessageId: message.id,
       })
       return NextResponse.json(
-        { ok: true, functionCallId: existingCallId, reused: true },
-        { status: 202 },
+        {
+          error:
+            'Verona is still working on your previous message. Please wait for it to finish before sending another.',
+          code: 'TURN_IN_FLIGHT',
+        },
+        { status: 409 },
       )
     }
 
-    // Upsert the user message row. The unique constraint on
-    // (session_id, client_message_id) makes this a no-op if the client
-    // hard-refreshed and re-fired with the same id, so no duplicate is
-    // written. The Python worker relies on finding this row when it starts.
+    // -------- Persist the user message row --------
+    // Unique constraint on (session_id, client_message_id) makes this a
+    // no-op if the client hard-refreshed and re-fired with the same id.
+    // The Python worker relies on finding this row at startup.
     const { error: userMsgErr } = await service
       .from('chat_messages')
       .upsert(
@@ -188,15 +237,20 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // -------- Mark session thinking + spawn Modal --------
-    // We set status BEFORE spawning so the client's Realtime subscription
-    // flips to the thinking indicator right away. If the spawn fails we
-    // reset it below.
+    // -------- Mark session thinking + clear any stale call id --------
+    // Clearing active_chat_call_id here guarantees we start from a clean
+    // slate for this turn. The field is observational (useful for cancel
+    // and debugging); the CAS-style write after spawn below leaves it as
+    // the id of the currently-running worker when possible, but we no
+    // longer depend on it for liveness.
+    const statusUpdatedAt = new Date().toISOString()
     await service
       .from('chat_sessions')
       .update({
         status: 'thinking',
-        status_updated_at: new Date().toISOString(),
+        status_updated_at: statusUpdatedAt,
+        active_chat_call_id: null,
+        active_chat_call_started_at: null,
       })
       .eq('id', session.id)
 
@@ -226,8 +280,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Persist the call id + timestamp so subsequent POSTs can see
-    // "already in flight" and short-circuit.
+    // Best-effort record of the new call id. We intentionally gate on
+    // `active_chat_call_id IS NULL` so that if the Modal worker finalized
+    // between our spawn-return and this write, we don't clobber the
+    // null-that-finalize wrote with the id of a now-dead call. This is
+    // observational, not liveness — see THINKING_MAX_AGE_MS.
     await service
       .from('chat_sessions')
       .update({
@@ -235,6 +292,7 @@ export async function POST(request: NextRequest) {
         active_chat_call_started_at: new Date().toISOString(),
       })
       .eq('id', session.id)
+      .is('active_chat_call_id', null)
 
     chatServerLog('info', 'chat_modal_turn_spawned', {
       projectId,

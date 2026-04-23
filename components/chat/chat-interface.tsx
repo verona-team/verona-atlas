@@ -196,10 +196,17 @@ export function ChatInterface({
         if (code === 'GITHUB_SETUP_REQUIRED') {
           toast.error(errorMessage)
           openSettings(projectId)
+        } else if (code === 'TURN_IN_FLIGHT') {
+          // 409 — a previous turn is still running and the server did
+          // NOT persist this new message. Surface a non-error toast so
+          // the user understands they need to wait; they can re-send
+          // after the current turn's assistant reply lands.
+          toast(errorMessage)
         } else {
           toast.error(errorMessage)
         }
-        // Drop the optimistic bubble on hard failure — the message didn't land.
+        // Drop the optimistic bubble — the message didn't land in the DB
+        // regardless of which non-202 path we took.
         setPendingUserMessages((prev) => prev.filter((m) => m.clientId !== clientId))
         return { ok: false, code }
       } catch (err) {
@@ -250,10 +257,18 @@ export function ChatInterface({
     void sendChatMessage(bootstrapText, { clientId: bootstrapClientId }).then(
       (result) => {
         if (!result.ok) {
+          // Only retry on generic network/5xx-style failures. Specifically
+          // skip retry on structured rejections that indicate the turn is
+          // unreachable by design (TURN_IN_FLIGHT means a previous turn is
+          // still running and the server did not accept this message —
+          // retrying immediately would just hit the same guard).
+          const isStructuredRejection =
+            result.code === 'GITHUB_SETUP_REQUIRED' ||
+            result.code === 'TURN_IN_FLIGHT'
           if (
             dbEmptyRef.current &&
             bootstrapFailureCountRef.current < 2 &&
-            result.code !== 'GITHUB_SETUP_REQUIRED'
+            !isStructuredRejection
           ) {
             bootstrapFailureCountRef.current += 1
             lastBootstrapKeyRef.current = null
