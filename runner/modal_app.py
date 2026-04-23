@@ -101,7 +101,7 @@ chat_image = (
         "pydantic>=2.12.0,<3.0.0",
         "pyjwt>=2.10.0",
         "cryptography>=46.0.0",
-        "modal>=1.5.0",  # nested spawn of execute_test_run from inside chat tool
+        "modal>=1.4.0,<2.0.0",  # nested spawn of execute_test_run from inside chat tool
     )
     .add_local_python_source("runner")
 )
