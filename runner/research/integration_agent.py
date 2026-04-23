@@ -5,33 +5,42 @@ combining three passes:
 
     1. **Preflight** — fixed httpx calls per integration that gather the
        obvious first-layer signal (recent PRs, top rage-click URLs,
-       top unresolved issues, etc.). Same as the previous version.
+       top unresolved issues, etc.).
 
-    2. **Deep exploration (Modal Sandbox + Sonnet ReAct loop)** — Claude
-       is given one tool, `execute_code`, that runs arbitrary Python
-       inside a gVisor-isolated Modal Sandbox. Preflight results are
-       injected as context; Claude decides what follow-up API calls
-       would yield insight and writes the code to make them. Env vars
-       (decrypted credentials + public config like hostnames) are
-       pre-populated inside the sandbox so the scripts can read from
-       `os.environ` rather than having creds passed as tool args.
+    2. **Research loop (ReAct over Modal Sandbox).** A Sonnet 4.6
+       orchestrator iteratively calls one tool, `execute_code(purpose)`,
+       with a natural-language goal. The tool delegates CODE GENERATION
+       to an Opus 4.6 code writer (see `code_writer.py`), executes the
+       resulting Python inside a gVisor-isolated Modal Sandbox with
+       creds preloaded as env vars, and returns `{exit_code, stdout,
+       stderr, explanation}`. The orchestrator decides what to ask next
+       based on everything it has seen so far — including correlating
+       signals ACROSS integrations (e.g. a rage-clicked URL from call #2
+       matching a GitHub PR from call #4). Loops up to
+       `RESEARCH_INTEGRATION_MAX_STEPS` (default 20) times.
 
     3. **Synthesis** — a single Sonnet structured-output call that
-       turns preflight data + research notes (what Claude tried and
-       what it found) into the final `IntegrationResearchReport`.
+       turns preflight data + research notes (purpose + result for
+       each call) into the final `IntegrationResearchReport`.
 
-## Why the sandbox is back
+## Why code writing is split out of the orchestrator
 
-The previous Python version skipped the sandbox loop — it was a
-deliberate simplification because the old TS version of the sandbox
-loop rarely produced findings that preflight didn't already surface.
-But "rarely" is not "never," and for integrations with rich APIs
-(PostHog HogQL, Sentry issue drilling, LangSmith run trees, GitHub
-blame/file history) the drill-in genuinely surfaces anchors that a
-fixed preflight can't anticipate. With Modal Sandboxes, the cost of
-supporting this pattern is significantly lower than the Vercel Sandbox
-version was: one long-lived sandbox per run, creds as env vars, Python
-inside instead of JS. So the loop is back.
+The orchestrator's job is deciding WHAT to investigate — scanning
+signals, correlating across providers, choosing the next question.
+Asking the same LLM call to also WRITE the Python was bad for two
+reasons:
+
+1. **Context bloat.** Each prior exec appends (AIMessage with full
+   code) + (ToolMessage with stdout) — over 20 steps that buries the
+   signal in raw code the orchestrator doesn't need for routing.
+2. **Quality mismatch.** Opus writes substantially better Python for
+   non-trivial httpx flows (HogQL joins, GitHub pagination, LangSmith's
+   session-first-then-runs pattern). Specializing Opus on code and
+   Sonnet on orchestration plays to both strengths.
+
+So `execute_code(purpose="...")` takes only a natural-language goal,
+and the tool body uses Opus to write the script before running it.
+See `runner.research.code_writer` for the code generator.
 
 ## Error handling
 
@@ -44,10 +53,13 @@ Every layer has a graceful-degradation path:
 - The sandbox itself fails to create (Modal outage, bad image) -> we
   log and fall back to "preflight-only synthesis" so the run still
   produces a usable report.
-- A single `execute_code` call fails -> its stderr is surfaced to
-  Claude via a `ToolMessage`, so Claude can learn and retry.
-- Synthesis fails -> we return a shaped `IntegrationResearchReport`
-  with the error in the summary rather than raising.
+- Opus code generation fails -> the tool returns a stub result the
+  orchestrator can see, so the ReAct loop isn't derailed.
+- A single exec fails -> stderr surfaced back to the orchestrator as
+  a ToolMessage; the code writer also gets to see the failure on its
+  next call for self-correction.
+- Synthesis fails -> shaped `IntegrationResearchReport` with the
+  error in summary rather than raising.
 """
 from __future__ import annotations
 
@@ -63,6 +75,11 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from runner.chat.logging import chat_log
 from runner.chat.models import get_sonnet
 from runner.encryption import decrypt
+from runner.research.code_writer import (
+    CodeWriterOutput,
+    PreviousExec,
+    write_research_code,
+)
 from runner.research.docs import get_integration_docs_bundle
 from runner.research.github_client import get_installation_token
 from runner.research.github_repo_explorer import parse_repo_full_name
@@ -299,68 +316,81 @@ async def _build_sandbox_env(
 
 
 # ---------------------------------------------------------------------------
-# System prompt for the drill-in ReAct loop
+# System prompt for the orchestrator ReAct loop
 # ---------------------------------------------------------------------------
 
 
-def _build_drill_in_system_prompt(
+def _build_orchestrator_system_prompt(
     app_url: str,
     integrations_covered: list[str],
-    env: IntegrationEnv,
 ) -> str:
-    """System prompt for the sandbox-backed ReAct loop.
+    """System prompt for the Sonnet orchestrator.
 
-    The prompt is responsible for documenting:
-    - Which env vars the sandbox has (the only contract Claude has to
-      the outside world).
-    - Which auth header format each provider wants (replacement for the
-      old Vercel Sandbox's auto-injected headers).
-    - What a "good" drill-in looks like vs. churn.
+    The orchestrator does NOT write Python. It issues natural-language
+    research goals via `execute_code(purpose=...)`; a separate Opus
+    code writer turns each goal into a script and runs it.
+
+    The prompt emphasizes two things:
+
+    1. **Cross-source ReAct.** The orchestrator can keep calling the
+       tool across different integrations in any order, including
+       correlating findings (e.g. GitHub PR #206 touched
+       `app/checkout/` → let me ask PostHog whether `/checkout/*` has
+       spiking rage-clicks in the same window).
+    2. **Writing GOALS, not CODE.** The tool contract is purpose-based;
+       any code-level details belong in the purpose as natural-language
+       intent ("fetch the PR's changed files, filter to app/checkout/*,
+       return filenames"), not Python.
     """
-    return f"""You are a QA research investigator doing deep exploration of connected integrations for {app_url}. You have preflight data from each integration already (shown in the user message) and one tool to go deeper:
+    return f"""You are the research orchestrator for QA planning on {app_url}. Your job is to decide WHAT to investigate across the connected integrations, not to write code.
 
-    execute_code(code: str, purpose: str) -> exit_code + stdout + stderr
+You have one tool:
 
-This tool runs arbitrary **Python 3.13** inside an isolated Modal Sandbox with `httpx` preinstalled and the following environment variables already set:
+    execute_code(purpose: str) -> {{exit_code, stdout, stderr, explanation}}
 
-{env.describe()}
+Pass a clear, natural-language research goal as `purpose`. A specialized code-writer model will translate your purpose into a focused Python script and run it inside an isolated sandbox against the connected integration APIs, with credentials already preloaded as environment variables. You will see:
 
-# Auth headers (you set these yourself — there is no injection)
+- `exit_code` — 0 on success, non-zero on failure (HTTP 4xx/5xx wrapped as JSON errors still count as success here; actual Python exceptions are non-zero).
+- `stdout` — the script's printed JSON output (truncated to ~4KB if huge).
+- `stderr` — any Python exception traceback or error stream (truncated).
+- `explanation` — one-sentence note from the code writer describing what the script did (useful for verifying the code writer understood your goal).
 
-- GitHub: `Authorization: token ${{GITHUB_INSTALLATION_TOKEN}}`, `Accept: application/vnd.github.v3+json`, `X-GitHub-Api-Version: 2022-11-28`. Base URL: `https://api.github.com`. `GITHUB_REPO` is `owner/repo`.
-- PostHog: `Authorization: Bearer ${{POSTHOG_API_KEY}}`. Base URL: `$POSTHOG_HOST`. Project id: `$POSTHOG_PROJECT_ID`.
-- Sentry: `Authorization: Bearer ${{SENTRY_AUTH_TOKEN}}`. Base URL: `https://sentry.io/api/0`. Org slug: `$SENTRY_ORG_SLUG`, project slug: `$SENTRY_PROJECT_SLUG`.
-- LangSmith: `X-API-Key: ${{LANGSMITH_API_KEY}}`. Base URL: `https://api.smith.langchain.com`. Project name (optional): `$LANGSMITH_PROJECT_NAME`.
-- Braintrust: `Authorization: Bearer ${{BRAINTRUST_API_KEY}}`. Base URL: `https://api.braintrust.dev`.
+# Connected integrations
 
-# How to use execute_code
+{', '.join(integrations_covered)}
 
-- Each call is a fresh Python process (no state survives between calls). Imports, variables, and `httpx.Client` instances reset.
-- Return data via `print(json.dumps(...))`. Keep each call focused on ONE question. Large responses will be truncated on your next turn — if you need to correlate, save the interesting slice first, then re-query.
-- `httpx` (sync) is preinstalled; `json`, `os` are stdlib. If you want an async client, use `httpx.AsyncClient`.
-- Wrap HTTP calls in try/except so the script exits cleanly even on 4xx/5xx.
-- NEVER set auth headers from hardcoded strings — always read from `os.environ`.
-- Sequential calls only (one execute_code per turn).
+# How to write good `purpose` strings
 
-# Investigation approach
+BAD (too vague): "Investigate GitHub"
+BAD (writing code): "Call GET /repos/owner/repo/pulls/206/files and print additions per file"
+GOOD: "List the files changed in PR #206, grouped by top-level directory, with per-file additions and deletions. Return the top 10 largest-changed files."
 
-1. **Read preflight first.** The user message has every integration's preflight result as JSON. That's the first-layer signal — do not re-fetch what it already has.
-2. **Drill into what's interesting.** Pick 1-3 signals that look QA-relevant per integration and go deeper:
-   - **GitHub**: biggest PRs → which files changed → who touched them recently; open issues labeled bug/regression; compare two commits to understand a migration.
-   - **PostHog**: top rage-click URL → pull a matching session recording's events (`POST /query/` with HogQL against `session_replay_events`); repeated exception messages → correlate with URL + affected users + first/last seen.
-   - **Sentry**: top unresolved issue → fetch events via `GET /issues/{{issue_id}}/events/` to see stack traces + affected URLs; check `GET /projects/{{org}}/{{proj}}/releases/` for recent deploys that might be the cause.
-   - **LangSmith**: list sessions, query error runs per session, pull one error run's full inputs/outputs to understand the failure mode.
-   - **Braintrust**: recent experiments per project, fetch one experiment's logs to see score regressions.
-3. **Correlate across integrations.** A PostHog rage-click URL that matches a GitHub PR's changed files is a much stronger signal than either alone.
-4. **Stop when the marginal drill-in no longer changes your conclusions.** You have a hard step budget; spend it on surfacing new evidence, not confirming what you already know.
+A good purpose names:
+- The provider (GitHub / PostHog / Sentry / LangSmith / Braintrust).
+- The specific entity or range (PR #206, last 14 days of $exception events, Sentry issue with the highest count).
+- The exact output shape you want ("return file counts grouped by directory", "return the top 5 rage-click URLs with counts", "join with timestamp").
 
-# What "good" looks like
+# Cross-source investigation (do this!)
 
-Every drill-in should surface something with a concrete anchor (commit SHA, PR #, URL, error count, session ID) that a downstream writer can cite. If your next call is just "let me verify that existing preflight number" — don't; move on.
+You have memory of every prior tool call in this conversation. Use it. Some of the highest-signal investigations correlate across integrations:
 
-Connected integrations: {', '.join(integrations_covered)}
+- "GitHub PR #206 touched app/checkout/* on Mar 14. Query PostHog for the count of $exception events on URLs matching /checkout/* in the 7 days AFTER Mar 14, compared to the 7 days before."
+- "Sentry issue SENTRY-1234 points at a TypeError in ReactEditor.tsx. Query GitHub for the last 5 commits that touched files matching ReactEditor*, and return commit sha + message + author."
+- "PostHog rage-click on /w/*/sheets/* is #1 at 290 events. Query LangSmith for error runs whose inputs reference sheet IDs or contain 'sheet', last 7 days, to see if an AI feature on that page is also failing."
 
-When you have enough to produce an evidence-backed report, stop calling tools. You'll then be asked for the structured output."""
+The orchestrator that DOES correlate across providers surfaces much stronger QA signals than one that only drills into one source at a time.
+
+# Loop discipline
+
+- Each tool call is sequential. Wait for the previous result, read stdout, decide the next question.
+- Stop calling tools when your next call wouldn't change the conclusions you'd write up. Don't pad.
+- Step budget is ~20 total. Spend it on surfacing new anchored evidence, not re-verifying preflight numbers.
+
+# What preflight already gave you
+
+The user message below contains each integration's preflight result (recent commits/PRs, top rage-clicks, top unresolved Sentry issues, etc.) as JSON. Read it first; don't waste calls re-fetching what it already has.
+
+When you have enough evidence-backed findings, stop calling tools. You'll then be asked for the structured report."""
 
 
 # ---------------------------------------------------------------------------
@@ -458,18 +488,25 @@ def _truncate(s: str, limit: int) -> str:
     return s[:limit] + f"\n\n[...truncated {len(s) - limit} more chars]"
 
 
-async def _run_drill_in_loop(
+async def _run_research_loop(
     app_url: str,
     integrations_covered: list[str],
     preflight_results: dict[str, dict[str, Any]],
     env: IntegrationEnv,
 ) -> list[str]:
-    """ReAct loop: Claude writes Python, runs in sandbox, reads stdout, repeats.
+    """ReAct loop where a Sonnet orchestrator issues natural-language
+    research goals and Opus writes the code that gets run in a Modal
+    sandbox.
 
-    Returns a list of "research notes" strings — one per execute_code call,
-    containing (purpose, exit_code, stdout, stderr) — plus any intermediate
-    natural-language thoughts Claude emitted between tool calls. These
-    notes are what the synthesis pass reads.
+    Returns a list of "research notes" strings — one per execute_code
+    call (purpose, code-writer explanation, exit_code, stdout, stderr)
+    plus any intermediate orchestrator thoughts. These notes are what
+    the synthesis pass reads.
+
+    Cross-source ReAct works here because every prior tool call's
+    result is appended to the orchestrator's `messages`, so turn N sees
+    turns 1..N-1 in context. The orchestrator can pivot between
+    providers freely and correlate findings across them.
     """
     max_steps = env_key_int("RESEARCH_INTEGRATION_MAX_STEPS", 20)
 
@@ -488,28 +525,62 @@ async def _run_drill_in_loop(
         )
         return [
             f"[sandbox unavailable: {type(e).__name__}: {e}]\n"
-            "Skipping drill-in phase; falling back to preflight-only synthesis."
+            "Skipping research loop; falling back to preflight-only synthesis."
         ]
 
-    # Closure-bound tool that records every call into `notes`.
-    @tool
-    def execute_code(code: str, purpose: str) -> str:
-        """Execute Python 3.13 code in the research sandbox with integration
-        credentials preloaded as environment variables.
+    # Pre-compute the provider docs block + env description once so the
+    # code writer can re-use them on every call without the orchestrator
+    # having to thread them through.
+    docs_block = "\n\n---\n\n".join(
+        f"## {t.upper()} API docs\n\n{doc}"
+        for t, doc in get_integration_docs_bundle(integrations_covered).items()
+    )
+    env_description = env.describe()
 
-        Args:
-            code: Python source. Return data by print()ing JSON. Max ~1.5MB.
-            purpose: One short sentence explaining what this call investigates.
+    # Tracks the immediately-previous exec so the code writer can
+    # self-correct on transient failures (wrong field name, missing
+    # query param, etc.). One call's history only — we don't want the
+    # code writer's prompt to balloon over the loop.
+    previous_exec: PreviousExec | None = None
+
+    async def _run_execute_code(purpose: str) -> dict[str, Any]:
+        """Do the real work for an `execute_code(purpose=...)` tool call.
+
+        Split out of the `@tool`-decorated function because the tool body
+        must be sync for `bind_tools` compatibility, but calling Opus to
+        write code is async. This coroutine is what gets awaited from
+        inside the loop body, bypassing the tool's sync surface.
         """
-        # Bypasses `sb is None` — create_research_sandbox either returned a
-        # live sandbox or we already returned the fallback notes above.
-        assert sb is not None
-        result: ExecResult = execute_in_sandbox(sb, code)
+        nonlocal previous_exec
 
-        # Keep a compact record for the synthesis pass. Truncate aggressively
-        # here because these notes go straight into a future LLM prompt.
+        # Phase A: Opus writes the code for this purpose.
+        code_output: CodeWriterOutput = await write_research_code(
+            purpose=purpose,
+            docs_block=docs_block,
+            env_description=env_description,
+            previous_exec=previous_exec,
+        )
+
+        # Phase B: run the code in the sandbox.
+        assert sb is not None  # create succeeded (else we bailed earlier)
+        result: ExecResult = execute_in_sandbox(sb, code_output.code)
+
+        # Remember for the code writer's next call.
+        previous_exec = PreviousExec(
+            purpose=purpose,
+            exit_code=result.exit_code,
+            stderr_head=_truncate(result.stderr, 1000),
+        )
+
+        # Record a note for the synthesis pass. We INCLUDE the generated
+        # code here (truncated) because synthesis may want to cite
+        # "the script that ran HogQL X found..." even if the orchestrator
+        # never saw the raw code.
         note = (
             f"[execute_code: {purpose}] exit {result.exit_code}\n"
+            f"explanation: {code_output.explanation}\n"
+            f"code ({len(code_output.code)} chars, truncated):\n"
+            f"{_truncate(code_output.code, 2000)}\n"
             f"stdout:\n{_truncate(result.stdout, 8000)}\n"
             f"stderr:\n{_truncate(result.stderr, 2000)}"
         )
@@ -517,26 +588,47 @@ async def _run_drill_in_loop(
 
         chat_log(
             "info",
-            "research_sandbox_exec",
-            purpose=purpose,
+            "research_execute_code",
+            purpose=purpose[:200],
             exit_code=result.exit_code,
-            code_length=len(code),
+            code_length=len(code_output.code),
             stdout_length=len(result.stdout),
             stderr_length=len(result.stderr),
+            explanation=code_output.explanation,
         )
 
-        # What we return to the LLM needs to be truncated more aggressively
-        # than what we save in `notes` — the LLM will see this in-context on
-        # every subsequent tool call, so keeping it tight matters for both
-        # cost and attention budget.
-        return json.dumps(
-            {
-                "purpose": purpose,
-                "exit_code": result.exit_code,
-                "stdout": _truncate(result.stdout, 4000),
-                "stderr": _truncate(result.stderr, 1000),
-            }
-        )
+        # What the orchestrator sees. Keep it tight — this lands in
+        # context on every subsequent turn.
+        return {
+            "purpose": purpose,
+            "explanation": code_output.explanation,
+            "exit_code": result.exit_code,
+            "stdout": _truncate(result.stdout, 4000),
+            "stderr": _truncate(result.stderr, 1000),
+        }
+
+    # The @tool decorator is purely for schema/binding — the body is
+    # unused because we route execute_code tool calls to `_run_execute_code`
+    # directly in the loop below (so we can await the Opus call).
+    @tool
+    def execute_code(purpose: str) -> str:  # noqa: D401 — schema-only stub
+        """Execute a research investigation step against the connected integrations.
+
+        Pass a natural-language research goal as `purpose`. A specialized
+        code writer will turn it into Python that runs inside an isolated
+        Modal Sandbox with credentials preloaded as environment variables,
+        then return {exit_code, stdout, stderr, explanation}.
+
+        Args:
+            purpose: A specific, actionable research goal. Name the
+                provider (GitHub / PostHog / Sentry / LangSmith / Braintrust),
+                the target entity or time window, and the desired output
+                shape. E.g. 'List files changed in GitHub PR #206,
+                grouped by top-level directory, with additions/deletions.'
+        """
+        # Schema-only — never actually invoked. The loop handles
+        # execute_code tool calls out-of-band so it can await Opus.
+        return "called via orchestrator loop"
 
     try:
         model = get_sonnet(max_tokens=4096, temperature=0.1).bind_tools([execute_code])
@@ -547,30 +639,24 @@ async def _run_drill_in_loop(
             f"## {t.upper()} preflight\n\n```json\n{json.dumps(preflight_results[t], indent=2, default=str)}\n```"
             for t in integrations_covered
         )
-        docs_block = "\n\n---\n\n".join(
-            f"## {t.upper()} API docs\n\n{doc}"
-            for t, doc in get_integration_docs_bundle(integrations_covered).items()
-        )
 
         messages: list = [
             SystemMessage(
-                content=_build_drill_in_system_prompt(
+                content=_build_orchestrator_system_prompt(
                     app_url=app_url,
                     integrations_covered=integrations_covered,
-                    env=env,
                 )
             ),
             HumanMessage(
                 content=(
                     f"Investigate {', '.join(integrations_covered)} for QA test "
-                    f"planning signals on {app_url}. Start by reading the preflight "
-                    "data below, pick the 2-4 most promising signals, and use "
-                    "execute_code to drill in. When you've surfaced enough "
-                    "evidence-backed findings, stop calling tools.\n\n"
+                    f"planning signals on {app_url}. Read the preflight data below, "
+                    "pick the most promising signals, and call `execute_code` with "
+                    "clear research goals — including cross-provider correlations "
+                    "where they reveal more than single-source drill-ins. Stop "
+                    "when you have enough evidence-backed findings.\n\n"
                     "# Preflight data\n\n"
-                    f"{preflight_block}\n\n"
-                    "# Provider API reference\n\n"
-                    f"{docs_block}"
+                    f"{preflight_block}"
                 )
             ),
         ]
@@ -579,10 +665,9 @@ async def _run_drill_in_loop(
             response: AIMessage = await model.ainvoke(messages)
             messages.append(response)
 
-            # Capture any natural-language text blocks the model emitted
-            # alongside the tool calls (or after the last one). This is
-            # where Claude often summarizes what it learned before calling
-            # the next tool — the synthesis pass benefits from seeing it.
+            # Capture any natural-language text blocks the orchestrator
+            # emitted. These often contain the reasoning for the next
+            # tool call, which is useful for synthesis.
             text_content: list[str] = []
             if isinstance(response.content, str) and response.content.strip():
                 text_content.append(response.content.strip())
@@ -593,13 +678,13 @@ async def _run_drill_in_loop(
                         if isinstance(t, str) and t.strip():
                             text_content.append(t.strip())
             if text_content:
-                notes.append("[agent_thought]\n" + "\n".join(text_content))
+                notes.append("[orchestrator_thought]\n" + "\n".join(text_content))
 
             tool_calls = getattr(response, "tool_calls", None) or []
             if not tool_calls:
                 chat_log(
                     "info",
-                    "research_sandbox_loop_done",
+                    "research_loop_done",
                     step=step,
                     total_execs=sum(1 for n in notes if n.startswith("[execute_code:")),
                 )
@@ -613,19 +698,33 @@ async def _run_drill_in_loop(
                         {"error": f"Unknown tool '{name}'. Only execute_code is available."}
                     )
                 else:
-                    # Invoke synchronously — the tool closure already handled
-                    # running the sandbox exec (which itself blocks on stdout).
-                    try:
-                        tool_result = execute_code.invoke(args)
-                    except Exception as e:
-                        chat_log(
-                            "error",
-                            "research_sandbox_tool_invoke_failed",
-                            err=repr(e),
-                        )
+                    purpose = str(args.get("purpose") or "").strip()
+                    if not purpose:
                         tool_result = json.dumps(
-                            {"error": f"{type(e).__name__}: {e}"}
+                            {
+                                "error": (
+                                    "execute_code requires a non-empty "
+                                    "`purpose` string describing the research goal."
+                                )
+                            }
                         )
+                    else:
+                        try:
+                            tool_result_dict = await _run_execute_code(purpose)
+                            tool_result = json.dumps(tool_result_dict, default=str)
+                        except Exception as e:
+                            chat_log(
+                                "error",
+                                "research_execute_code_uncaught",
+                                err=repr(e),
+                                purpose=purpose[:200],
+                            )
+                            tool_result = json.dumps(
+                                {
+                                    "purpose": purpose,
+                                    "error": f"{type(e).__name__}: {e}",
+                                }
+                            )
                 messages.append(
                     ToolMessage(
                         content=tool_result,
@@ -636,7 +735,7 @@ async def _run_drill_in_loop(
         else:
             chat_log(
                 "warn",
-                "research_sandbox_loop_step_budget_exhausted",
+                "research_loop_step_budget_exhausted",
                 max_steps=max_steps,
                 total_execs=sum(1 for n in notes if n.startswith("[execute_code:")),
             )
@@ -786,23 +885,23 @@ async def run_integration_research(
             "general best practices.",
         )
 
-    # Phase 2: sandbox-backed drill-in. Runs asynchronously alongside
-    # nothing else — synthesis needs the notes.
+    # Phase 2: sandbox-backed research loop. Orchestrator (Sonnet)
+    # picks the next question; Opus writes the code; sandbox runs it.
     env = await _build_sandbox_env(resolved)
     try:
-        research_notes = await _run_drill_in_loop(
+        research_notes = await _run_research_loop(
             app_url=app_url,
             integrations_covered=integrations_covered,
             preflight_results=preflight_results,
             env=env,
         )
     except Exception as e:
-        chat_log("error", "research_sandbox_loop_uncaught", err=repr(e))
-        research_notes = [f"[drill-in failed: {type(e).__name__}: {e}]"]
+        chat_log("error", "research_loop_uncaught", err=repr(e))
+        research_notes = [f"[research loop failed: {type(e).__name__}: {e}]"]
 
     chat_log(
         "info",
-        "research_integration_drill_in_complete",
+        "research_integration_loop_complete",
         note_count=len(research_notes),
         exec_count=sum(1 for n in research_notes if n.startswith("[execute_code:")),
     )
