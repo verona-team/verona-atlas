@@ -98,22 +98,40 @@ export function AppSidebar() {
               const isActive =
                 project.id === activeProjectId ||
                 pathname.startsWith(`/projects/${project.id}`)
+              // Unread-style dot for projects whose initial bootstrap turn
+              // hasn't been dispatched yet. These are projects the user
+              // created but hasn't finished arming (didn't click "Continue
+              // to chat" on the CTA landing). The dot persists across
+              // reloads since the state lives in
+              // `projects.bootstrap_dispatched_at`.
+              const needsSetup = !project.bootstrap_dispatched_at
               return (
                 <Link
                   key={project.id}
                   href={`/projects/${project.id}`}
                   tabIndex={sidebarCollapsed ? -1 : 0}
                   className={cn(
-                    'flex flex-col rounded-lg px-3 py-2 text-sm transition-colors truncate',
+                    'flex items-start gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
                     isActive
                       ? 'bg-sidebar-accent text-sidebar-foreground'
                       : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground/80',
                   )}
                 >
-                  <span className="truncate font-medium">{project.name}</span>
-                  <span className="truncate text-xs opacity-50 mt-0.5">
-                    {project.app_url.replace(/^https?:\/\//, '')}
-                  </span>
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate font-medium">
+                      {project.name}
+                    </span>
+                    <span className="truncate text-xs opacity-50 mt-0.5">
+                      {project.app_url.replace(/^https?:\/\//, '')}
+                    </span>
+                  </div>
+                  {needsSetup && (
+                    <span
+                      aria-label="Setup incomplete"
+                      title="Setup incomplete"
+                      className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary"
+                    />
+                  )}
                 </Link>
               )
             })}
