@@ -312,6 +312,7 @@ export type Database = {
           agentmail_inbox_address: string | null
           agentmail_inbox_id: string | null
           app_url: string
+          bootstrap_dispatched_at: string | null
           created_at: string
           id: string
           name: string
@@ -326,6 +327,7 @@ export type Database = {
           agentmail_inbox_address?: string | null
           agentmail_inbox_id?: string | null
           app_url: string
+          bootstrap_dispatched_at?: string | null
           created_at?: string
           id?: string
           name: string
@@ -340,6 +342,7 @@ export type Database = {
           agentmail_inbox_address?: string | null
           agentmail_inbox_id?: string | null
           app_url?: string
+          bootstrap_dispatched_at?: string | null
           created_at?: string
           id?: string
           name?: string
@@ -513,6 +516,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      user_github_identities: {
+        Row: {
+          access_token_encrypted: string
+          access_token_expires_at: string | null
+          created_at: string
+          github_login: string
+          github_user_id: number
+          refresh_token_encrypted: string | null
+          refresh_token_expires_at: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          access_token_encrypted: string
+          access_token_expires_at?: string | null
+          created_at?: string
+          github_login: string
+          github_user_id: number
+          refresh_token_encrypted?: string | null
+          refresh_token_expires_at?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          access_token_encrypted?: string
+          access_token_expires_at?: string | null
+          created_at?: string
+          github_login?: string
+          github_user_id?: number
+          refresh_token_encrypted?: string | null
+          refresh_token_expires_at?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
     }
     Views: {
