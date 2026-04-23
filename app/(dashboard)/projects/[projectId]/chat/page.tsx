@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { getServerUser } from '@/lib/supabase/server-user'
 import { getOrCreateSession } from '@/lib/chat/session'
-import { ChatInterface } from '@/components/chat/chat-interface'
+import { ProjectChatGate } from '@/components/chat/project-chat-gate'
 import { SettingsQueryOpener } from '@/components/dashboard/settings-query-opener'
 import { SettingsPrefetcher } from '@/components/dashboard/settings-prefetcher'
 import { getGithubIntegrationReady } from '@/lib/github-integration-guard'
@@ -52,21 +52,31 @@ export default async function ChatPage({ params, searchParams }: PageProps) {
   // tell the client to open the overlay. This keeps the chat page mounted and
   // avoids a server/client loop where stripping the query param would re-trigger
   // the server guard.
-  const autoOpenSettings = settings === '1' || !gh.ok
+  //
+  // Suppress the auto-open while the bootstrap CTA is the landing surface —
+  // the CTA already surfaces the GitHub card inline, so stacking the settings
+  // overlay on top just double-prompts the user. Manual `?settings=1` still
+  // wins (explicit navigation to settings).
+  const bootstrapDispatched = Boolean(project.bootstrap_dispatched_at)
+  const autoOpenSettings =
+    settings === '1' || (bootstrapDispatched && !gh.ok)
 
   return (
     <div className="flex h-full flex-col">
       {autoOpenSettings && <SettingsQueryOpener projectId={projectId} />}
       <SettingsPrefetcher projectId={projectId} />
-      <ChatInterface
-        projectId={projectId}
-        sessionId={session.id}
+      <ProjectChatGate
+        bootstrapDispatched={bootstrapDispatched}
         initialMessages={messages ?? []}
-        initialSessionStatus={session.status as 'idle' | 'thinking' | 'error'}
-        initialStatusUpdatedAt={session.status_updated_at}
-        projectName={project.name}
-        appUrl={project.app_url}
-        githubReady={gh.ok}
+        chatProps={{
+          projectId,
+          sessionId: session.id,
+          initialSessionStatus: session.status as 'idle' | 'thinking' | 'error',
+          initialStatusUpdatedAt: session.status_updated_at,
+          projectName: project.name,
+          appUrl: project.app_url,
+          githubReady: gh.ok,
+        }}
       />
     </div>
   )
