@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { Children, useEffect, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
@@ -76,13 +76,17 @@ export function IntegrationCard({
   // A card only needs a body section when there is interactive content to
   // render (e.g. a "Connect" CTA, the repo picker, the channel picker, or a
   // form). Treating empty bodies as absent lets fully-connected cards with no
-  // further action collapse to a tight single row without baked-in empty
-  // whitespace.
-  const hasBody =
-    children !== null &&
-    children !== undefined &&
-    children !== false &&
-    !(Array.isArray(children) && children.length === 0)
+  // further action (e.g. a connected PostHog card that only shows "Project:
+  // 325427" as meta) collapse to a tight single row without baked-in empty
+  // whitespace — and gives them a touch more breathing room between the
+  // title and the subtitle, since they aren't followed by any body.
+  //
+  // We must count renderable children specifically: the integration cards
+  // below commonly pass short-circuited branches like `{cond && <X/>}` that
+  // evaluate to `false` when hidden, so `children` is often `[false, false]`
+  // even when nothing should render. `Children.toArray` strips out React's
+  // non-rendering values (null, undefined, booleans) for us.
+  const hasBody = Children.toArray(children).length > 0
 
   return (
     <Card size="sm" className={`ring-0 border border-border ${hasBody ? 'py-3' : 'py-4'}`}>
