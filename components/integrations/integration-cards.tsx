@@ -789,9 +789,6 @@ export function AdvancedIntegrationsSection({
             </Badge>
           )}
         </span>
-        <span className="text-[10px] text-muted-foreground/70 normal-case tracking-normal">
-          Sentry · LangSmith · Braintrust
-        </span>
       </CollapsibleTrigger>
       {/*
         Animate the height so the Danger Zone card below doesn't jump
