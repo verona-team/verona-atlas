@@ -85,7 +85,7 @@ export function IntegrationCard({
     !(Array.isArray(children) && children.length === 0)
 
   return (
-    <Card size="sm" className="ring-0 border border-border py-3">
+    <Card size="sm" className={`ring-0 border border-border ${hasBody ? 'py-3' : 'py-4'}`}>
       <CardContent>
         <div className={`flex items-center justify-between gap-3 ${hasBody ? 'mb-2' : ''}`}>
           <div className="min-w-0">
@@ -97,7 +97,7 @@ export function IntegrationCard({
                 </Badge>
               )}
             </h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
+            <p className={`text-xs text-muted-foreground ${hasBody ? 'mt-0.5' : 'mt-1.5'}`}>
               {meta || description}
             </p>
           </div>
