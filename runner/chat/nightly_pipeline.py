@@ -52,16 +52,23 @@ async def run_nightly_pipeline(sb: Client, project_id: str, *, turn_id: str) -> 
 
     # Ensure session exists (create if not — the cron may fire before any
     # user has opened the chat).
+    #
+    # Intentionally using .limit(1) without .maybe_single() because the
+    # supabase-py maybe_single().execute() returns `None` (not a response
+    # object with .data = None) when zero rows match, which would crash
+    # on attribute access. Using the plain list form and indexing is the
+    # version that's actually robust against 0/1 rows here.
     session_resp = (
         sb.table("chat_sessions")
         .select("id")
         .eq("project_id", project_id)
         .limit(1)
-        .maybe_single()
         .execute()
     )
-    session = session_resp.data
-    if not session:
+    existing_sessions = session_resp.data or []
+    if existing_sessions:
+        session_id = existing_sessions[0]["id"]
+    else:
         ins = (
             sb.table("chat_sessions")
             .insert({"project_id": project_id})
@@ -74,8 +81,6 @@ async def run_nightly_pipeline(sb: Client, project_id: str, *, turn_id: str) -> 
             )
             return
         session_id = rows[0]["id"]
-    else:
-        session_id = session["id"]
 
     # Always refresh research for nightly.
     chat_log(

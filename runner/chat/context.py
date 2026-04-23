@@ -15,6 +15,7 @@ from supabase import Client
 
 from .logging import chat_log
 from .models import get_sonnet
+from .supabase_client import iso_now
 
 
 RECENT_MESSAGE_LIMIT = 30
@@ -136,7 +137,7 @@ async def maybe_summarize_older_messages(sb: Client, session_id: str) -> None:
         sb.table("chat_sessions").update(
             {
                 "context_summary": new_summary,
-                "updated_at": "now()",  # supabase accepts the string literal
+                "updated_at": iso_now(),
             }
         ).eq("id", session_id).execute()
     except Exception as e:

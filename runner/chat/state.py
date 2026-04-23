@@ -99,28 +99,38 @@ async def build_initial_state(
       synchronously before spawning us. If it doesn't, we raise — this is
       a programming error, not a runtime condition we should paper over.
     - The session row MUST exist; same reason.
+
+    Implementation note: we use `.limit(1)` + list indexing instead of
+    `.single()` / `.maybe_single()`. supabase-py's `.single().execute()`
+    raises `postgrest.APIError` (status 406) on zero rows, which would
+    drown our clean RuntimeError; `.maybe_single().execute()` returns
+    None-the-response-itself (not `.data = None`) and crashes on
+    attribute access. The plain list form is the one that composes
+    predictably with explicit length checks.
     """
     session_resp = (
         sb.table("chat_sessions")
         .select("id, context_summary, research_report, project_id, status")
         .eq("id", session_id)
-        .single()
+        .limit(1)
         .execute()
     )
-    session = session_resp.data
-    if not session:
+    session_rows = session_resp.data or []
+    if not session_rows:
         raise RuntimeError(f"chat session {session_id} not found")
+    session = session_rows[0]
 
     project_resp = (
         sb.table("projects")
         .select("id, name, app_url")
         .eq("id", project_id)
-        .single()
+        .limit(1)
         .execute()
     )
-    project = project_resp.data
-    if not project:
+    project_rows = project_resp.data or []
+    if not project_rows:
         raise RuntimeError(f"project {project_id} not found")
+    project = project_rows[0]
 
     # Recent messages (last 30) — convert into langchain Messages for the LLM.
     msgs_resp = (
