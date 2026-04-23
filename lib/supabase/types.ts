@@ -312,6 +312,7 @@ export type Database = {
           agentmail_inbox_address: string | null
           agentmail_inbox_id: string | null
           app_url: string
+          bootstrap_dispatched_at: string | null
           created_at: string
           id: string
           name: string
@@ -326,6 +327,7 @@ export type Database = {
           agentmail_inbox_address?: string | null
           agentmail_inbox_id?: string | null
           app_url: string
+          bootstrap_dispatched_at?: string | null
           created_at?: string
           id?: string
           name: string
@@ -340,6 +342,7 @@ export type Database = {
           agentmail_inbox_address?: string | null
           agentmail_inbox_id?: string | null
           app_url?: string
+          bootstrap_dispatched_at?: string | null
           created_at?: string
           id?: string
           name?: string
