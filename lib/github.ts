@@ -1,6 +1,5 @@
 import { App } from "@octokit/app"
 import { Octokit } from "@octokit/rest"
-import type { Endpoints } from "@octokit/types"
 import { createHmac, timingSafeEqual } from "crypto"
 
 type InstallationOctokit = InstanceType<typeof Octokit>
@@ -91,55 +90,6 @@ export async function listInstallationRepos(
   }
 
   return repos
-}
-
-type RepoCommit = Endpoints["GET /repos/{owner}/{repo}/commits"]["response"]["data"][number]
-
-export async function fetchRecentCommits(
-  installationId: number,
-  repo: string,
-  sinceDays: number = 7,
-): Promise<Array<{ sha: string; message: string; date: string; author: string }>> {
-  const octokit = await getInstallationOctokit(installationId)
-  const [owner, repoName] = repo.split("/")
-  const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000).toISOString()
-
-  const { data: commits } = await octokit.request("GET /repos/{owner}/{repo}/commits", {
-    owner,
-    repo: repoName,
-    since,
-    per_page: 30,
-  })
-
-  return commits.map((c: RepoCommit) => ({
-    sha: c.sha,
-    message: c.commit.message,
-    date: c.commit.author?.date ?? "",
-    author: c.commit.author?.name ?? "",
-  }))
-}
-
-export async function fetchCommitDiff(
-  installationId: number,
-  repo: string,
-  sha: string,
-): Promise<string> {
-  const octokit = await getInstallationOctokit(installationId)
-  const [owner, repoName] = repo.split("/")
-
-  const { data } = await octokit.request("GET /repos/{owner}/{repo}/commits/{ref}", {
-    owner,
-    repo: repoName,
-    ref: sha,
-    mediaType: { format: "diff" },
-  })
-
-  return data as unknown as string
-}
-
-export async function getInstallUrl(): Promise<string> {
-  const slug = await getAppSlug()
-  return `https://github.com/apps/${slug}/installations/new`
 }
 
 export function verifyWebhookSignature(

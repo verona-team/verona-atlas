@@ -120,6 +120,8 @@ export type Database = {
       }
       chat_sessions: {
         Row: {
+          active_chat_call_id: string | null
+          active_chat_call_started_at: string | null
           context_summary: string | null
           created_at: string | null
           id: string
@@ -130,6 +132,8 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          active_chat_call_id?: string | null
+          active_chat_call_started_at?: string | null
           context_summary?: string | null
           created_at?: string | null
           id?: string
@@ -140,6 +144,8 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          active_chat_call_id?: string | null
+          active_chat_call_started_at?: string | null
           context_summary?: string | null
           created_at?: string | null
           id?: string
@@ -692,8 +698,8 @@ export const Constants = {
 } as const
 
 // --- Convenience aliases -----------------------------------------------------
-// Re-added after running `supabase gen types` (which overwrites this file).
-// Keep these in sync with the generated table shapes above.
+// Auto-appended by scripts/supabase-gen-types.sh after `supabase gen types`
+// (the generator overwrites this file, so aliases live here).
 export type Project = Database["public"]["Tables"]["projects"]["Row"]
 export type ChatSession = Database["public"]["Tables"]["chat_sessions"]["Row"]
 export type ChatMessage = Database["public"]["Tables"]["chat_messages"]["Row"]
