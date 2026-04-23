@@ -1,6 +1,10 @@
 """
 Atlas Test Runner — Main Orchestrator
 Loads project → executes templates (DB order) → reports results
+
+All log lines emitted from this module are single-line JSON with
+`source: "modal_test_runner"` and a bound `test_run_id` / `project_id`
+context. See `runner.logging` for the wire shape.
 """
 import json
 import os
@@ -16,6 +20,7 @@ from supabase import create_client as create_supabase_client
 from runner.test_executor import execute_template
 from runner.reporter import send_report
 from runner.encryption import decrypt, encrypt
+from runner.logging import bind, test_log
 from runner.observability import collect_observability_data, diff_observability_snapshots
 from runner.recordings import save_session_recording
 from runner.browser import create_stagehand_session, cleanup_session
@@ -37,7 +42,13 @@ def _load_chat_session_id(supabase, project_id: str) -> str | None:
         if rows:
             return rows[0]["id"]
     except Exception as e:
-        print(f"[CHAT] WARNING: failed to load chat session: {type(e).__name__}: {e}")
+        test_log(
+            "warn",
+            "pipeline_chat_session_lookup_failed",
+            project_id=project_id,
+            err_type=type(e).__name__,
+            err=str(e),
+        )
     return None
 
 
@@ -84,10 +95,25 @@ def _insert_live_session_chat_message(
         )
         row = resp.data or {}
         msg_id = row.get("id")
-        print(f"[CHAT] live-session chat message inserted — id={msg_id}")
+        test_log(
+            "info",
+            "pipeline_live_session_chat_message_inserted",
+            test_run_id=test_run_id,
+            template_id=test_template_id,
+            template_name=template_name,
+            chat_message_id=msg_id,
+            browserbase_session_id=browserbase_session_id,
+        )
         return msg_id
     except Exception as e:
-        print(f"[CHAT] WARNING: failed to insert live-session chat message: {type(e).__name__}: {e}")
+        test_log(
+            "warn",
+            "pipeline_live_session_chat_message_insert_failed",
+            test_run_id=test_run_id,
+            template_id=test_template_id,
+            err_type=type(e).__name__,
+            err=str(e),
+        )
         return None
 
 
@@ -132,9 +158,21 @@ def _update_live_session_chat_message(
             "content": new_content,
             "metadata": new_meta,
         }).eq("id", chat_message_id).execute()
-        print(f"[CHAT] live-session chat message updated — id={chat_message_id} status={status}")
+        test_log(
+            "info",
+            "pipeline_live_session_chat_message_updated",
+            chat_message_id=chat_message_id,
+            status=status,
+            duration_ms=duration_ms,
+        )
     except Exception as e:
-        print(f"[CHAT] WARNING: failed to update live-session chat message: {type(e).__name__}: {e}")
+        test_log(
+            "warn",
+            "pipeline_live_session_chat_message_update_failed",
+            chat_message_id=chat_message_id,
+            err_type=type(e).__name__,
+            err=str(e),
+        )
 
 
 def _template_ids_from_trigger_ref(trigger_ref: str | None) -> list[str] | None:
@@ -184,7 +222,13 @@ def _load_agent_credentials(supabase, project_id: str) -> dict | None:
     try:
         password = decrypt(row["password_encrypted"])
     except Exception as e:
-        print(f"[PIPELINE] WARNING: failed to decrypt agent credentials: {type(e).__name__}: {e}")
+        test_log(
+            "warn",
+            "pipeline_agent_credentials_decrypt_failed",
+            project_id=project_id,
+            err_type=type(e).__name__,
+            err=str(e),
+        )
         return None
     return {
         "id": row["id"],
@@ -213,7 +257,12 @@ async def _save_agent_credentials(supabase, project_id: str, email: str, passwor
             "updated_at": now,
             "last_used_at": now,
         }).eq("id", existing.data[0]["id"]).execute()
-        print(f"[CREDENTIALS] Updated existing credentials for project {project_id[:12]}...")
+        test_log(
+            "info",
+            "pipeline_agent_credentials_updated",
+            project_id=project_id,
+            email=email,
+        )
     else:
         supabase.table("agent_credentials").insert({
             "project_id": project_id,
@@ -222,33 +271,44 @@ async def _save_agent_credentials(supabase, project_id: str, email: str, passwor
             "status": "active",
             "last_used_at": now,
         }).execute()
-        print(f"[CREDENTIALS] Inserted new credentials for project {project_id[:12]}...")
+        test_log(
+            "info",
+            "pipeline_agent_credentials_inserted",
+            project_id=project_id,
+            email=email,
+        )
 
 
 async def run_test_pipeline(test_run_id: str, project_id: str):
     """Full test execution pipeline."""
+    log = bind(
+        "modal_test_runner",
+        test_run_id=test_run_id,
+        project_id=project_id,
+    )
     pipeline_t0 = time.time()
-    print(f"[PIPELINE] run_test_pipeline — starting")
-    print(f"[PIPELINE]   test_run_id = {test_run_id}")
-    print(f"[PIPELINE]   project_id  = {project_id}")
+    log.info("pipeline_start")
 
     supabase_url = os.environ["SUPABASE_URL"]
     supabase_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
     supabase = create_supabase_client(supabase_url, supabase_key)
-    print("[PIPELINE] Supabase client created")
+    log.debug("pipeline_supabase_client_ready")
 
     try:
         # 1. Load project
-        print("[PIPELINE] Step 1: Loading project...")
+        log.info("pipeline_load_project_begin")
         project = supabase.table("projects").select("*").eq("id", project_id).single().execute().data
         if not project:
             raise ValueError(f"Project {project_id} not found")
-        print(f"[PIPELINE]   project name     = {project.get('name', '?')}")
-        print(f"[PIPELINE]   app_url          = {project.get('app_url', '?')}")
-        print(f"[PIPELINE]   agentmail_inbox  = {project.get('agentmail_inbox_address', 'none')}")
+        log.info(
+            "pipeline_load_project_ok",
+            project_name=project.get("name"),
+            app_url=project.get("app_url"),
+            agentmail_inbox_address=project.get("agentmail_inbox_address"),
+        )
 
         # 2. Load test run
-        print("[PIPELINE] Step 2: Loading test run row...")
+        log.info("pipeline_load_test_run_begin")
         run_row = (
             supabase.table("test_runs")
             .select("trigger_ref, trigger")
@@ -261,53 +321,78 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
             raise ValueError(f"Test run {test_run_id} not found")
 
         scoped_template_ids = _template_ids_from_trigger_ref(run_row.get("trigger_ref"))
-        print(f"[PIPELINE]   trigger_ref        = {run_row.get('trigger_ref', 'null')}")
-        print(f"[PIPELINE]   scoped_template_ids = {scoped_template_ids}")
+        log.info(
+            "pipeline_load_test_run_ok",
+            trigger=run_row.get("trigger"),
+            trigger_ref=run_row.get("trigger_ref"),
+            scoped_template_count=(
+                len(scoped_template_ids) if scoped_template_ids is not None else None
+            ),
+        )
 
         # Only post chat-message live views when the run originated from chat.
         chat_session_id: str | None = None
         if run_row.get("trigger") == "chat":
             chat_session_id = _load_chat_session_id(supabase, project_id)
-            print(f"[PIPELINE]   chat_session_id    = {chat_session_id}")
+            log.info(
+                "pipeline_chat_session_resolved",
+                chat_session_id=chat_session_id,
+            )
 
         # 3. Load integrations
-        print("[PIPELINE] Step 3: Loading integrations...")
+        log.info("pipeline_load_integrations_begin")
         integrations_resp = supabase.table("integrations").select("*").eq("project_id", project_id).execute()
         integrations = {i["type"]: i for i in (integrations_resp.data or [])}
-        print(f"[PIPELINE]   integrations loaded = {list(integrations.keys())}")
+        log.info(
+            "pipeline_load_integrations_ok",
+            integrations=list(integrations.keys()),
+        )
 
         # 3b. Load agent credentials (if any from previous runs)
-        print("[PIPELINE] Step 3b: Loading agent credentials...")
+        log.info("pipeline_load_agent_credentials_begin")
         agent_creds = _load_agent_credentials(supabase, project_id)
-        if agent_creds:
-            print(f"[PIPELINE]   agent credentials found — email={agent_creds['email']}")
-        else:
-            print("[PIPELINE]   no agent credentials — agent will create its own account if needed")
+        log.info(
+            "pipeline_load_agent_credentials_ok",
+            has_credentials=agent_creds is not None,
+            email=agent_creds["email"] if agent_creds else None,
+        )
 
         agentmail_address = project.get("agentmail_inbox_address")
         agentmail_inbox_id = project.get("agentmail_inbox_id")
         # Always generate a password — even when credentials exist, the agent
         # may need to create a new account if the saved credentials fail.
         generated_password = _generate_password()
-        print(f"[PIPELINE]   generated password for signup (len={len(generated_password)})")
+        log.debug(
+            "pipeline_generated_signup_password",
+            password_length=len(generated_password),
+        )
 
         # 4. Update status to planning
-        print("[PIPELINE] Step 4: Setting status → planning")
+        log.info("pipeline_status_update", new_status="planning")
         supabase.table("test_runs").update({
             "status": "planning",
             "started_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", test_run_id).execute()
 
         # 5. Load active templates
-        print("[PIPELINE] Step 5: Loading active templates...")
+        log.info("pipeline_load_templates_begin")
         q = supabase.table("test_templates").select("*").eq("project_id", project_id).eq("is_active", True)
         if scoped_template_ids is not None:
             q = q.in_("id", scoped_template_ids)
         templates_resp = q.execute()
         templates = templates_resp.data or []
-        print(f"[PIPELINE]   templates found = {len(templates)}")
-        for i, t in enumerate(templates):
-            print(f"[PIPELINE]     [{i}] id={t['id'][:12]}... name={t.get('name', '?')!r} steps={len(t.get('steps', []))}")
+        log.info(
+            "pipeline_load_templates_ok",
+            template_count=len(templates),
+            templates=[
+                {
+                    "id": t["id"],
+                    "name": t.get("name"),
+                    "step_count": len(t.get("steps") or []),
+                }
+                for t in templates
+            ],
+        )
 
         if not templates:
             msg = (
@@ -315,7 +400,7 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
                 if scoped_template_ids is not None
                 else "No active test templates found"
             )
-            print(f"[PIPELINE] WARNING: {msg} — marking run as completed")
+            log.warn("pipeline_no_templates_found", message=msg)
             supabase.table("test_runs").update({
                 "status": "completed",
                 "completed_at": datetime.now(timezone.utc).isoformat(),
@@ -326,23 +411,31 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
         # Compute dynamic deadline: 1 hour per template
         total_timeout = len(templates) * SECONDS_PER_TEMPLATE
         deadline = pipeline_t0 + total_timeout
-        print(f"[PIPELINE]   dynamic timeout = {total_timeout}s "
-              f"({len(templates)} templates × {SECONDS_PER_TEMPLATE}s)")
+        log.info(
+            "pipeline_deadline_computed",
+            total_timeout_s=total_timeout,
+            seconds_per_template=SECONDS_PER_TEMPLATE,
+            template_count=len(templates),
+        )
 
         # 6. Update status to running
-        print("[PIPELINE] Step 6: Setting status → running")
+        log.info("pipeline_status_update", new_status="running")
         supabase.table("test_runs").update({"status": "running"}).eq("id", test_run_id).execute()
 
         # 7. Execute each template
         results = []
         for idx, template in enumerate(templates):
             tpl_name = template.get("name", "unnamed")
+            tpl_id = template["id"]
+            tpl_log = log.bind(template_id=tpl_id, template_name=tpl_name, template_index=idx)
 
             remaining = deadline - time.time()
             if remaining <= 0:
-                print("-" * 60)
-                print(f"[PIPELINE] TIMEOUT: deadline exceeded — skipping template {idx + 1}/{len(templates)}: {tpl_name!r} "
-                      f"(and {len(templates) - idx - 1} more)")
+                tpl_log.warn(
+                    "pipeline_template_skipped_deadline",
+                    remaining_s=round(remaining, 3),
+                    skip_count=len(templates) - idx,
+                )
                 for skip_tpl in templates[idx:]:
                     results.append({
                         "test_run_id": test_run_id,
@@ -356,9 +449,11 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
                     supabase.table("test_results").insert(results[-1]).execute()
                 break
 
-            print("-" * 60)
-            print(f"[PIPELINE] Template {idx + 1}/{len(templates)}: {tpl_name!r} (id={template['id'][:12]}...) "
-                  f"[{remaining:.0f}s remaining]")
+            tpl_log.info(
+                "pipeline_template_begin",
+                remaining_s=round(remaining, 1),
+                template_position=f"{idx + 1}/{len(templates)}",
+            )
             tpl_t0 = time.time()
             try:
                 # Re-check credentials before each template (a previous template
@@ -366,7 +461,10 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
                 if not agent_creds:
                     agent_creds = _load_agent_credentials(supabase, project_id)
                     if agent_creds:
-                        print(f"[PIPELINE]   credentials now available from earlier template — email={agent_creds['email']}")
+                        tpl_log.info(
+                            "pipeline_credentials_resolved_midrun",
+                            email=agent_creds["email"],
+                        )
 
                 result = await execute_single_template(
                     supabase, project, template, test_run_id, integrations,
@@ -377,26 +475,38 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
                     chat_session_id=chat_session_id,
                 )
                 tpl_elapsed = time.time() - tpl_t0
-                print(f"[PIPELINE] Template {idx + 1}/{len(templates)} finished: status={result.get('status')} "
-                      f"duration={result.get('duration_ms', 0)}ms wall={tpl_elapsed:.1f}s")
+                tpl_log.info(
+                    "pipeline_template_ok",
+                    status=result.get("status"),
+                    duration_ms=result.get("duration_ms", 0),
+                    elapsed_s=round(tpl_elapsed, 3),
+                )
 
                 # If the agent saved credentials during this template, reload them
                 if result.get("console_logs", {}).get("credentials_saved"):
                     agent_creds = _load_agent_credentials(supabase, project_id)
                     if agent_creds:
-                        print(f"[PIPELINE]   credentials saved during this template — email={agent_creds['email']}")
+                        tpl_log.info(
+                            "pipeline_credentials_saved_midrun",
+                            email=agent_creds["email"],
+                        )
 
                 results.append(result)
             except Exception as e:
                 tpl_elapsed = time.time() - tpl_t0
                 duration_ms = int(tpl_elapsed * 1000)
-                print(f"[PIPELINE] Template {idx + 1}/{len(templates)} EXCEPTION after {tpl_elapsed:.1f}s: {type(e).__name__}: {e}")
-                print(f"[PIPELINE]   traceback:\n{traceback.format_exc()}")
+                tpl_log.error(
+                    "pipeline_template_failed",
+                    elapsed_s=round(tpl_elapsed, 3),
+                    err_type=type(e).__name__,
+                    err=str(e),
+                    traceback=traceback.format_exc(),
+                )
                 error_result = {
                     "test_run_id": test_run_id,
                     "test_template_id": template["id"],
                     "status": "error",
-                    "duration_ms": int(tpl_elapsed * 1000),
+                    "duration_ms": duration_ms,
                     "error_message": str(e),
                     "screenshots": [],
                     "console_logs": {"error": traceback.format_exc()},
@@ -418,12 +528,13 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
             "skipped": skipped,
         }
 
-        print("-" * 60)
-        print(f"[PIPELINE] Step 8: Aggregate results")
-        print(f"[PIPELINE]   total={summary['total']}  passed={passed}  failed={failed}  errors={errors}  skipped={skipped}")
+        log.info(
+            "pipeline_aggregate_results",
+            **summary,
+        )
 
         # 9. Update test run as completed
-        print("[PIPELINE] Step 9: Setting status → completed")
+        log.info("pipeline_status_update", new_status="completed")
         supabase.table("test_runs").update({
             "status": "completed",
             "completed_at": datetime.now(timezone.utc).isoformat(),
@@ -431,21 +542,33 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
         }).eq("id", test_run_id).execute()
 
         # 10. Send Slack report
-        print("[PIPELINE] Step 10: Sending Slack report...")
+        log.info("pipeline_send_report_begin")
         try:
             await send_report(supabase, project, integrations, test_run_id, results, summary)
-            print("[PIPELINE] Step 10: Slack report sent")
+            log.info("pipeline_send_report_ok")
         except Exception as e:
-            print(f"[PIPELINE] Step 10: Slack report failed (non-fatal): {type(e).__name__}: {e}")
+            log.warn(
+                "pipeline_send_report_failed",
+                err_type=type(e).__name__,
+                err=str(e),
+            )
 
         pipeline_elapsed = time.time() - pipeline_t0
-        print(f"[PIPELINE] run_test_pipeline — completed in {pipeline_elapsed:.1f}s")
+        log.info(
+            "pipeline_ok",
+            elapsed_s=round(pipeline_elapsed, 3),
+            **summary,
+        )
 
     except Exception as e:
         pipeline_elapsed = time.time() - pipeline_t0
-        print(f"[PIPELINE] run_test_pipeline — FATAL ERROR after {pipeline_elapsed:.1f}s")
-        print(f"[PIPELINE]   {type(e).__name__}: {e}")
-        print(f"[PIPELINE]   traceback:\n{traceback.format_exc()}")
+        log.error(
+            "pipeline_failed",
+            elapsed_s=round(pipeline_elapsed, 3),
+            err_type=type(e).__name__,
+            err=str(e),
+            traceback=traceback.format_exc(),
+        )
         supabase.table("test_runs").update({
             "status": "failed",
             "completed_at": datetime.now(timezone.utc).isoformat(),
@@ -458,7 +581,15 @@ async def upload_screenshots(supabase, screenshots: list[dict], test_run_id: str
     """Upload screenshot PNGs to Supabase Storage and return public URLs."""
     import base64
 
-    print(f"[SCREENSHOTS] Uploading {len(screenshots)} screenshots for template={template_name!r}...")
+    log = bind(
+        "modal_test_runner",
+        test_run_id=test_run_id,
+        template_name=template_name,
+    )
+    log.info(
+        "pipeline_upload_screenshots_begin",
+        screenshot_count=len(screenshots),
+    )
     urls: list[str] = []
     supabase_url = os.environ.get("SUPABASE_URL", "")
     safe_name = template_name.replace(" ", "_").replace("/", "_")[:50]
@@ -481,9 +612,19 @@ async def upload_screenshots(supabase, screenshots: list[dict], test_run_id: str
             public_url = f"{supabase_url}/storage/v1/object/public/test-screenshots/{file_path}"
             urls.append(public_url)
         except Exception as e:
-            print(f"[SCREENSHOTS] WARNING: failed to upload screenshot {i} ({shot.get('label', '?')}): {type(e).__name__}: {e}")
+            log.warn(
+                "pipeline_upload_screenshot_failed",
+                screenshot_index=i,
+                label=shot.get("label"),
+                err_type=type(e).__name__,
+                err=str(e),
+            )
 
-    print(f"[SCREENSHOTS] Uploaded {len(urls)}/{len(screenshots)} screenshots")
+    log.info(
+        "pipeline_upload_screenshots_ok",
+        uploaded=len(urls),
+        screenshot_count=len(screenshots),
+    )
     return urls
 
 
@@ -509,16 +650,30 @@ async def execute_single_template(
     browserbase_session_id: str | None = None
     live_chat_message_id: str | None = None
 
-    print(f"[TEMPLATE] execute_single_template — {tpl_name!r} (id={tpl_id[:12]}...)")
+    log = bind(
+        "modal_test_runner",
+        test_run_id=test_run_id,
+        project_id=project_id,
+        template_id=tpl_id,
+        template_name=tpl_name,
+    )
+    log.info("template_execute_start")
 
     # Pre-test observability snapshot
     pre_snapshot: dict = {}
     try:
-        print("[TEMPLATE] Collecting pre-test observability snapshot...")
+        log.info("template_observability_pre_begin")
         pre_snapshot = await collect_observability_data(integrations, window_minutes=1)
-        print(f"[TEMPLATE]   pre-snapshot keys: {list(pre_snapshot.keys())}")
+        log.info(
+            "template_observability_pre_ok",
+            keys=list(pre_snapshot.keys()),
+        )
     except Exception as e:
-        print(f"[TEMPLATE] WARNING: pre-test observability snapshot failed: {type(e).__name__}: {e}")
+        log.warn(
+            "template_observability_pre_failed",
+            err_type=type(e).__name__,
+            err=str(e),
+        )
 
     client = None
     session = None
@@ -531,8 +686,7 @@ async def execute_single_template(
         await _save_agent_credentials(supabase, project_id, email, password)
 
     try:
-        # Create Stagehand + Browserbase + Playwright session
-        print("[TEMPLATE] Creating browser session...")
+        log.info("template_browser_session_begin")
         session_ctx = await create_stagehand_session()
         client = session_ctx["client"]
         session = session_ctx["session"]
@@ -541,7 +695,10 @@ async def execute_single_template(
         browser = session_ctx["browser"]
         browserbase_session_id = session_ctx["session_id"]
 
-        print(f"[TEMPLATE] Browser session ready — browserbase_session_id={browserbase_session_id}")
+        log.info(
+            "template_browser_session_ready",
+            browserbase_session_id=browserbase_session_id,
+        )
 
         # If this run originated from chat, post a live-session message so
         # the user can watch the test execute in realtime from the chat.
@@ -561,12 +718,12 @@ async def execute_single_template(
         # Navigate to the app URL before starting the test loop
         app_url = project.get("app_url", "")
         if app_url:
-            print(f"[TEMPLATE] Navigating to app URL: {app_url}")
+            log.info("template_initial_navigate_begin", app_url=app_url)
             await page.goto(app_url, wait_until="domcontentloaded", timeout=30000)
-            print(f"[TEMPLATE] Navigation complete — url={page.url}")
+            log.info("template_initial_navigate_ok", url=page.url)
 
         # Execute the test template (auth is now handled inside the ReAct loop)
-        print(f"[TEMPLATE] Executing test template (ReAct loop)...")
+        log.info("template_react_loop_begin")
         exec_t0 = time.time()
         agent_result = await execute_template(
             session, page, template, project, integrations,
@@ -577,13 +734,20 @@ async def execute_single_template(
             on_credentials_saved=on_credentials_saved,
         )
         exec_elapsed = time.time() - exec_t0
-        print(f"[TEMPLATE] ReAct loop finished ({exec_elapsed:.1f}s)")
         llm_err = agent_result.get("llm_error")
         hit_lim = agent_result.get("hit_iteration_limit")
-        print(f"[TEMPLATE]   passed={agent_result.get('passed')}  iterations={agent_result.get('iterations_used')}/{agent_result.get('max_iterations')}  "
-              f"hit_limit={hit_lim}  llm_error={'yes' if llm_err else 'no'}  bugs={len(agent_result.get('bugs_found', []))}  screenshots={len(agent_result.get('screenshots', []))}")
-        if llm_err:
-            print(f"[TEMPLATE]   llm_error: {llm_err[:500]}{'…' if len(llm_err) > 500 else ''}")
+        log.info(
+            "template_react_loop_ok",
+            elapsed_s=round(exec_elapsed, 3),
+            passed=agent_result.get("passed"),
+            iterations_used=agent_result.get("iterations_used"),
+            max_iterations=agent_result.get("max_iterations"),
+            hit_iteration_limit=hit_lim,
+            llm_error_present=bool(llm_err),
+            llm_error=(llm_err[:500] + "…") if llm_err and len(llm_err) > 500 else llm_err,
+            bug_count=len(agent_result.get("bugs_found", [])),
+            screenshot_count=len(agent_result.get("screenshots", [])),
+        )
 
         test_passed = agent_result.get("passed", False)
         status = "passed" if test_passed else "failed"
@@ -593,29 +757,39 @@ async def execute_single_template(
         if bugs and status == "passed":
             status = "failed"
             error_message = "; ".join(b.get("description", "") for b in bugs)
-            print(f"[TEMPLATE] Status overridden to 'failed' due to {len(bugs)} bug(s) found")
+            log.info(
+                "template_status_overridden_bugs",
+                bug_count=len(bugs),
+            )
 
         duration_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
 
         # Post-test observability snapshot
         observability_errors: dict = {}
         try:
-            print("[TEMPLATE] Collecting post-test observability snapshot (waiting 3s)...")
+            log.info("template_observability_post_begin")
             await asyncio.sleep(3)
             post_snapshot = await collect_observability_data(integrations, window_minutes=2)
             observability_errors = diff_observability_snapshots(pre_snapshot, post_snapshot)
-            if observability_errors:
-                print(f"[TEMPLATE] Observability errors detected: {list(observability_errors.keys())}")
-            else:
-                print("[TEMPLATE] No new observability errors detected")
+            log.info(
+                "template_observability_post_ok",
+                new_error_sources=list(observability_errors.keys()),
+            )
         except Exception as e:
-            print(f"[TEMPLATE] WARNING: post-test observability snapshot failed: {type(e).__name__}: {e}")
+            log.warn(
+                "template_observability_post_failed",
+                err_type=type(e).__name__,
+                err=str(e),
+            )
 
         if observability_errors and status == "passed":
             status = "failed"
             error_sources = [k for k, v in observability_errors.items() if v]
             error_message = f"Observability errors detected in: {', '.join(error_sources)}"
-            print(f"[TEMPLATE] Status overridden to 'failed' due to observability errors: {error_sources}")
+            log.info(
+                "template_status_overridden_observability",
+                error_sources=error_sources,
+            )
 
         # Upload screenshots
         screenshot_urls: list[str] = []
@@ -627,12 +801,19 @@ async def execute_single_template(
                     template.get("name", "unknown"),
                 )
             except Exception as e:
-                print(f"[TEMPLATE] WARNING: screenshot upload failed: {type(e).__name__}: {e}")
+                log.warn(
+                    "template_screenshot_upload_failed",
+                    err_type=type(e).__name__,
+                    err=str(e),
+                )
 
         # Save Browserbase session recording
         recording_url = None
         if browserbase_session_id:
-            print(f"[TEMPLATE] Saving Browserbase session recording (session={browserbase_session_id})...")
+            log.info(
+                "template_save_recording_begin",
+                browserbase_session_id=browserbase_session_id,
+            )
             try:
                 recording_url = await save_session_recording(
                     supabase,
@@ -640,12 +821,17 @@ async def execute_single_template(
                     test_run_id,
                     template.get("name", "unknown"),
                 )
-                if recording_url:
-                    print(f"[TEMPLATE] Recording saved: {recording_url}")
-                else:
-                    print("[TEMPLATE] Recording returned None (may not be available yet)")
+                log.info(
+                    "template_save_recording_ok",
+                    recording_url=recording_url,
+                    had_url=bool(recording_url),
+                )
             except Exception as e:
-                print(f"[TEMPLATE] WARNING: Failed to save recording: {type(e).__name__}: {e}")
+                log.warn(
+                    "template_save_recording_failed",
+                    err_type=type(e).__name__,
+                    err=str(e),
+                )
 
         actions_for_log = []
         for a in agent_result.get("actions", []):
@@ -673,7 +859,11 @@ async def execute_single_template(
             },
         }
 
-        print(f"[TEMPLATE] Inserting test result: status={status} duration_ms={duration_ms}")
+        log.info(
+            "template_insert_result",
+            status=status,
+            duration_ms=duration_ms,
+        )
         supabase.table("test_results").insert(result).execute()
 
         # Finalize the chat live-session bubble (if any) so the UI flips
@@ -689,14 +879,22 @@ async def execute_single_template(
             )
 
         total_elapsed = time.time() - t0
-        print(f"[TEMPLATE] execute_single_template — done ({total_elapsed:.1f}s) status={status}")
+        log.info(
+            "template_execute_ok",
+            elapsed_s=round(total_elapsed, 3),
+            status=status,
+        )
         return result
 
     except Exception as e:
         total_elapsed = time.time() - t0
-        print(f"[TEMPLATE] execute_single_template — EXCEPTION after {total_elapsed:.1f}s")
-        print(f"[TEMPLATE]   {type(e).__name__}: {e}")
-        print(f"[TEMPLATE]   traceback:\n{traceback.format_exc()}")
+        log.error(
+            "template_execute_failed",
+            elapsed_s=round(total_elapsed, 3),
+            err_type=type(e).__name__,
+            err=str(e),
+            traceback=traceback.format_exc(),
+        )
         if live_chat_message_id:
             _update_live_session_chat_message(
                 supabase,
@@ -709,5 +907,8 @@ async def execute_single_template(
         raise
 
     finally:
-        print(f"[TEMPLATE] Cleaning up session resources (browserbase_session={browserbase_session_id})...")
+        log.info(
+            "template_cleanup_session",
+            browserbase_session_id=browserbase_session_id,
+        )
         await cleanup_session(client, session, browser, playwright_inst)
