@@ -190,9 +190,30 @@ export function GitHubCard({
       try {
         const res = await fetch(`/api/integrations/github/status?project_id=${projectId}`)
         if (!res.ok || cancelled) return
-        const data = await res.json()
-        if (!data.connected || cancelled) return
-        await onRefresh()
+        const data = (await res.json()) as {
+          connected?: boolean
+          reason?: string
+        }
+        if (cancelled) return
+        if (data.connected) {
+          await onRefresh()
+          return
+        }
+        // Structured non-success reasons — stop polling and tell the user
+        // what's wrong instead of spinning forever. This is the signal
+        // layer the backend added so failure modes surface cleanly rather
+        // than running out the 2-minute hard timeout.
+        if (data.reason === 'AMBIGUOUS_MULTIPLE_INSTALLATIONS') {
+          if (cancelled) return
+          setWaiting(false)
+          installPopupRef.current?.close()
+          installPopupRef.current = null
+          toast.message(
+            'Multiple GitHub installations found for your account. Complete the install flow from the popup to pick which one to link here.',
+            { duration: 8000 },
+          )
+          return
+        }
       } catch {
         /* ignore */
       }

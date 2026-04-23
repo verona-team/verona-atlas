@@ -514,6 +514,42 @@ export type Database = {
           },
         ]
       }
+      user_github_identities: {
+        Row: {
+          access_token_encrypted: string
+          access_token_expires_at: string | null
+          created_at: string
+          github_login: string
+          github_user_id: number
+          refresh_token_encrypted: string | null
+          refresh_token_expires_at: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          access_token_encrypted: string
+          access_token_expires_at?: string | null
+          created_at?: string
+          github_login: string
+          github_user_id: number
+          refresh_token_encrypted?: string | null
+          refresh_token_expires_at?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          access_token_encrypted?: string
+          access_token_expires_at?: string | null
+          created_at?: string
+          github_login?: string
+          github_user_id?: number
+          refresh_token_encrypted?: string | null
+          refresh_token_expires_at?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -703,3 +739,4 @@ export const Constants = {
 export type Project = Database["public"]["Tables"]["projects"]["Row"]
 export type ChatSession = Database["public"]["Tables"]["chat_sessions"]["Row"]
 export type ChatMessage = Database["public"]["Tables"]["chat_messages"]["Row"]
+export type UserGithubIdentity = Database["public"]["Tables"]["user_github_identities"]["Row"]

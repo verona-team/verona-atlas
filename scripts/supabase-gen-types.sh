@@ -20,6 +20,7 @@ cat >> "$TMP" <<'EOF'
 export type Project = Database["public"]["Tables"]["projects"]["Row"]
 export type ChatSession = Database["public"]["Tables"]["chat_sessions"]["Row"]
 export type ChatMessage = Database["public"]["Tables"]["chat_messages"]["Row"]
+export type UserGithubIdentity = Database["public"]["Tables"]["user_github_identities"]["Row"]
 EOF
 
 mv "$TMP" "$OUT"
