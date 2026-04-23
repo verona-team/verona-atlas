@@ -102,7 +102,15 @@ export function SearchablePicker({
                 className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               />
             </div>
-            <Combobox.Empty className="px-3 py-6 text-center text-xs text-muted-foreground">
+            {/**
+             * `Combobox.Empty` from base-ui always renders its wrapper `<div>`
+             * — only the children are conditional on the list being empty.
+             * Without the `empty:hidden` guard the wrapper still contributes
+             * `py-6` of vertical space above the list, showing up as a band
+             * of unnecessary top padding inside the popup whenever the list
+             * has items.
+             */}
+            <Combobox.Empty className="px-3 py-6 text-center text-xs text-muted-foreground empty:hidden">
               {emptyText}
             </Combobox.Empty>
             <Combobox.List className="max-h-[min(280px,var(--available-height))] overflow-y-auto p-1">
