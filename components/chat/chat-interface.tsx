@@ -596,15 +596,21 @@ export function ChatInterface({
      * UI, leaving only a thinking indicator with no context of what
      * was asked.
      *
-     * Fix: whenever we have no visible user turn but the backend is
-     * known to be working (or we're locally streaming), synthesize a
+     * Fix: while the backend is known to be working on the very first
+     * turn of the session (no DB history at all and no visible
+     * in-flight user turn in `streamMessages`), synthesize a
      * placeholder bubble that mirrors the exact bootstrap text. Once
      * the real DB row arrives via Supabase Realtime (or a subsequent
-     * reload picks it up via SSR), it will be rendered instead — so
-     * this placeholder cleanly dissolves.
+     * reload picks it up via SSR) the `hasVisibleUserTurn` branch
+     * above takes over and this placeholder cleanly dissolves. We
+     * scope this to `dbMessages.length === 0` so a follow-up user
+     * turn on an existing conversation does not accidentally render
+     * the bootstrap wording.
      */
     const hasVisibleUserTurn = combined.some((m) => m.role === 'user')
-    if (!hasVisibleUserTurn && (backendThinking || isStreamActive)) {
+    const isFirstTurnInFlight =
+      dbMessages.length === 0 && (backendThinking || isStreamActive)
+    if (!hasVisibleUserTurn && isFirstTurnInFlight) {
       const placeholder = {
         id: `bootstrap-placeholder:${sessionId}`,
         role: 'user' as const,
