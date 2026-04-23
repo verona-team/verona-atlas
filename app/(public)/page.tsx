@@ -28,7 +28,7 @@ export default function LandingPage() {
         <div className="flex flex-col items-center gap-[68px] -mt-16">
           <InteractiveLogo size={180} />
           <h1 className="max-w-2xl text-center text-5xl font-normal leading-[1.1] tracking-tight text-[#1a1a1a] sm:text-6xl">
-            Verona bug bashes your product like a human.
+            Verona bug bashes your product like a human would
           </h1>
         </div>
       </main>
