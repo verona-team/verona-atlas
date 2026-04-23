@@ -16,13 +16,15 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
+  AdvancedIntegrationsSection,
+  BraintrustCard,
+  countConnectedAdvanced,
   GitHubCard,
+  isGitHubComplete,
+  LangSmithCard,
   PostHogCard,
   SentryCard,
-  LangSmithCard,
-  BraintrustCard,
   SlackCard,
-  isGitHubComplete,
   type IntegrationStatus,
 } from '@/components/integrations/integration-cards'
 import { useWorkspace } from '@/lib/workspace-context'
@@ -278,26 +280,30 @@ export function NewProjectModal() {
                 integration={getStatus('posthog')}
                 onRefresh={handleRefresh}
               />
-              <SentryCard
-                projectId={projectId!}
-                integration={getStatus('sentry')}
-                onRefresh={handleRefresh}
-              />
-              <LangSmithCard
-                projectId={projectId!}
-                integration={getStatus('langsmith')}
-                onRefresh={handleRefresh}
-              />
-              <BraintrustCard
-                projectId={projectId!}
-                integration={getStatus('braintrust')}
-                onRefresh={handleRefresh}
-              />
               <SlackCard
                 projectId={projectId!}
                 integration={getStatus('slack')}
                 onRefresh={handleRefresh}
               />
+              <AdvancedIntegrationsSection
+                connectedCount={countConnectedAdvanced(integrations)}
+              >
+                <SentryCard
+                  projectId={projectId!}
+                  integration={getStatus('sentry')}
+                  onRefresh={handleRefresh}
+                />
+                <LangSmithCard
+                  projectId={projectId!}
+                  integration={getStatus('langsmith')}
+                  onRefresh={handleRefresh}
+                />
+                <BraintrustCard
+                  projectId={projectId!}
+                  integration={getStatus('braintrust')}
+                  onRefresh={handleRefresh}
+                />
+              </AdvancedIntegrationsSection>
             </div>
 
             <div className="pt-3">

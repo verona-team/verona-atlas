@@ -1,11 +1,16 @@
 'use client'
 
 import { Children, useEffect, useRef, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { ChevronDown, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
 import { SlackChannelPicker } from '@/components/integrations/slack-channel-picker'
 import { Card, CardContent } from '@/components/ui/card'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -694,4 +699,114 @@ export function isGitHubComplete(integrations: IntegrationStatus[]): boolean {
   if (!gh) return false
   const repo = gh.meta?.repo as { full_name?: string } | null | undefined
   return typeof repo?.full_name === 'string' && repo.full_name.length > 0
+}
+
+/* ------------------------------------------------------------------ */
+/*  Advanced integrations accordion                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The integration types hidden behind the "More integrations" accordion.
+ * These are niche enough (error monitoring + LLM observability) that
+ * surfacing them to every user adds more noise than signal.
+ *
+ * Exported so callers can share one source of truth for both the UI
+ * (accordion contents) and the "is anything connected?" computation
+ * (accordion default-open state + badge count).
+ */
+export const ADVANCED_INTEGRATION_TYPES = ['sentry', 'langsmith', 'braintrust'] as const
+
+export type AdvancedIntegrationType = (typeof ADVANCED_INTEGRATION_TYPES)[number]
+
+/**
+ * How many of the advanced integrations are currently connected.
+ *
+ * Used by `AdvancedIntegrationsSection` to:
+ *   1. Auto-expand the accordion when the user already has one of these
+ *      connected (so their live state is never hidden).
+ *   2. Render a "N connected" pill on the collapsed trigger, so the user
+ *      always sees at a glance that there's active state inside.
+ */
+export function countConnectedAdvanced(
+  integrations: IntegrationStatus[],
+): number {
+  return integrations.filter(
+    (i) =>
+      i.status === 'active' &&
+      (ADVANCED_INTEGRATION_TYPES as readonly string[]).includes(i.type),
+  ).length
+}
+
+/**
+ * A labeled accordion that groups the rarely-needed integrations
+ * (Sentry, LangSmith, Braintrust) behind a "More integrations" trigger.
+ *
+ * Behaviour:
+ *   - Collapsed by default when nothing inside is connected.
+ *   - Auto-expands on mount when at least one inside is connected, so
+ *     users never lose visibility of live integration state.
+ *   - Always shows a count badge on the trigger when anything is
+ *     connected, including when collapsed — that way, even if the user
+ *     re-collapses the section after the auto-expand, the state is still
+ *     visually represented in the closed header.
+ *
+ * The children (rendered inside `CollapsibleContent`) are the caller's
+ * responsibility — this component is deliberately layout-only so it can
+ * wrap both the new-project-modal integration cards and the
+ * settings-page integration cards without coupling to either.
+ */
+export function AdvancedIntegrationsSection({
+  connectedCount,
+  children,
+}: {
+  connectedCount: number
+  children: React.ReactNode
+}) {
+  // One-shot default: open if the user already has something connected,
+  // otherwise start closed. After mount, we let the user drive the open
+  // state directly — we do NOT force it back open on every render if
+  // `connectedCount` flips to >0, because that would fight the user if
+  // they explicitly collapsed the section after connecting something.
+  const [open, setOpen] = useState(connectedCount > 0)
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger
+        className="flex w-full items-center justify-between gap-2 rounded-md px-1 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+      >
+        <span className="flex items-center gap-2">
+          <ChevronDown
+            className={`size-3.5 transition-transform duration-200 ${open ? 'rotate-0' : '-rotate-90'}`}
+            aria-hidden
+          />
+          <span className="uppercase tracking-wider">More integrations</span>
+          {connectedCount > 0 && (
+            <Badge
+              variant="outline"
+              className="h-5 px-1.5 border-green-500/30 text-green-500 text-[10px]"
+            >
+              {connectedCount} connected
+            </Badge>
+          )}
+        </span>
+      </CollapsibleTrigger>
+      {/*
+        Animate the height so the Danger Zone card below doesn't jump
+        abruptly when the accordion opens/closes. Base-ui's Collapsible
+        exposes `--collapsible-panel-height` on the panel element, which
+        we bind to `height` so the browser can interpolate between 0 and
+        the measured content height. `overflow-hidden` is required to
+        clip the content while the height is less than its natural size;
+        without it the children would visibly overflow during the
+        transition. `keepMounted` preserves in-progress credential form
+        state if the user accidentally collapses the section mid-flow.
+      */}
+      <CollapsibleContent
+        keepMounted
+        className="overflow-hidden transition-[height] duration-200 ease-out h-[var(--collapsible-panel-height)] data-[starting-style]:h-0 data-[ending-style]:h-0"
+      >
+        <div className="space-y-3 pt-2">{children}</div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
 }
