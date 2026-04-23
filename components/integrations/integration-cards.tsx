@@ -132,6 +132,18 @@ export function IntegrationCard({
 /*  GitHub                                                             */
 /* ------------------------------------------------------------------ */
 
+// Cap the waiting-for-auth state so a failed connect (popup closed, auth
+// abandoned, or transient status API failure) can't leave the card spinning
+// forever. Two minutes is long enough to cover the slowest legitimate
+// GitHub install flow — including 2FA prompts and "select which repos"
+// pickers — while still bailing out before it feels stuck.
+const GITHUB_WAITING_TIMEOUT_MS = 120_000
+
+// Grace period before we let a closed popup bail us out. Some browsers mark
+// `window.closed === true` for a brief moment during the cross-origin
+// redirect dance, so we don't want to react to the first tick.
+const POPUP_CLOSE_GRACE_MS = 1_500
+
 export function GitHubCard({
   projectId,
   integration,
@@ -166,6 +178,7 @@ export function GitHubCard({
     if (!waiting) return
 
     let cancelled = false
+    const popupOpenedAt = Date.now()
 
     async function checkStatus() {
       if (cancelled) return
@@ -188,9 +201,42 @@ export function GitHubCard({
     }
     document.addEventListener('visibilitychange', onVisibility)
 
+    // Safety net: if the popup is closed (manually or by the oauth-complete
+    // page) but the backend never observed a connection, give up instead of
+    // polling forever. The status endpoint is idempotent, so one final poll
+    // tells us whether a late webhook/callback already linked us.
+    const popupWatcher = setInterval(() => {
+      if (cancelled) return
+      const popup = installPopupRef.current
+      if (!popup) return
+      if (!popup.closed) return
+      if (Date.now() - popupOpenedAt < POPUP_CLOSE_GRACE_MS) return
+      clearInterval(popupWatcher)
+      void (async () => {
+        await checkStatus()
+        if (cancelled) return
+        setWaiting(false)
+        installPopupRef.current = null
+      })()
+    }, 500)
+
+    // Hard timeout — even if the popup remains open indefinitely (e.g. the
+    // user wandered off), we must not leave the UI in a permanent spinning
+    // state. This is the last line of defense against the infinite-loop
+    // bug that motivated this component.
+    const hardTimeout = setTimeout(() => {
+      if (cancelled) return
+      setWaiting(false)
+      toast.error(
+        "GitHub is taking a while. Close the popup and try again if it's stuck.",
+      )
+    }, GITHUB_WAITING_TIMEOUT_MS)
+
     return () => {
       cancelled = true
       clearInterval(interval)
+      clearInterval(popupWatcher)
+      clearTimeout(hardTimeout)
       document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [waiting, projectId, onRefresh])
