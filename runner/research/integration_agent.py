@@ -543,13 +543,33 @@ async def _run_research_loop(
     # code writer's prompt to balloon over the loop.
     previous_exec: PreviousExec | None = None
 
-    async def _run_execute_code(purpose: str) -> dict[str, Any]:
-        """Do the real work for an `execute_code(purpose=...)` tool call.
+    # The tool is declared as `async def` so its body can await the
+    # Opus code-writer call directly. `@tool` preserves the signature
+    # (`purpose: str`) and docstring for schema/binding purposes;
+    # `bind_tools` accepts async tools, and the loop invokes them via
+    # `await execute_code.ainvoke({...})`.
+    #
+    # The closure captures `sb`, `docs_block`, `env_description`,
+    # `previous_exec`, and `notes` from the outer scope so the tool can
+    # update loop-level state (carrying forward the previous exec for
+    # code-writer self-correction, accumulating research notes for the
+    # synthesis pass) without the orchestrator having to thread any of
+    # it through.
+    @tool
+    async def execute_code(purpose: str) -> str:
+        """Execute a research investigation step against the connected integrations.
 
-        Split out of the `@tool`-decorated function because the tool body
-        must be sync for `bind_tools` compatibility, but calling Opus to
-        write code is async. This coroutine is what gets awaited from
-        inside the loop body, bypassing the tool's sync surface.
+        Pass a natural-language research goal as `purpose`. A specialized
+        code writer will turn it into Python that runs inside an isolated
+        Modal Sandbox with credentials preloaded as environment variables,
+        then return {exit_code, stdout, stderr, explanation}.
+
+        Args:
+            purpose: A specific, actionable research goal. Name the
+                provider (GitHub / PostHog / Sentry / LangSmith / Braintrust),
+                the target entity or time window, and the desired output
+                shape. E.g. 'List files changed in GitHub PR #206,
+                grouped by top-level directory, with additions/deletions.'
         """
         nonlocal previous_exec
 
@@ -576,7 +596,7 @@ async def _run_research_loop(
         # code here (truncated) because synthesis may want to cite
         # "the script that ran HogQL X found..." even if the orchestrator
         # never saw the raw code.
-        note = (
+        notes.append(
             f"[execute_code: {purpose}] exit {result.exit_code}\n"
             f"explanation: {code_output.explanation}\n"
             f"code ({len(code_output.code)} chars, truncated):\n"
@@ -584,7 +604,6 @@ async def _run_research_loop(
             f"stdout:\n{_truncate(result.stdout, 8000)}\n"
             f"stderr:\n{_truncate(result.stderr, 2000)}"
         )
-        notes.append(note)
 
         chat_log(
             "info",
@@ -599,36 +618,16 @@ async def _run_research_loop(
 
         # What the orchestrator sees. Keep it tight — this lands in
         # context on every subsequent turn.
-        return {
-            "purpose": purpose,
-            "explanation": code_output.explanation,
-            "exit_code": result.exit_code,
-            "stdout": _truncate(result.stdout, 4000),
-            "stderr": _truncate(result.stderr, 1000),
-        }
-
-    # The @tool decorator is purely for schema/binding — the body is
-    # unused because we route execute_code tool calls to `_run_execute_code`
-    # directly in the loop below (so we can await the Opus call).
-    @tool
-    def execute_code(purpose: str) -> str:  # noqa: D401 — schema-only stub
-        """Execute a research investigation step against the connected integrations.
-
-        Pass a natural-language research goal as `purpose`. A specialized
-        code writer will turn it into Python that runs inside an isolated
-        Modal Sandbox with credentials preloaded as environment variables,
-        then return {exit_code, stdout, stderr, explanation}.
-
-        Args:
-            purpose: A specific, actionable research goal. Name the
-                provider (GitHub / PostHog / Sentry / LangSmith / Braintrust),
-                the target entity or time window, and the desired output
-                shape. E.g. 'List files changed in GitHub PR #206,
-                grouped by top-level directory, with additions/deletions.'
-        """
-        # Schema-only — never actually invoked. The loop handles
-        # execute_code tool calls out-of-band so it can await Opus.
-        return "called via orchestrator loop"
+        return json.dumps(
+            {
+                "purpose": purpose,
+                "explanation": code_output.explanation,
+                "exit_code": result.exit_code,
+                "stdout": _truncate(result.stdout, 4000),
+                "stderr": _truncate(result.stderr, 1000),
+            },
+            default=str,
+        )
 
     try:
         model = get_sonnet(max_tokens=4096, temperature=0.1).bind_tools([execute_code])
@@ -697,34 +696,33 @@ async def _run_research_loop(
                     tool_result = json.dumps(
                         {"error": f"Unknown tool '{name}'. Only execute_code is available."}
                     )
+                elif not str(args.get("purpose") or "").strip():
+                    # Defend against the model hallucinating a call with an
+                    # empty purpose. Tell it why the call was a no-op.
+                    tool_result = json.dumps(
+                        {
+                            "error": (
+                                "execute_code requires a non-empty "
+                                "`purpose` string describing the research goal."
+                            )
+                        }
+                    )
                 else:
-                    purpose = str(args.get("purpose") or "").strip()
-                    if not purpose:
+                    try:
+                        tool_result = await execute_code.ainvoke(args)
+                    except Exception as e:
+                        chat_log(
+                            "error",
+                            "research_execute_code_uncaught",
+                            err=repr(e),
+                            purpose=str(args.get("purpose") or "")[:200],
+                        )
                         tool_result = json.dumps(
                             {
-                                "error": (
-                                    "execute_code requires a non-empty "
-                                    "`purpose` string describing the research goal."
-                                )
+                                "purpose": args.get("purpose"),
+                                "error": f"{type(e).__name__}: {e}",
                             }
                         )
-                    else:
-                        try:
-                            tool_result_dict = await _run_execute_code(purpose)
-                            tool_result = json.dumps(tool_result_dict, default=str)
-                        except Exception as e:
-                            chat_log(
-                                "error",
-                                "research_execute_code_uncaught",
-                                err=repr(e),
-                                purpose=purpose[:200],
-                            )
-                            tool_result = json.dumps(
-                                {
-                                    "purpose": purpose,
-                                    "error": f"{type(e).__name__}: {e}",
-                                }
-                            )
                 messages.append(
                     ToolMessage(
                         content=tool_result,
