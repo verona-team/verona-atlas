@@ -793,7 +793,21 @@ export function AdvancedIntegrationsSection({
           Sentry · LangSmith · Braintrust
         </span>
       </CollapsibleTrigger>
-      <CollapsibleContent keepMounted>
+      {/*
+        Animate the height so the Danger Zone card below doesn't jump
+        abruptly when the accordion opens/closes. Base-ui's Collapsible
+        exposes `--collapsible-panel-height` on the panel element, which
+        we bind to `height` so the browser can interpolate between 0 and
+        the measured content height. `overflow-hidden` is required to
+        clip the content while the height is less than its natural size;
+        without it the children would visibly overflow during the
+        transition. `keepMounted` preserves in-progress credential form
+        state if the user accidentally collapses the section mid-flow.
+      */}
+      <CollapsibleContent
+        keepMounted
+        className="overflow-hidden transition-[height] duration-200 ease-out h-[var(--collapsible-panel-height)] data-[starting-style]:h-0 data-[ending-style]:h-0"
+      >
         <div className="space-y-3 pt-2">{children}</div>
       </CollapsibleContent>
     </Collapsible>
