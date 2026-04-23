@@ -129,17 +129,23 @@ def _build_sandbox_image() -> modal.Image:
     )
 
 
-def create_research_sandbox(env: IntegrationEnv) -> modal.Sandbox:
+async def create_research_sandbox(env: IntegrationEnv) -> modal.Sandbox:
     """Spawn a fresh Modal Sandbox for a single research run.
 
-    Caller MUST pair this with `teardown_sandbox(sb)` in a finally
+    Caller MUST pair this with `await teardown_sandbox(sb)` in a finally
     block — sandboxes are charged until terminated, and detach is
     required to clean up the local gRPC connection.
 
     The sandbox runs with default network policy (open outbound).
     See the module docstring for the rationale.
+
+    Uses Modal's async interface (`.aio`) throughout so this coroutine
+    never blocks the parent event loop. The blocking Modal client would
+    otherwise run a full gRPC round-trip on the chat worker's single
+    thread, pausing every other async task (Supabase writes, Anthropic
+    streams, sibling research tasks) until it returned.
     """
-    app = modal.App.lookup(_SANDBOX_APP_NAME, create_if_missing=True)
+    app = await modal.App.lookup.aio(_SANDBOX_APP_NAME, create_if_missing=True)
     image = _build_sandbox_image()
 
     secrets: list[modal.Secret] = []
@@ -154,7 +160,7 @@ def create_research_sandbox(env: IntegrationEnv) -> modal.Sandbox:
         timeout_s=_SANDBOX_TIMEOUT_S,
     )
 
-    sb = modal.Sandbox.create(
+    sb = await modal.Sandbox.create.aio(
         app=app,
         image=image,
         env=env.public if env.public else None,
@@ -165,13 +171,17 @@ def create_research_sandbox(env: IntegrationEnv) -> modal.Sandbox:
     return sb
 
 
-def execute_in_sandbox(sb: modal.Sandbox, code: str) -> ExecResult:
+async def execute_in_sandbox(sb: modal.Sandbox, code: str) -> ExecResult:
     """Run a snippet of Python inside the sandbox, return (exit_code, stdout, stderr).
 
     Uses `python -c` so the script is passed inline (no filesystem round
     trip, no script-name collisions between parallel calls). On ARG_MAX
     grounds we cap the code at 1.5MB here — anything larger indicates a
     prompt or loop bug, not legitimate research code.
+
+    All Modal calls are awaited on the `.aio` variant so the event loop
+    stays responsive during long-running sandbox execs (pagination
+    loops against PostHog/Sentry can take tens of seconds of real time).
     """
     MAX_CODE_CHARS = 1_500_000
     if len(code) > MAX_CODE_CHARS:
@@ -185,13 +195,13 @@ def execute_in_sandbox(sb: modal.Sandbox, code: str) -> ExecResult:
         )
 
     try:
-        proc = sb.exec("python", "-c", code, timeout=_EXEC_TIMEOUT_S)
+        proc = await sb.exec.aio("python", "-c", code, timeout=_EXEC_TIMEOUT_S)
         # `.wait()` isn't strictly needed before `.read()` because the
         # PIPE readers block until EOF, but calling it ensures we get a
         # definite exit code even if stdout/stderr are empty.
-        stdout = proc.stdout.read()
-        stderr = proc.stderr.read()
-        proc.wait()
+        stdout = await proc.stdout.read.aio()
+        stderr = await proc.stderr.read.aio()
+        await proc.wait.aio()
         return ExecResult(
             exit_code=proc.returncode if proc.returncode is not None else -1,
             stdout=stdout or "",
@@ -206,7 +216,7 @@ def execute_in_sandbox(sb: modal.Sandbox, code: str) -> ExecResult:
         )
 
 
-def teardown_sandbox(sb: modal.Sandbox | None) -> None:
+async def teardown_sandbox(sb: modal.Sandbox | None) -> None:
     """Best-effort terminate + detach. Never raises.
 
     `terminate()` stops billing; `detach()` closes the local gRPC
@@ -216,11 +226,11 @@ def teardown_sandbox(sb: modal.Sandbox | None) -> None:
     if sb is None:
         return
     try:
-        sb.terminate()
+        await sb.terminate.aio()
     except Exception as e:
         chat_log("warn", "research_sandbox_terminate_failed", err=repr(e))
     try:
-        sb.detach()
+        await sb.detach.aio()
     except Exception as e:
         chat_log("warn", "research_sandbox_detach_failed", err=repr(e))
 

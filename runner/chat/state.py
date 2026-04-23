@@ -85,6 +85,7 @@ async def build_initial_state(
     session_id: str,
     project_id: str,
     user_message_client_id: str,
+    user_message_text: str,
     turn_id: str,
 ) -> ChatTurnState:
     """Build the initial state dict by reading everything the graph will need.
@@ -95,10 +96,19 @@ async def build_initial_state(
     vs. loading the same things again inside a first node.
 
     Invariants:
-    - The user message row MUST already exist; the API route writes it
-      synchronously before spawning us. If it doesn't, we raise — this is
-      a programming error, not a runtime condition we should paper over.
-    - The session row MUST exist; same reason.
+    - The session row MUST exist; raise otherwise.
+
+    The current turn's user text comes in as `user_message_text` rather
+    than being re-read from `chat_messages`. The route-side upsert is
+    still responsible for durability (so hard refreshes land on an
+    existing row and don't double-spawn), but we do NOT rely on the
+    Python worker being able to SELECT that row at cold-start: passing
+    the text as an argument eliminates an entire read-your-writes race
+    class without any retry logic here.
+
+    Historical context (previous turns in this session) is still loaded
+    from the DB; if the listing happens to also include this turn's row
+    we dedupe it out so the LLM doesn't see its own current turn twice.
 
     Implementation note: we use `.limit(1)` + list indexing instead of
     `.single()` / `.maybe_single()`. supabase-py's `.single().execute()`
@@ -132,14 +142,18 @@ async def build_initial_state(
         raise RuntimeError(f"project {project_id} not found")
     project = project_rows[0]
 
-    # Recent messages (last 30) — convert into langchain Messages for the LLM.
+    # Historical messages (up to 30 most recent) — convert into langchain
+    # Messages for the LLM. We explicitly skip the row matching this turn's
+    # `client_message_id` because the current turn's text is appended below
+    # from the function argument (the authoritative copy, passed in by the
+    # API route). If we also included the DB row we'd double-feed the LLM.
     #
     # We order DESC and reverse locally (rather than ASC + limit 30 on the
     # DB), because "ASC limit 30" returns the OLDEST 30 — which for any
     # session with >30 messages means the LLM sees ancient context and
-    # never the user's latest turn. Postgres has no "take the newest N
-    # in chronological order" in one query, so: DESC + limit + reverse
-    # in app code. Matches the TS original (lib/chat/context.ts).
+    # never recent turns. Postgres has no "take the newest N in
+    # chronological order" in one query, so: DESC + limit + reverse in
+    # app code. Matches the TS original (lib/chat/context.ts).
     msgs_resp = (
         sb.table("chat_messages")
         .select("id, role, content, metadata, client_message_id, created_at")
@@ -151,14 +165,14 @@ async def build_initial_state(
     raw_msgs: list[dict[str, Any]] = list(reversed(msgs_resp.data or []))
 
     lc_messages: list[AnyMessage] = []
-    user_msg_seen = False
     for row in raw_msgs:
+        if row.get("client_message_id") == user_message_client_id:
+            # The current turn. Skip here; appended below from the arg.
+            continue
         role = row.get("role")
         content = row.get("content") or ""
         if role == "user":
             lc_messages.append(HumanMessage(content=content))
-            if row.get("client_message_id") == user_message_client_id:
-                user_msg_seen = True
         elif role == "assistant":
             # Assistant rows in our DB are rendered flat text; preserve them
             # as HumanMessages with "[assistant said]" prefix rather than
@@ -168,12 +182,22 @@ async def build_initial_state(
             # context handling.
             lc_messages.append(HumanMessage(content=f"[previous assistant reply] {content}"))
 
-    if not user_msg_seen:
-        # The API route should have upserted this row before spawning us. If
-        # it's missing, something upstream is broken — log loudly.
+    # Append the current turn's user message from the function argument.
+    # This is what makes us immune to the read-your-writes race: even if
+    # the SELECT above ran against a replica that had not yet observed
+    # the route's upsert, we still hand the LLM a non-empty conversation
+    # with the user's actual message as the final turn.
+    current_text = (user_message_text or "").strip()
+    if current_text:
+        lc_messages.append(HumanMessage(content=current_text))
+    else:
+        # Defensive: if somehow the API route spawned us with an empty
+        # text (shouldn't happen — the route rejects empty bodies), log
+        # so we can spot it instead of silently handing Claude an empty
+        # list (which would 400 with "at least one message is required").
         chat_log(
-            "warn",
-            "chat_user_message_row_missing",
+            "error",
+            "chat_user_message_text_empty",
             project_id=project_id,
             session_id=session_id,
             turn_id=turn_id,

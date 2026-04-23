@@ -144,6 +144,7 @@ async def process_chat_turn(
     session_id: str,
     project_id: str,
     user_message_client_id: str,
+    user_message_text: str,
 ) -> None:
     """Run one full chat turn: research (if needed) -> agent -> tools -> persist.
 
@@ -151,6 +152,16 @@ async def process_chat_turn(
     returns 202 immediately. All user-visible side effects land in Supabase
     and surface on the client via Supabase Realtime; this function never
     communicates directly with the browser.
+
+    The current turn's `user_message_text` is passed as a function argument
+    rather than re-read from `chat_messages`. The Next.js route already has
+    the text in hand (it just wrote it to the DB); shipping it over as an
+    argument removes an entire class of read-your-writes bugs where the
+    Python replica hadn't yet seen the row the route just committed.
+    `user_message_client_id` is still passed through for idempotency +
+    trace correlation and for the historical-messages load (we skip a row
+    in history if it matches this id, so we don't include the current
+    turn twice when the DB row IS visible).
     """
     import time
     import traceback
@@ -164,12 +175,18 @@ async def process_chat_turn(
         project_id=project_id,
         session_id=session_id,
         user_message_client_id=user_message_client_id,
+        user_message_text_len=len(user_message_text or ""),
         modal_function="process_chat_turn",
     )
     try:
         from runner.chat.turn import run_chat_turn
 
-        await run_chat_turn(session_id, project_id, user_message_client_id)
+        await run_chat_turn(
+            session_id,
+            project_id,
+            user_message_client_id,
+            user_message_text,
+        )
         chat_log(
             "info",
             "process_chat_turn_ok",
