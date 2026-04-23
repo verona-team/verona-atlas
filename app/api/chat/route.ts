@@ -31,15 +31,7 @@ import { triggerChatTurn } from '@/lib/modal'
  *     - 202: spawn succeeded (or was a legitimate duplicate we short-circuited).
  *     - 400 GITHUB_SETUP_REQUIRED: unchanged behavior; client opens settings.
  *     - 401/404/500: standard.
- *
- * Feature flag: USE_MODAL_CHAT. When unset or "0"/"false", we still land
- * here but return a friendly error — the legacy path has been deleted
- * along with the Vercel AI SDK dependencies. We keep the env check so
- * ops can see a clear failure mode if someone mis-sets the flag; once
- * we're confident post-rollout, the flag can be removed entirely.
  */
-const MODAL_CHAT_ENABLED =
-  process.env.USE_MODAL_CHAT === '1' || process.env.USE_MODAL_CHAT === 'true'
 
 // Spawn + DB round-trips typically complete in well under 5s.
 export const maxDuration = 30
@@ -71,16 +63,6 @@ function extractMessageText(msg: IncomingMessage): string {
 const ACTIVE_CALL_MAX_AGE_MS = 60 * 60 * 1000
 
 export async function POST(request: NextRequest) {
-  if (!MODAL_CHAT_ENABLED) {
-    return NextResponse.json(
-      {
-        error:
-          'Chat is being migrated. Please re-enable USE_MODAL_CHAT on the server.',
-      },
-      { status: 503 },
-    )
-  }
-
   const supabase = await createClient()
   const user = await getServerUser(supabase)
   if (!user) {

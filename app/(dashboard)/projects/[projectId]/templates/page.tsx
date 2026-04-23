@@ -20,8 +20,7 @@ import { Loader2, ArrowUp, ArrowDown, X as XIcon, Plus } from 'lucide-react'
 type StepType = 'navigate' | 'action' | 'assertion' | 'extract' | 'wait'
 
 interface TemplateStep { order: number; instruction: string; type: StepType; url?: string; expected?: string; timeout?: number }
-interface Template { id: string; project_id: string; name: string; description: string | null; steps: TemplateStep[]; source: 'manual' | 'ai_generated'; is_active: boolean; created_at: string; updated_at: string }
-interface GeneratedTemplate { name: string; description: string; steps: TemplateStep[] }
+interface Template { id: string; project_id: string; name: string; description: string | null; steps: TemplateStep[]; source: 'manual' | 'ai_generated' | 'chat_generated'; is_active: boolean; created_at: string; updated_at: string }
 
 const STEP_TYPES: StepType[] = ['navigate', 'action', 'assertion', 'extract', 'wait']
 function emptyStep(order: number): TemplateStep { return { order, instruction: '', type: 'action' } }
@@ -38,11 +37,6 @@ export default function TemplatesPage() {
   const [formDescription, setFormDescription] = useState('')
   const [formSteps, setFormSteps] = useState<TemplateStep[]>([emptyStep(1)])
   const [saving, setSaving] = useState(false)
-  const [generating, setGenerating] = useState(false)
-  const [reviewDialogOpen, setReviewDialogOpen] = useState(false)
-  const [generatedTemplates, setGeneratedTemplates] = useState<GeneratedTemplate[]>([])
-  const [acceptedIndices, setAcceptedIndices] = useState<Set<number>>(new Set())
-  const [savingGenerated, setSavingGenerated] = useState(false)
 
   const fetchTemplates = useCallback(async () => {
     try { const res = await fetch(`/api/templates?projectId=${projectId}`); if (res.ok) setTemplates(await res.json()) } finally { setLoading(false) }
@@ -73,35 +67,22 @@ export default function TemplatesPage() {
   function removeStep(i: number) { setFormSteps(p => p.filter((_, j) => j !== i)) }
   function moveStep(i: number, dir: 'up' | 'down') { setFormSteps(p => { const n = [...p]; const s = dir === 'up' ? i - 1 : i + 1; if (s < 0 || s >= n.length) return p; [n[i], n[s]] = [n[s], n[i]]; return n }) }
 
-  async function handleGenerate() {
-    setGenerating(true)
-    try { const res = await fetch('/api/templates/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId }) }); if (res.ok) { setGeneratedTemplates(await res.json()); setAcceptedIndices(new Set()); setReviewDialogOpen(true) } } finally { setGenerating(false) }
-  }
-
-  function toggleAccepted(i: number) { setAcceptedIndices(p => { const n = new Set(p); n.has(i) ? n.delete(i) : n.add(i); return n }) }
-
-  async function handleSaveGenerated() {
-    setSavingGenerated(true)
-    try { await Promise.all(generatedTemplates.filter((_, i) => acceptedIndices.has(i)).map(t => fetch('/api/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: projectId, name: t.name, description: t.description, steps: t.steps, source: 'ai_generated' }) }))); setReviewDialogOpen(false); fetchTemplates() } finally { setSavingGenerated(false) }
-  }
-
   if (loading) return <p className="text-sm text-muted-foreground py-12 max-w-4xl mx-auto">Loading...</p>
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-medium">Templates</h1>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handleGenerate} disabled={generating}>
-            {generating ? <Loader2 className="size-3.5 animate-spin" /> : null}
-            AI Generate
-          </Button>
-          <Button size="sm" onClick={openCreateDialog}>
-            <Plus className="size-3.5" />
-            Create
-          </Button>
-        </div>
+        <Button size="sm" onClick={openCreateDialog}>
+          <Plus className="size-3.5" />
+          Create
+        </Button>
       </div>
+
+      <p className="text-sm text-muted-foreground">
+        Chat with Verona to auto-generate templates from approved flows, or
+        create one manually below.
+      </p>
 
       {templates.length === 0 ? (
         <p className="text-sm text-muted-foreground py-8">No templates yet.</p>
@@ -114,7 +95,9 @@ export default function TemplatesPage() {
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium">{t.name}</span>
-                      {t.source === 'ai_generated' && <Badge variant="secondary">AI</Badge>}
+                      {(t.source === 'ai_generated' || t.source === 'chat_generated') && (
+                        <Badge variant="secondary">AI</Badge>
+                      )}
                     </div>
                     {t.description && <p className="text-sm text-muted-foreground mt-1">{t.description}</p>}
                   </div>
@@ -141,7 +124,6 @@ export default function TemplatesPage() {
         </div>
       )}
 
-      {/* Create/Edit dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
@@ -192,48 +174,6 @@ export default function TemplatesPage() {
             <Button variant="outline" onClick={() => setEditDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving || !formName.trim() || formSteps.length === 0}>
               {saving && <Loader2 className="mr-1 size-4 animate-spin" />}{editingTemplate ? 'Update' : 'Create'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* AI Review dialog */}
-      <Dialog open={reviewDialogOpen} onOpenChange={setReviewDialogOpen}>
-        <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Review AI Templates</DialogTitle>
-            <DialogDescription>Click to select, then save.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            {generatedTemplates.map((gt, idx) => (
-              <Card
-                key={idx}
-                size="sm"
-                className={`ring-0 border cursor-pointer transition-all ${acceptedIndices.has(idx) ? 'border-primary' : 'border-border opacity-60'}`}
-                onClick={() => toggleAccepted(idx)}
-              >
-                <CardContent>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm">{acceptedIndices.has(idx) ? '☑' : '☐'}</span>
-                    <span className="text-sm font-medium">{gt.name}</span>
-                  </div>
-                  <p className="text-sm text-muted-foreground mt-1">{gt.description}</p>
-                  <div className="mt-2 space-y-1">
-                    {gt.steps.map((s, si) => (
-                      <div key={si} className="text-sm flex gap-3">
-                        <Badge variant="outline" className="text-[10px]">{s.type}</Badge>
-                        <span className="text-muted-foreground">{s.instruction}</span>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setReviewDialogOpen(false)}>Dismiss</Button>
-            <Button onClick={handleSaveGenerated} disabled={savingGenerated || acceptedIndices.size === 0}>
-              {savingGenerated && <Loader2 className="mr-1 size-4 animate-spin" />}Save {acceptedIndices.size}
             </Button>
           </DialogFooter>
         </DialogContent>
