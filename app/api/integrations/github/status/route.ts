@@ -5,31 +5,32 @@ import { App } from '@octokit/app'
 import { Octokit } from '@octokit/rest'
 import type { Json } from '@/lib/supabase/types'
 
-type InstallationSummary = {
-  id: number
-  updatedAtMs: number
-}
-
 /**
  * Polls for a GitHub App installation that can be linked to this project.
  *
- * Background: our GitHub App's install flow redirects back to
- * `/api/integrations/github/callback` only when GitHub actually fires the
- * post-install setup callback. That callback never fires when the user
- * reuses an existing installation (e.g. they already installed the app on
- * the same account for a previous project, and GitHub drops them on the
- * "Configure" screen instead of the install screen). This endpoint bridges
- * that gap.
+ * Two resolution paths exist:
  *
- * Resolution order when the current project has no GitHub integration yet:
- *   1. If there is an App installation that is NOT linked to any project,
- *      adopt it for the current project (first-time install path).
- *   2. Otherwise, if any of the user's own orgs already has an integration
- *      pointing at one of the App's installations, reuse the most recently
- *      updated such installation for the current project (repeat-install
- *      path — the previous bug).
- *   3. Otherwise, the user genuinely hasn't authorized an installation yet;
- *      return `connected: false` and let the UI keep waiting.
+ * 1. First-time install. The user has never installed the Verona GitHub App
+ *    on this account before. The install popup walks them through creating
+ *    a brand-new installation and GitHub fires the post-install setup
+ *    callback at `/api/integrations/github/callback`, which writes the
+ *    integration row authoritatively. This endpoint plays no role in that
+ *    path — we simply observe the row once it exists and return
+ *    `connected: true` on the next poll tick.
+ *
+ * 2. Repeat install. The user already installed the app on the same GitHub
+ *    account for a previous project. GitHub will not fire the callback for
+ *    a re-use — it just shows the "Configure" screen. This endpoint
+ *    bridges that gap by reusing the existing installation the user's own
+ *    orgs have already linked.
+ *
+ * The endpoint deliberately does NOT claim a GitHub installation that the
+ * user's orgs have not previously linked. Doing so would be a cross-tenant
+ * leak in a multi-customer deployment, because `GET /app/installations` is
+ * authenticated as the GitHub App itself and returns every customer's
+ * installation. The only safe signal that an installation belongs to the
+ * current caller is "it already appears in an integrations row inside one
+ * of their own orgs" — which is enforced by RLS on the integrations table.
  */
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -73,42 +74,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ connected: true })
   }
 
-  let installations: InstallationSummary[]
-  try {
-    const app = new App({
-      appId: process.env.GITHUB_APP_ID!,
-      privateKey: Buffer.from(process.env.GITHUB_APP_PRIVATE_KEY!, 'base64').toString('utf8'),
-      Octokit,
-    })
-    const { data } = await app.octokit.request('GET /app/installations', {
-      per_page: 100,
-    })
-    installations = data.map((i) => ({
-      id: i.id,
-      updatedAtMs: i.updated_at ? Date.parse(i.updated_at) : 0,
-    }))
-  } catch (e) {
-    console.error('Failed to list GitHub App installations:', e)
-    return NextResponse.json({ connected: false })
-  }
-
-  if (installations.length === 0) {
-    return NextResponse.json({ connected: false })
-  }
-
-  // All active GitHub integrations we can see. RLS limits this to rows that
-  // live under orgs the user is a member of — exactly what we want for the
-  // "reuse an installation I've already set up" fallback. We do NOT want to
-  // include integrations from other orgs here (even though the install may
-  // technically belong to the same GitHub account) because claiming an
-  // installation owned by a different customer would be a cross-tenant leak.
+  // RLS-scoped: only installations already linked to integrations inside the
+  // caller's own orgs. This is the only pool we'll ever claim from — see
+  // the docstring for why.
   const { data: userOrgIntegrations } = await supabase
     .from('integrations')
     .select('config, updated_at')
     .eq('type', 'github')
     .eq('status', 'active')
 
-  const userOrgInstallationHits = new Map<number, number>()
+  const userOrgInstallations = new Map<number, number>()
   for (const row of userOrgIntegrations ?? []) {
     const config = row.config as Record<string, Json> | null
     const rawId = config?.installation_id
@@ -120,39 +95,43 @@ export async function GET(request: NextRequest) {
           : NaN
     if (!Number.isFinite(installationId)) continue
     const ts = row.updated_at ? Date.parse(row.updated_at) : 0
-    const prev = userOrgInstallationHits.get(installationId) ?? -1
-    if (ts > prev) userOrgInstallationHits.set(installationId, ts)
+    const prev = userOrgInstallations.get(installationId) ?? -1
+    if (ts > prev) userOrgInstallations.set(installationId, ts)
   }
 
-  // Step 1: is there any installation that isn't linked to ANY project visible
-  // to this user? That's the classic "user just installed it for this project"
-  // signal.
-  const unlinked = installations.filter(
-    (inst) => !userOrgInstallationHits.has(inst.id),
-  )
+  if (userOrgInstallations.size === 0) {
+    // The caller has no reusable installation on file. First-time connect
+    // must be resolved by the OAuth setup callback — not us.
+    return NextResponse.json({ connected: false })
+  }
+
+  // Intersect with GitHub's authoritative list so we never return an
+  // installation that GitHub no longer knows about (e.g. user uninstalled
+  // the app on GitHub's side but we still have a stale row).
+  let liveInstallationIds: Set<number>
+  try {
+    const app = new App({
+      appId: process.env.GITHUB_APP_ID!,
+      privateKey: Buffer.from(process.env.GITHUB_APP_PRIVATE_KEY!, 'base64').toString('utf8'),
+      Octokit,
+    })
+    const { data } = await app.octokit.request('GET /app/installations', {
+      per_page: 100,
+    })
+    liveInstallationIds = new Set(data.map((i) => i.id))
+  } catch (e) {
+    console.error('Failed to list GitHub App installations:', e)
+    return NextResponse.json({ connected: false })
+  }
 
   let chosenInstallationId: number | null = null
-
-  if (unlinked.length > 0) {
-    // Most recently touched install is the one the user just interacted with.
-    chosenInstallationId = unlinked.reduce((best, inst) =>
-      inst.updatedAtMs > best.updatedAtMs ? inst : best,
-    ).id
-  } else {
-    // Step 2: reuse an installation the user has already linked to one of
-    // their own projects. This is the missing branch that caused the
-    // repeat-connect infinite-loop bug.
-    let bestId: number | null = null
-    let bestTs = -1
-    for (const inst of installations) {
-      const ts = userOrgInstallationHits.get(inst.id)
-      if (ts === undefined) continue
-      if (ts > bestTs) {
-        bestTs = ts
-        bestId = inst.id
-      }
+  let bestTs = -1
+  for (const [installationId, ts] of userOrgInstallations) {
+    if (!liveInstallationIds.has(installationId)) continue
+    if (ts > bestTs) {
+      bestTs = ts
+      chosenInstallationId = installationId
     }
-    chosenInstallationId = bestId
   }
 
   if (chosenInstallationId === null) {
