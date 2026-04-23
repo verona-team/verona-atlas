@@ -176,6 +176,14 @@ export function ChatInterface({
         })
 
         if (res.status === 202) {
+          // The server wrote `status='thinking'` on `chat_sessions` just before
+          // spawning the Modal worker. Flip the spinner on locally so the UI
+          // doesn't rely on Realtime to deliver that UPDATE — the WS channel
+          // may still be joining on first mount, and Realtime does not replay
+          // events that occurred before SUBSCRIBED. Realtime is still the
+          // authoritative source for flipping back to `idle` when the turn
+          // completes; by then the channel has long since joined.
+          setBackendThinking(true)
           return { ok: true }
         }
 
@@ -353,8 +361,33 @@ export function ChatInterface({
   }, [sessionId])
 
   // Session status Realtime — drives the `thinking` indicator.
+  //
+  // Realtime does NOT replay events that occurred before the channel reached
+  // SUBSCRIBED. Between page mount and WS handshake completion there is a
+  // window (typically a few hundred ms, longer on cold connections) where any
+  // UPDATE to `chat_sessions` is silently dropped. To stay consistent across
+  // that window we:
+  //   1. Listen to live UPDATEs as before.
+  //   2. On SUBSCRIBED, do a one-shot catch-up read of the row to pick up
+  //      anything that changed between SSR and channel-join — covers refresh
+  //      mid-turn, a turn that finished very quickly, WS reconnects, and
+  //      another tab flipping the session.
   useEffect(() => {
     const supabase = createClient()
+    let cancelled = false
+
+    const refetchStatus = async () => {
+      const { data } = await supabase
+        .from('chat_sessions')
+        .select('status, status_updated_at')
+        .eq('id', sessionId)
+        .maybeSingle()
+      if (cancelled || !data) return
+      setBackendThinking(
+        computeSessionThinking(data.status ?? 'idle', data.status_updated_at ?? null),
+      )
+    }
+
     const channel = supabase
       .channel(`session-status-${sessionId}`)
       .on(
@@ -374,9 +407,14 @@ export function ChatInterface({
           }
         },
       )
-      .subscribe()
+      .subscribe((state) => {
+        if (state === 'SUBSCRIBED') {
+          void refetchStatus()
+        }
+      })
 
     return () => {
+      cancelled = true
       supabase.removeChannel(channel)
     }
   }, [sessionId, computeSessionThinking])
