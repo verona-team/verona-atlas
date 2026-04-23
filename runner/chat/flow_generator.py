@@ -21,6 +21,7 @@ are load-bearing. Do not reorganize without a matching client change.
 """
 from __future__ import annotations
 
+import time
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -154,12 +155,34 @@ Do not include any emoji characters in the analysis, flow names, descriptions, r
 
     model = get_sonnet(max_tokens=4096, temperature=0.2)
     structured = model.with_structured_output(FlowProposals, method="json_schema")
+    chat_log(
+        "info",
+        "flow_generator_llm_begin",
+        finding_count=len(findings),
+        recommended_count=len(recommended),
+        integrations_covered=integrations_covered,
+        integrations_skipped=integrations_skipped,
+    )
+    t0 = time.time()
     try:
         output = await structured.ainvoke(prompt)
     except Exception as e:
-        chat_log("error", "flow_generator_llm_failed", err=repr(e))
+        chat_log(
+            "error",
+            "flow_generator_llm_failed",
+            elapsed_s=round(time.time() - t0, 3),
+            err=repr(e),
+        )
         raise
 
+    chat_log(
+        "info",
+        "flow_generator_llm_ok",
+        elapsed_s=round(time.time() - t0, 3),
+        flow_count=len(output.flows),
+        flow_names=[f.name for f in output.flows],
+        flow_priorities=[f.priority for f in output.flows],
+    )
     return output
 
 

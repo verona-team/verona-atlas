@@ -16,6 +16,13 @@ Two concerns live here:
 They share a secret ("atlas-secrets") but intentionally use separate images
 so the chat path doesn't pay for the Playwright / browser toolchain cold
 start, and vice versa.
+
+## Logging
+
+Every Modal entry point emits a single JSON-per-line log stream via
+`runner.logging`. The entry points themselves use bound loggers with
+`test_run_id` / `session_id` / `project_id` / `turn_id` context so
+every downstream line can be filtered to a single invocation.
 """
 import modal
 
@@ -47,31 +54,46 @@ runner_image = (
     timeout=86400,  # 24h hard ceiling; actual deadline is enforced dynamically inside the pipeline
 )
 async def execute_test_run(test_run_id: str, project_id: str):
-    """Main entry point triggered from Next.js via Modal TypeScript SDK."""
+    """Main entry point triggered from Next.js via Modal TypeScript SDK.
+
+    We bind `test_run_id` + `project_id` to the logger once here so every
+    downstream log line in the pipeline inherits them — this is what
+    makes it possible to filter a full run to one coherent log stream.
+    """
     import time
-    import traceback
+
+    from runner.logging import bind
+
+    log = bind(
+        "modal_test_runner",
+        test_run_id=test_run_id,
+        project_id=project_id,
+    )
 
     t0 = time.time()
-    print("=" * 72)
-    print(f"[MODAL] execute_test_run invoked")
-    print(f"[MODAL]   test_run_id = {test_run_id}")
-    print(f"[MODAL]   project_id  = {project_id}")
-    print("=" * 72)
+    log.info(
+        "execute_test_run_invoked",
+        modal_function="execute_test_run",
+    )
 
     try:
         from runner.execute import run_test_pipeline
+
         await run_test_pipeline(test_run_id, project_id)
-        elapsed = time.time() - t0
-        print("=" * 72)
-        print(f"[MODAL] execute_test_run completed successfully in {elapsed:.1f}s")
-        print("=" * 72)
+        log.info(
+            "execute_test_run_ok",
+            elapsed_s=round(time.time() - t0, 3),
+        )
     except Exception as e:
-        elapsed = time.time() - t0
-        print("=" * 72)
-        print(f"[MODAL] execute_test_run FAILED after {elapsed:.1f}s")
-        print(f"[MODAL]   error: {type(e).__name__}: {e}")
-        print(f"[MODAL]   traceback:\n{traceback.format_exc()}")
-        print("=" * 72)
+        import traceback as _tb
+
+        log.error(
+            "execute_test_run_failed",
+            elapsed_s=round(time.time() - t0, 3),
+            err_type=type(e).__name__,
+            err=str(e),
+            traceback=_tb.format_exc(),
+        )
         raise
 
 
@@ -133,26 +155,39 @@ async def process_chat_turn(
     import time
     import traceback
 
+    from runner.logging import chat_log
+
     t0 = time.time()
-    print(
-        f"[MODAL_CHAT] process_chat_turn invoked "
-        f"session={session_id} project={project_id} "
-        f"client_msg_id={user_message_client_id}"
+    chat_log(
+        "info",
+        "process_chat_turn_invoked",
+        project_id=project_id,
+        session_id=session_id,
+        user_message_client_id=user_message_client_id,
+        modal_function="process_chat_turn",
     )
     try:
         from runner.chat.turn import run_chat_turn
 
         await run_chat_turn(session_id, project_id, user_message_client_id)
-        print(
-            f"[MODAL_CHAT] process_chat_turn OK in {time.time() - t0:.1f}s "
-            f"session={session_id}"
+        chat_log(
+            "info",
+            "process_chat_turn_ok",
+            project_id=project_id,
+            session_id=session_id,
+            elapsed_s=round(time.time() - t0, 3),
         )
     except Exception as e:
-        print(
-            f"[MODAL_CHAT] process_chat_turn FAILED in {time.time() - t0:.1f}s "
-            f"session={session_id} err={type(e).__name__}: {e}"
+        chat_log(
+            "error",
+            "process_chat_turn_failed",
+            project_id=project_id,
+            session_id=session_id,
+            elapsed_s=round(time.time() - t0, 3),
+            err_type=type(e).__name__,
+            err=str(e),
+            traceback=traceback.format_exc(),
         )
-        print(traceback.format_exc())
         raise
 
 
@@ -173,20 +208,33 @@ async def process_nightly_job(project_id: str) -> None:
     import time
     import traceback
 
+    from runner.logging import chat_log
+
     t0 = time.time()
-    print(f"[MODAL_CHAT] process_nightly_job invoked project={project_id}")
+    chat_log(
+        "info",
+        "process_nightly_job_invoked",
+        project_id=project_id,
+        modal_function="process_nightly_job",
+    )
     try:
         from runner.chat.nightly import run_nightly_job
 
         await run_nightly_job(project_id)
-        print(
-            f"[MODAL_CHAT] process_nightly_job OK in {time.time() - t0:.1f}s "
-            f"project={project_id}"
+        chat_log(
+            "info",
+            "process_nightly_job_ok",
+            project_id=project_id,
+            elapsed_s=round(time.time() - t0, 3),
         )
     except Exception as e:
-        print(
-            f"[MODAL_CHAT] process_nightly_job FAILED in {time.time() - t0:.1f}s "
-            f"project={project_id} err={type(e).__name__}: {e}"
+        chat_log(
+            "error",
+            "process_nightly_job_failed",
+            project_id=project_id,
+            elapsed_s=round(time.time() - t0, 3),
+            err_type=type(e).__name__,
+            err=str(e),
+            traceback=traceback.format_exc(),
         )
-        print(traceback.format_exc())
         raise
