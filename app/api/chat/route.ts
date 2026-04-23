@@ -213,7 +213,18 @@ export async function POST(request: NextRequest) {
     // -------- Persist the user message row --------
     // Unique constraint on (session_id, client_message_id) makes this a
     // no-op if the client hard-refreshed and re-fired with the same id.
-    // The Python worker relies on finding this row at startup.
+    //
+    // The Python worker does NOT depend on finding this row at startup
+    // anymore (we pass the text through the spawn args, see triggerChatTurn),
+    // but we still must write it here for two reasons: (a) so Realtime
+    // delivers the bubble to every tab viewing this session, and (b) so
+    // the row is durable for history-load on future turns.
+    //
+    // If the upsert fails we MUST NOT spawn Modal — a turn with no
+    // persisted user message would produce a ghost assistant reply that
+    // clients can't attribute. Log loudly AND surface a 500 so the
+    // caller sees the failure and can retry, rather than silently
+    // swallowing it the way the old code did.
     const { error: userMsgErr } = await service
       .from('chat_messages')
       .upsert(
@@ -229,12 +240,25 @@ export async function POST(request: NextRequest) {
         },
       )
     if (userMsgErr) {
-      chatServerLog('warn', 'chat_user_message_persist_failed', {
+      chatServerLog('error', 'chat_user_message_persist_failed', {
         err: userMsgErr,
+        supabaseCode: userMsgErr.code,
+        supabaseMessage: userMsgErr.message,
+        supabaseDetails: userMsgErr.details,
         projectId,
         sessionId: session.id,
         userId: user.id,
+        clientMessageId: message.id,
       })
+      // Status wasn't flipped to 'thinking' yet (that happens below),
+      // so the UI won't be stuck; just return the failure.
+      return NextResponse.json(
+        {
+          error: 'Failed to save your message. Please try again.',
+          code: 'MESSAGE_PERSIST_FAILED',
+        },
+        { status: 500 },
+      )
     }
 
     // -------- Mark session thinking + clear any stale call id --------
@@ -256,7 +280,12 @@ export async function POST(request: NextRequest) {
 
     let functionCallId: string
     try {
-      functionCallId = await triggerChatTurn(session.id, projectId, message.id)
+      functionCallId = await triggerChatTurn(
+        session.id,
+        projectId,
+        message.id,
+        text,
+      )
     } catch (spawnErr) {
       chatServerLog('error', 'chat_modal_spawn_failed', {
         err: spawnErr,
