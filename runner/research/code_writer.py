@@ -227,7 +227,7 @@ async def write_research_code(
         ),
     )
 
-    model = get_gemini_pro(max_tokens=4096)
+    model = get_gemini_pro()
     structured = model.with_structured_output(CodeWriterOutput, method="json_schema")
 
     user_message = _build_user_message(

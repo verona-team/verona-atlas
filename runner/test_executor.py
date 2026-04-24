@@ -584,9 +584,12 @@ async def execute_template(
     )
 
     # Build the outer ReAct model once; tools are bound with LangChain's
-    # provider-agnostic `bind_tools`. max_tokens is large enough for
-    # Gemini 3 Pro's reasoning turns that interleave thought + tool use.
-    outer_model = get_gemini_pro(max_tokens=21000).bind_tools(_LANGCHAIN_TOOLS)
+    # provider-agnostic `bind_tools`. Defaults (66k output tokens, 5-minute
+    # timeout) give the reasoning loop full headroom — a single turn can
+    # spend a substantial chunk on thinking blocks before emitting the
+    # tool_use block, and clipping that caused silent truncation on the
+    # old Anthropic path.
+    outer_model = get_gemini_pro().bind_tools(_LANGCHAIN_TOOLS)
 
     test_start_time = datetime.now(timezone.utc)
 

@@ -122,7 +122,12 @@ Provide a concise summary including:
 5. Severity assessment for each issue
 Keep it under 500 words."""
 
-        model = get_gemini_flash(max_tokens=1024)
+        # No max_tokens override: the prompt asks for "under 500 words" but
+        # Gemini 3 Flash burns output tokens on reasoning BEFORE emitting
+        # the visible summary, and a tight cap silently truncated the
+        # Slack AI-analysis block. Prompt enforces length; the helper
+        # default (66k, the model's ceiling) is the safe token cap.
+        model = get_gemini_flash()
         response = await model.ainvoke(prompt)
 
         # Gemini 3 returns list content blocks (one per thought-signed text

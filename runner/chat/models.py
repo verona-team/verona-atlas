@@ -59,9 +59,9 @@ CLAUDE_OPUS_MODEL = "claude-opus-4-7"
 
 def get_gemini_pro(
     *,
-    max_tokens: int | None = 8192,
+    max_tokens: int | None = 66_000,
     temperature: float | None = None,
-    timeout: float | None = 180.0,
+    timeout: float | None = 300.0,
     max_retries: int = 2,
 ) -> "ChatGoogleGenerativeAI":
     """Gemini 3.1 Pro — the main reasoning model.
@@ -70,8 +70,19 @@ def get_gemini_pro(
     writer, codebase explorer, flow-proposal generator, and the outer QA
     test-executor ReAct loop.
 
-    Timeout is generous because tool-calling turns can include a chain of
-    thinking + tool-use blocks on Gemini 3 Pro (reasoning model).
+    Defaults are set to the model's full envelope rather than a
+    conservative fraction of it:
+
+    - `max_tokens=66_000` matches Gemini 3.1 Pro's maximum output token
+      ceiling. Reasoning models burn output tokens on thinking blocks
+      BEFORE they emit the final answer, so a cap below the model's
+      ceiling silently truncates structured output when a turn reasons
+      hard (e.g. codebase agent reading 6 files + drafting a finish
+      payload). Better to let the model self-terminate than to clip it.
+    - `timeout=300.0` (5 minutes) gives reasoning + tool-use turns room
+      to breathe. A chat orchestrator turn that fires
+      `generate_flow_proposals` can internally take a minute or two
+      end-to-end on a cold research cache.
     """
     from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -90,9 +101,9 @@ def get_gemini_pro(
 
 def get_gemini_flash(
     *,
-    max_tokens: int | None = 4096,
+    max_tokens: int | None = 66_000,
     temperature: float | None = None,
-    timeout: float | None = 120.0,
+    timeout: float | None = 180.0,
     max_retries: int = 2,
 ) -> "ChatGoogleGenerativeAI":
     """Gemini 3 Flash — the cheap/fast summarization model.
@@ -100,6 +111,15 @@ def get_gemini_flash(
     Used for rolling conversation-context compaction and the post-test-run
     Slack executive summary. These are short, well-scoped tasks where we
     want throughput and cost, not peak reasoning.
+
+    `max_tokens=66_000` matches Gemini 3 Flash's maximum output ceiling.
+    Summaries are almost always far shorter than this, but the ceiling is
+    the safe default — specific call sites that want to hard-cap output
+    for UI/prose-length reasons should still pass their own `max_tokens`.
+
+    `timeout=180.0` (3 minutes) is plenty for the summarization workloads
+    Flash handles; it isn't a reasoning model so it doesn't need the
+    Pro/Opus 5-minute budget.
     """
     from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -118,9 +138,9 @@ def get_gemini_flash(
 
 def get_claude_opus(
     *,
-    max_tokens: int = 8192,
+    max_tokens: int = 128_000,
     temperature: float = 0.2,
-    timeout: float = 180.0,
+    timeout: float = 300.0,
     max_retries: int = 2,
 ) -> "ChatAnthropic":
     """Claude Opus 4.7 — reserved for the Stagehand browser agent path.
@@ -130,6 +150,12 @@ def get_claude_opus(
     to the Anthropic API. This helper exists so any future non-Stagehand
     LangChain path that needs Opus can get a configured `ChatAnthropic`
     without re-pinning the model id.
+
+    `max_tokens=128_000` matches Opus 4.7's maximum output ceiling;
+    `timeout=300.0` (5 minutes) matches the Gemini Pro reasoning budget.
+    Both are the safe defaults for any non-Stagehand Opus call we might
+    add later — override downward on specific call sites if you need
+    shorter outputs for UI/token-budget reasons.
     """
     from langchain_anthropic import ChatAnthropic
 

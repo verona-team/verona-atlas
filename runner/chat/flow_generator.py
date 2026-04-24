@@ -266,7 +266,7 @@ Skipped: {', '.join(integrations_skipped) or 'none'}
 
 Do not include any emoji characters in the analysis, flow names, descriptions, rationales, or steps. Use plain text only."""
 
-    model = get_gemini_pro(max_tokens=4096)
+    model = get_gemini_pro()
     structured = model.with_structured_output(FlowProposals, method="json_schema")
     chat_log(
         "info",

@@ -365,7 +365,7 @@ async def run_codebase_exploration_agent(
         ]
         tools_by_name = {t.name: t for t in tools}
 
-        model = get_gemini_pro(max_tokens=4096).bind_tools(tools)
+        model = get_gemini_pro().bind_tools(tools)
 
         messages: list = [
             SystemMessage(content=_build_system_prompt(repo_full_name)),

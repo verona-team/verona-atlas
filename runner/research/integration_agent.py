@@ -640,7 +640,7 @@ async def _run_research_loop(
         )
 
     try:
-        model = get_gemini_pro(max_tokens=4096).bind_tools([execute_code])
+        model = get_gemini_pro().bind_tools([execute_code])
 
         # Build the initial user message: every integration's preflight
         # result as fenced JSON blocks.
@@ -807,7 +807,7 @@ Skipped (no data or errors):
 
 {notes_block}"""
 
-    model = get_gemini_pro(max_tokens=4096)
+    model = get_gemini_pro()
     structured = model.with_structured_output(_AgentReport, method="json_schema")
     try:
         agent_report: _AgentReport = await structured.ainvoke(

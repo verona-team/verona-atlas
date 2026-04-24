@@ -126,7 +126,13 @@ async def maybe_summarize_older_messages(sb: Client, session_id: str) -> None:
 {conversation_text}"""
 
     try:
-        model = get_gemini_flash(max_tokens=2048)
+        # No max_tokens override: the prompt asks for "under 1000 words" but
+        # Gemini 3 Flash burns output tokens on reasoning BEFORE emitting the
+        # final summary, so a tight cap silently clips the visible summary.
+        # The helper default (66k, the model's ceiling) lets the model
+        # self-terminate on the natural stop token — the prompt is what
+        # enforces length, not the token cap.
+        model = get_gemini_flash()
         response = await model.ainvoke(prompt)
         new_summary = (response.content or "").strip() if isinstance(response.content, str) else ""
         # Gemini 3 returns list content blocks (one per thought-signed text
