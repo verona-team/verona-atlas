@@ -8,3 +8,8 @@ pyjwt
 cryptography
 browserbase
 playwright
+langchain>=1.0.0,<2.0.0
+langchain-core>=1.0.0,<2.0.0
+langchain-google-genai>=3.1.0,<4.0.0
+langchain-anthropic>=1.1.0,<2.0.0
+google-genai>=1.0.0,<2.0.0

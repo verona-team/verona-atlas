@@ -1,4 +1,4 @@
-"""Tool schemas exposed to the Opus orchestrator.
+"""Tool schemas exposed to the chat orchestrator.
 
 These are **schema only** — the function bodies here are never executed
 against a real tool invocation; we route each tool call to its matching

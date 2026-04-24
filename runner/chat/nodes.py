@@ -56,7 +56,7 @@ from .flow_generator import (
     serialize_flows_for_message,
 )
 from .logging import chat_log
-from .models import get_opus
+from .models import get_gemini_pro
 from .prompts import build_orchestrator_system_prompt
 from .state import ChatTurnState
 from .supabase_client import get_supabase, iso_now, set_session_status
@@ -70,11 +70,18 @@ from .context import maybe_summarize_older_messages
 def extract_ai_message_text(message: AIMessage) -> str:
     """Concatenate the text blocks from an AIMessage, ignoring tool_use blocks.
 
-    Claude's `AIMessage.content` is either a plain string (text-only turn) or
-    a list of content blocks interleaving text and tool_use. When the model
-    emits both — e.g. "Here's my analysis..." followed by a tool_use block
-    calling `generate_flow_proposals` — the text blocks appear in the order
-    the model wrote them; we concatenate those and drop everything else.
+    `AIMessage.content` can be either a plain string (rare, text-only turns
+    from older model families) or a list of content blocks interleaving
+    text and tool_use. Gemini 3 series models always return the list form
+    — one text block per thought-signed span — so after the Gemini
+    migration this helper almost exclusively takes the list branch. We
+    still handle the string case for forward/back compatibility with other
+    model providers.
+
+    When the model emits both — e.g. "Here's my analysis..." followed by a
+    tool_use block calling `generate_flow_proposals` — the text blocks
+    appear in the order the model wrote them; we concatenate those and
+    drop everything else.
 
     Empty / whitespace-only results return "" so callers can skip the DB
     write without an extra truthiness dance.
@@ -175,7 +182,7 @@ async def ensure_research(state: ChatTurnState) -> dict[str, Any]:
 
 
 async def agent_turn(state: ChatTurnState) -> dict[str, Any]:
-    """Call Opus with the tools bound. Append the AIMessage to state.messages."""
+    """Call Gemini 3.1 Pro with the tools bound. Append the AIMessage to state.messages."""
     system = build_orchestrator_system_prompt(
         project_name=state.get("project_name", ""),
         app_url=state.get("app_url", ""),
@@ -188,7 +195,7 @@ async def agent_turn(state: ChatTurnState) -> dict[str, Any]:
 
     messages = [SystemMessage(content=system), *state.get("messages", [])]
 
-    model = get_opus().bind_tools(ALL_TOOLS)
+    model = get_gemini_pro().bind_tools(ALL_TOOLS)
 
     chat_log(
         "info",
@@ -232,9 +239,9 @@ async def agent_turn(state: ChatTurnState) -> dict[str, Any]:
     )
 
     # Persist the opening assistant text NOW — before any downstream tool
-    # node writes a row of its own. Claude's AIMessage is structured as
-    # [text_block, tool_use_block] (the model narrates, then calls the
-    # tool), and the user-visible ordering should match.
+    # node writes a row of its own. The model's AIMessage is structured
+    # as [text_block, tool_use_block] (it narrates, then calls the tool),
+    # and the user-visible ordering should match.
     #
     # Without this early persist, the ordering in the DB was reversed on
     # every bootstrap turn:
@@ -870,7 +877,7 @@ async def finalize(state: ChatTurnState) -> dict[str, Any]:
     """Compact history (best-effort) and reset session status.
 
     Assistant text persistence is NOT this node's responsibility — it
-    happens inside `agent_turn`, immediately after Claude returns, so the
+    happens inside `agent_turn`, immediately after the LLM returns, so the
     text row's `created_at` naturally precedes any tool-generated row's.
 
     We deliberately do NOT write the text again here as a "fallback." A

@@ -19,7 +19,7 @@ Atlas is a multi-tenant SaaS platform that provides autonomous browser-based QA 
 | Browser Infra | Browserbase (cloud browser sessions) |
 | Browser Automation | Stagehand v3 (AI-native browser control) |
 | Email (2FA) | AgentMail (programmatic inboxes) |
-| LLM | Claude API (test planning + analysis) |
+| LLM | Google Gemini (chat orchestration, research, flow generation, outer QA loop) + Claude (Stagehand browser agent) |
 | Compute | Modal.com (Python serverless functions) |
 | Integrations | GitHub App, PostHog API, Slack OAuth |
 
@@ -45,7 +45,7 @@ Next.js 16 (Vercel)          Modal.com (Python)
 - Node.js 22+
 - Python 3.13+ (for Modal runner)
 - A Supabase project
-- API keys for: Modal, Browserbase, AgentMail, Anthropic (Claude)
+- API keys for: Modal, Browserbase, AgentMail, Google Gemini, Anthropic (Claude — only used by the Stagehand browser agent)
 - GitHub App (for repo integration)
 - Slack App (for reporting)
 
@@ -136,7 +136,8 @@ See `.env.example` for the full list. Key variables:
 | `ENCRYPTION_KEY` | 64-char hex for AES-256-GCM |
 | `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` | Modal compute credentials |
 | `AGENTMAIL_API_KEY` | AgentMail for 2FA handling |
-| `ANTHROPIC_API_KEY` | Claude API for AI features |
+| `GOOGLE_API_KEY` | Google Gemini API (chat orchestrator, research agents, flow generator, outer QA loop, post-run summaries) |
+| `ANTHROPIC_API_KEY` | Claude Opus 4.7 API — only used by the Stagehand inner browser agent |
 | `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` | GitHub App for repo access |
 | `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` | Slack for reporting |
 | `BROWSERBASE_API_KEY` / `BROWSERBASE_PROJECT_ID` | Cloud browsers |

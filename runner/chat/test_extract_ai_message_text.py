@@ -41,7 +41,7 @@ def test_plain_string_content() -> None:
 
 
 def test_text_blocks_only() -> None:
-    """A single text block wrapped in a list — common for claude with no tool calls."""
+    """A single text block wrapped in a list — common for text-only turns."""
     msg = AIMessage(content=[{"type": "text", "text": "Just text."}])
     assert extract_ai_message_text(msg) == "Just text."
     print(_green("  ok: single text block extracted"))
@@ -50,10 +50,11 @@ def test_text_blocks_only() -> None:
 def test_text_then_tool_use() -> None:
     """The reverse-ordering bug's exact shape: text precedes tool_use.
 
-    This is the content claude emits for a bootstrap turn — it narrates
-    ("Welcome — let me pull together the highest-priority test flows...")
-    and then calls generate_flow_proposals. The extractor must return the
-    text cleanly so agent_turn can persist it before the tool runs.
+    This is the content the orchestrator LLM emits on a bootstrap turn —
+    it narrates ("Welcome — let me pull together the highest-priority
+    test flows...") and then calls generate_flow_proposals. The extractor
+    must return the text cleanly so agent_turn can persist it before the
+    tool runs.
     """
     msg = AIMessage(
         content=[
@@ -79,7 +80,7 @@ def test_text_then_tool_use() -> None:
 def test_tool_use_only_no_text() -> None:
     """A pure tool call with no accompanying prose returns empty string.
 
-    The orchestrator prompt tells Claude it may emit a short opening
+    The orchestrator prompt tells the LLM it may emit a short opening
     sentence or skip it entirely; the empty-text case is legitimate.
     Returning "" lets callers skip the DB write without branching.
     """
@@ -98,7 +99,7 @@ def test_tool_use_only_no_text() -> None:
 
 
 def test_multiple_text_blocks_concatenated() -> None:
-    """Two text blocks joined without an extra separator (claude rarely does this,
+    """Two text blocks joined without an extra separator (rare in practice,
     but the helper must be deterministic)."""
     msg = AIMessage(
         content=[
@@ -135,8 +136,8 @@ def test_whitespace_only_text_returns_empty() -> None:
 
 def test_non_string_text_block_ignored() -> None:
     """Defensive: a text block where `text` is not a string is dropped,
-    not crashed on. (Shouldn't happen in practice — claude always sends
-    strings — but guards against an upstream schema change.)"""
+    not crashed on. (Shouldn't happen in practice — real LLM providers
+    always send strings — but guards against an upstream schema change.)"""
     msg = AIMessage(
         content=[
             {"type": "text", "text": 42},  # type: ignore[dict-item]

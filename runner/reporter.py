@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 import httpx
-from anthropic import Anthropic
+from runner.chat.models import get_gemini_flash
 from runner.encryption import decrypt
 from runner.logging import test_log
 
@@ -87,10 +87,8 @@ async def generate_ai_summary(
     summary: dict,
     observability_data: dict[str, list[dict]] | None = None,
 ) -> str:
-    """Use Claude to generate an executive summary of the test run."""
+    """Use Gemini 3 Flash to generate an executive summary of the test run."""
     try:
-        client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-
         obs_section = ""
         if observability_data:
             obs_parts = []
@@ -105,12 +103,7 @@ async def generate_ai_summary(
             if obs_parts:
                 obs_section = "\n\nObservability Errors Detected During Test Run:\n" + "\n\n".join(obs_parts)
 
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1024,
-            messages=[{
-                "role": "user",
-                "content": f"""Analyze this QA test run for the web application at {project.get('app_url', 'unknown')}.
+        prompt = f"""Analyze this QA test run for the web application at {project.get('app_url', 'unknown')}.
 
 Test Results Summary:
 - Total: {summary.get('total', 0)}
@@ -128,11 +121,37 @@ Provide a concise summary including:
 4. Recommended fixes (if failures detected)
 5. Severity assessment for each issue
 Keep it under 500 words."""
-            }],
-        )
 
-        content = message.content[0]
-        return content.text if content.type == "text" else ""
+        # No max_tokens override: the prompt asks for "under 500 words" but
+        # Gemini 3 Flash burns output tokens on reasoning BEFORE emitting
+        # the visible summary, and a tight cap silently truncated the
+        # Slack AI-analysis block. Prompt enforces length; the helper
+        # default (66k, the model's ceiling) is the safe token cap.
+        model = get_gemini_flash()
+        response = await model.ainvoke(prompt)
+
+        # Gemini 3 returns list content blocks (one per thought-signed text
+        # span). Prefer `.text` (LangChain's accessor that flattens blocks
+        # to the concatenated text); fall back to manual block traversal
+        # for older LangChain versions that only expose `.content`.
+        text = getattr(response, "text", None)
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+
+        content = response.content
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    t = block.get("text")
+                    if isinstance(t, str):
+                        parts.append(t)
+                elif isinstance(block, str):
+                    parts.append(block)
+            return "".join(parts).strip()
+        return ""
     except Exception as e:
         test_log(
             "warn",
