@@ -177,7 +177,7 @@ async def build_initial_state(
             # Assistant rows in our DB are rendered flat text; preserve them
             # as HumanMessages with "[assistant said]" prefix rather than
             # AIMessage, because putting them back in as AIMessage confuses
-            # Claude about whose turn it is. Alternative would be to model
+            # the model about whose turn it is. Alternative would be to model
             # them properly — we can upgrade this later when we rewrite
             # context handling.
             lc_messages.append(HumanMessage(content=f"[previous assistant reply] {content}"))
@@ -193,7 +193,7 @@ async def build_initial_state(
     else:
         # Defensive: if somehow the API route spawned us with an empty
         # text (shouldn't happen — the route rejects empty bodies), log
-        # so we can spot it instead of silently handing Claude an empty
+        # so we can spot it instead of silently handing the model an empty
         # list (which would 400 with "at least one message is required").
         chat_log(
             "error",

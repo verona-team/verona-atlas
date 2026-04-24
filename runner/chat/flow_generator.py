@@ -1,6 +1,6 @@
 """Flow-proposal generation — called by the `tool_generate_flow_proposals` node.
 
-Port of `lib/chat/flow-generator.ts`. Uses Claude Sonnet 4.6 with structured
+Port of `lib/chat/flow-generator.ts`. Uses Gemini 3.1 Pro with structured
 output (`with_structured_output`) to produce up to 3 proposed flows from a
 ResearchReport.
 
@@ -28,7 +28,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from runner.chat.logging import chat_log
-from runner.chat.models import get_sonnet
+from runner.chat.models import get_gemini_pro
 
 
 # ----- Pydantic schemas (match lib/test-planner.ts + flow-generator.ts) -----
@@ -69,7 +69,7 @@ async def generate_flow_proposals(
     app_url: str,
     research_report: dict[str, Any],
 ) -> FlowProposals:
-    """Call Sonnet to produce up to 3 concrete, approvable flow proposals."""
+    """Call Gemini 3.1 Pro to produce up to 3 concrete, approvable flow proposals."""
     report = research_report or {}
     findings = report.get("findings") or []
     codebase = report.get("codebaseExploration") or {}
@@ -206,7 +206,7 @@ Skipped: {', '.join(integrations_skipped) or 'none'}
 
 Do not include any emoji characters in the analysis, flow names, descriptions, rationales, or steps. Use plain text only."""
 
-    model = get_sonnet(max_tokens=4096, temperature=0.2)
+    model = get_gemini_pro(max_tokens=4096)
     structured = model.with_structured_output(FlowProposals, method="json_schema")
     chat_log(
         "info",

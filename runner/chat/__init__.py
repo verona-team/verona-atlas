@@ -9,8 +9,8 @@ This package owns the full lifecycle of a chat turn:
   `nodes/` (one file per node) and the edges are wired here.
 - `tools.py` defines the LangChain tools exposed to the orchestrator
   LLM (`generate_flow_proposals`, `start_test_run`). The tool schemas
-  are what Claude sees; the actual side-effecting work happens in
-  matching nodes under `nodes/`.
+  are what the orchestrator model sees; the actual side-effecting work
+  happens in matching nodes under `nodes/`.
 - `nightly.py` is the cron-triggered counterpart of `turn.run_chat_turn`
   and shares most of the same plumbing.
 - `context.py`, `flow_generator.py`, `prompts.py` are ports of their TS

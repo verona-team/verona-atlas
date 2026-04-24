@@ -1,11 +1,12 @@
 """
-Agentic test executor — ReAct loop powered by Claude Opus (outer reasoning)
-and Stagehand session.execute() (inner browser actions via Stagehand v3 API).
+Agentic test executor — ReAct loop powered by Gemini 3.1 Pro (outer reasoning,
+via LangChain) and Stagehand session.execute() (inner browser actions via
+Stagehand v3 API, backed by Claude Opus 4.7).
 
 Architecture:
-  Outer loop (Claude Opus):  observe screenshot → reason → pick tool → repeat
-  Inner loop (Stagehand v3): session.execute(instruction) performs
-      multi-step browser interactions within a single action
+  Outer loop (Gemini 3.1 Pro): observe screenshot → reason → pick tool → repeat
+  Inner loop (Stagehand v3 + Claude Opus 4.7): session.execute(instruction)
+    performs multi-step browser interactions within a single action.
 """
 import asyncio
 import base64
@@ -16,18 +17,58 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Awaitable
 
-from anthropic import Anthropic
 from agentmail import AgentMail
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 
 from runner.browser import stagehand_agent_model_config
+from runner.chat.models import get_gemini_pro
 from runner.logging import test_log
 from runner.prompts import (
     OUTER_AGENT_MODEL,
     STAGEHAND_AGENT_MODEL,
     TOOLS,
     build_system_prompt,
-    build_tool_result_content,
 )
+
+
+# ---------------------------------------------------------------------------
+# Tool schema adaptation
+# ---------------------------------------------------------------------------
+# `runner.prompts.TOOLS` is authored in Anthropic's native shape
+# (`{name, description, input_schema}`). LangChain's `bind_tools` accepts
+# that format directly, but the Google genai integration wants an OpenAI-style
+# `{type: "function", function: {name, description, parameters}}`. We convert
+# once here so the tool list is provider-agnostic.
+
+
+def _adapt_tools_for_langchain() -> list[dict[str, Any]]:
+    adapted: list[dict[str, Any]] = []
+    for t in TOOLS:
+        adapted.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t["description"],
+                    "parameters": t["input_schema"],
+                },
+            }
+        )
+    return adapted
+
+
+_LANGCHAIN_TOOLS = _adapt_tools_for_langchain()
+
+
+# ---------------------------------------------------------------------------
+# Page state helpers
+# ---------------------------------------------------------------------------
 
 
 async def capture_page_state(page) -> dict:
@@ -378,52 +419,108 @@ async def execute_check_email(
     }
 
 
-def _strip_images_from_message(msg: dict) -> dict:
-    """Return a copy of *msg* with image blocks replaced by text placeholders."""
-    content = msg.get("content")
-    if content is None or isinstance(content, str):
-        return msg
-    if not isinstance(content, list):
-        return msg
+# ---------------------------------------------------------------------------
+# Message construction helpers (LangChain unified content blocks)
+# ---------------------------------------------------------------------------
 
-    new_content: list = []
+
+def _screenshot_message(url: str, screenshot_b64: str, note: str) -> HumanMessage:
+    """Build a HumanMessage with a text note + PNG screenshot block.
+
+    Gemini 3 accepts multimodal HumanMessages with `image` content blocks
+    using the unified LangChain shape `{type: "image", base64, mime_type}`.
+    Screenshots returned from tool calls are delivered this way (as a
+    follow-up HumanMessage after the corresponding ToolMessage) because
+    some providers don't accept image parts inside a tool/function
+    response message.
+    """
+    content: list[dict[str, Any]] = [
+        {"type": "text", "text": f"Current URL: {url}\n\n{note}"},
+    ]
+    if screenshot_b64:
+        content.append(
+            {
+                "type": "image",
+                "base64": screenshot_b64,
+                "mime_type": "image/png",
+            }
+        )
+    return HumanMessage(content=content)
+
+
+def _strip_images_from_content(content: Any) -> Any:
+    """Replace image content blocks in a message's `content` with a text placeholder."""
+    if content is None or isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return content
+    new_content: list[Any] = []
     for block in content:
-        if isinstance(block, dict):
-            if block.get("type") == "image":
-                new_content.append({"type": "text", "text": "[Screenshot — removed from context]"})
-            elif block.get("type") == "tool_result":
-                inner = block.get("content")
-                if isinstance(inner, list):
-                    new_inner: list = []
-                    for ib in inner:
-                        if isinstance(ib, dict) and ib.get("type") == "image":
-                            new_inner.append({"type": "text", "text": "[Screenshot — removed from context]"})
-                        else:
-                            new_inner.append(ib)
-                    new_content.append({**block, "content": new_inner})
-                else:
-                    new_content.append(block)
-            else:
-                new_content.append(block)
+        if isinstance(block, dict) and block.get("type") == "image":
+            new_content.append(
+                {"type": "text", "text": "[Screenshot — removed from context]"}
+            )
         else:
             new_content.append(block)
-
-    return {**msg, "content": new_content}
+    return new_content
 
 
 def _compress_messages(
-    messages: list[dict],
-    keep_recent_images: int = 8,
-) -> list[dict]:
-    """Strip screenshot images from older messages to manage context size."""
+    messages: list[BaseMessage],
+    keep_recent_images: int = 12,
+) -> list[BaseMessage]:
+    """Strip screenshot images from older messages to keep context bounded.
+
+    Operates on LangChain `BaseMessage` objects. Messages with string
+    content pass through untouched; messages with list content have any
+    `image` blocks replaced by a text placeholder. Only the oldest
+    messages are stripped; the most recent `keep_recent_images` retain
+    their screenshots so the model still sees current visual state.
+    """
     if len(messages) <= keep_recent_images:
         return messages
 
     cutoff = len(messages) - keep_recent_images
-    return [
-        _strip_images_from_message(msg) if i < cutoff else msg
-        for i, msg in enumerate(messages)
-    ]
+    out: list[BaseMessage] = []
+    for i, msg in enumerate(messages):
+        if i >= cutoff:
+            out.append(msg)
+            continue
+        new_content = _strip_images_from_content(msg.content)
+        if new_content is msg.content:
+            out.append(msg)
+        else:
+            out.append(msg.model_copy(update={"content": new_content}))
+    return out
+
+
+def _extract_assistant_text(ai_msg: AIMessage) -> str:
+    """Concatenate the text blocks of an AIMessage, for logging + end-turn summary."""
+    content = ai_msg.content
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type") == "text":
+                    t = block.get("text")
+                    if isinstance(t, str):
+                        parts.append(t)
+                elif block.get("type") == "thinking":
+                    # Don't include thinking blocks in the visible text summary.
+                    continue
+            elif isinstance(block, str):
+                parts.append(block)
+        return "".join(parts)
+    # Fallback: try `.text` accessor (Gemini 3) if available.
+    text = getattr(ai_msg, "text", None)
+    return text if isinstance(text, str) else ""
+
+
+# ---------------------------------------------------------------------------
+# Main template executor
+# ---------------------------------------------------------------------------
 
 
 async def execute_template(
@@ -477,7 +574,6 @@ async def execute_template(
         agentmail_address=agentmail_address,
     )
 
-    anthropic = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
     system_prompt = build_system_prompt(
         template,
         project,
@@ -486,6 +582,11 @@ async def execute_template(
         existing_credentials=existing_credentials,
         generated_password=generated_password,
     )
+
+    # Build the outer ReAct model once; tools are bound with LangChain's
+    # provider-agnostic `bind_tools`. max_tokens is large enough for
+    # Gemini 3 Pro's reasoning turns that interleave thought + tool use.
+    outer_model = get_gemini_pro(max_tokens=21000).bind_tools(_LANGCHAIN_TOOLS)
 
     test_start_time = datetime.now(timezone.utc)
 
@@ -498,24 +599,22 @@ async def execute_template(
         has_screenshot=bool(initial_state["screenshot_base64"]),
     )
 
-    initial_content: list[dict] = [
-        {"type": "text", "text": (
-            f"The browser is open at {initial_state['url']}.\n"
-            "Here is a screenshot of the current page state. "
-            "Review the authentication instructions and test plan in your system prompt, then begin."
-        )},
-    ]
-    if initial_state["screenshot_base64"]:
-        initial_content.append({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": "image/png",
-                "data": initial_state["screenshot_base64"],
-            },
-        })
+    initial_note = (
+        "Here is a screenshot of the current page state. "
+        "Review the authentication instructions and test plan in your system prompt, then begin."
+    )
 
-    messages: list[dict] = [{"role": "user", "content": initial_content}]
+    messages: list[BaseMessage] = [
+        SystemMessage(content=system_prompt),
+        _screenshot_message(
+            url=initial_state["url"],
+            screenshot_b64=initial_state["screenshot_base64"],
+            note=(
+                f"The browser is open at {initial_state['url']}.\n"
+                + initial_note
+            ),
+        ),
+    ]
 
     actions: list[dict] = []
     screenshots: list[dict] = []
@@ -550,26 +649,21 @@ async def execute_template(
             message_count=len(messages),
         )
 
-        # Call outer agent (Claude Opus)
+        # Call outer agent (Gemini 3.1 Pro via LangChain).
         llm_t0 = time.time()
         try:
-            response = anthropic.messages.create(
-                model=OUTER_AGENT_MODEL,
-                max_tokens=21000,
-                system=system_prompt,
-                tools=TOOLS,
-                messages=messages,
-            )
+            ai_msg: AIMessage = await outer_model.ainvoke(messages)
             llm_elapsed = time.time() - llm_t0
+            usage = getattr(ai_msg, "usage_metadata", None) or {}
             test_log(
                 "info",
                 "executor_llm_call_ok",
                 template_name=tpl_name,
                 iteration=iteration,
                 elapsed_s=round(llm_elapsed, 3),
-                stop_reason=response.stop_reason,
-                input_tokens=response.usage.input_tokens,
-                output_tokens=response.usage.output_tokens,
+                tool_call_count=len(getattr(ai_msg, "tool_calls", None) or []),
+                input_tokens=usage.get("input_tokens"),
+                output_tokens=usage.get("output_tokens"),
             )
         except Exception as e:
             llm_elapsed = time.time() - llm_t0
@@ -591,15 +685,17 @@ async def execute_template(
             })
             break
 
-        assistant_content = response.content
-        messages.append({"role": "assistant", "content": assistant_content})
+        # CRITICAL: append the AIMessage as-is so thought signatures (Gemini 3)
+        # and the tool_use blocks stay attached for the next turn.
+        messages.append(ai_msg)
 
-        if response.stop_reason == "end_turn":
-            text_parts = [
-                b.text for b in assistant_content
-                if hasattr(b, "text")
-            ]
-            test_summary = " ".join(text_parts) if text_parts else "Agent ended without explicit completion."
+        tool_calls = getattr(ai_msg, "tool_calls", None) or []
+
+        if not tool_calls:
+            # No tool call = end of turn. Use any text the model emitted
+            # as the final test summary.
+            final_text = _extract_assistant_text(ai_msg).strip()
+            test_summary = final_text or "Agent ended without explicit completion."
             test_log(
                 "info",
                 "executor_agent_end_turn",
@@ -610,24 +706,16 @@ async def execute_template(
             completed = True
             break
 
-        tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
-        if not tool_use_blocks:
-            test_log(
-                "warn",
-                "executor_no_tool_use_blocks",
-                template_name=tpl_name,
-                iteration=iteration,
-                stop_reason=response.stop_reason,
-            )
-            completed = True
-            break
+        # For each tool call: execute, build a ToolMessage with the text
+        # result, and (when applicable) follow with a HumanMessage containing
+        # the post-action screenshot so the model can observe visually.
+        followups: list[BaseMessage] = []
+        early_complete = False
 
-        tool_results: list[dict] = []
-
-        for tool_block in tool_use_blocks:
-            tool_name = tool_block.name
-            tool_input = tool_block.input or {}
-            tool_id = tool_block.id
+        for tool_call in tool_calls:
+            tool_name = tool_call.get("name", "")
+            tool_input = tool_call.get("args") or {}
+            tool_id = tool_call.get("id") or ""
 
             action_record: dict[str, Any] = {
                 "iteration": iteration,
@@ -658,10 +746,19 @@ async def execute_template(
                 else:
                     result_text = f"Action failed: {result['error']}"
 
-                content = build_tool_result_content(
-                    result["page_state"]["screenshot_base64"],
-                    result["page_state"]["url"],
-                    result_text,
+                messages.append(
+                    ToolMessage(
+                        content=result_text,
+                        tool_call_id=tool_id,
+                        name=tool_name,
+                    )
+                )
+                followups.append(
+                    _screenshot_message(
+                        url=result["page_state"]["url"],
+                        screenshot_b64=result["page_state"]["screenshot_base64"],
+                        note=f"Result of {tool_name}: {result_text}",
+                    )
                 )
 
                 if result["page_state"]["screenshot_base64"]:
@@ -671,12 +768,6 @@ async def execute_template(
                         "url": result["page_state"]["url"],
                         "timestamp": result["page_state"]["timestamp"],
                     })
-
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_id,
-                    "content": content,
-                })
 
             elif tool_name == "navigate_to_url":
                 nav_url = tool_input.get("url", "")
@@ -700,10 +791,19 @@ async def execute_template(
                 else:
                     result_text = f"Navigation failed: {result['error']}"
 
-                content = build_tool_result_content(
-                    result["page_state"]["screenshot_base64"],
-                    result["page_state"]["url"],
-                    result_text,
+                messages.append(
+                    ToolMessage(
+                        content=result_text,
+                        tool_call_id=tool_id,
+                        name=tool_name,
+                    )
+                )
+                followups.append(
+                    _screenshot_message(
+                        url=result["page_state"]["url"],
+                        screenshot_b64=result["page_state"]["screenshot_base64"],
+                        note=f"Result of {tool_name}: {result_text}",
+                    )
                 )
 
                 if result["page_state"]["screenshot_base64"]:
@@ -713,12 +813,6 @@ async def execute_template(
                         "url": result["page_state"]["url"],
                         "timestamp": result["page_state"]["timestamp"],
                     })
-
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_id,
-                    "content": content,
-                })
 
             elif tool_name == "observe_dom":
                 query = tool_input.get("query", "")
@@ -735,11 +829,13 @@ async def execute_template(
                 action_record["found"] = result["found"]
                 action_record["observations"] = result["observations"][:500]
 
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_id,
-                    "content": result["observations"],
-                })
+                messages.append(
+                    ToolMessage(
+                        content=result["observations"],
+                        tool_call_id=tool_id,
+                        name=tool_name,
+                    )
+                )
 
             elif tool_name == "save_credentials":
                 cred_email = tool_input.get("email", "")
@@ -764,11 +860,13 @@ async def execute_template(
                             template_name=tpl_name,
                             email=cred_email,
                         )
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": tool_id,
-                            "content": "Credentials saved successfully. They will be available on future test runs.",
-                        })
+                        messages.append(
+                            ToolMessage(
+                                content="Credentials saved successfully. They will be available on future test runs.",
+                                tool_call_id=tool_id,
+                                name=tool_name,
+                            )
+                        )
                     except Exception as e:
                         action_record["success"] = False
                         action_record["error"] = str(e)
@@ -779,21 +877,29 @@ async def execute_template(
                             err_type=type(e).__name__,
                             err=str(e),
                         )
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": tool_id,
-                            "content": f"Failed to save credentials: {e}. Proceed with testing anyway.",
-                            "is_error": True,
-                        })
+                        messages.append(
+                            ToolMessage(
+                                content=f"Failed to save credentials: {e}. Proceed with testing anyway.",
+                                tool_call_id=tool_id,
+                                name=tool_name,
+                                status="error",
+                            )
+                        )
                 else:
-                    msg = "Missing email or password." if not (cred_email and cred_password) else "No credential storage handler configured."
+                    msg_txt = (
+                        "Missing email or password."
+                        if not (cred_email and cred_password)
+                        else "No credential storage handler configured."
+                    )
                     action_record["success"] = False
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tool_id,
-                        "content": f"Could not save credentials: {msg}",
-                        "is_error": True,
-                    })
+                    messages.append(
+                        ToolMessage(
+                            content=f"Could not save credentials: {msg_txt}",
+                            tool_call_id=tool_id,
+                            name=tool_name,
+                            status="error",
+                        )
+                    )
 
             elif tool_name == "check_email":
                 timeout_secs = tool_input.get("timeout_seconds", 30)
@@ -834,11 +940,13 @@ async def execute_template(
                 else:
                     response_text = result["summary"]
 
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_id,
-                    "content": response_text,
-                })
+                messages.append(
+                    ToolMessage(
+                        content=response_text,
+                        tool_call_id=tool_id,
+                        name=tool_name,
+                    )
+                )
 
             elif tool_name == "complete_test":
                 test_passed = tool_input.get("passed", False)
@@ -862,14 +970,16 @@ async def execute_template(
                     ],
                 )
 
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_id,
-                    "content": "Test completion recorded.",
-                })
+                messages.append(
+                    ToolMessage(
+                        content="Test completion recorded.",
+                        tool_call_id=tool_id,
+                        name=tool_name,
+                    )
+                )
 
                 actions.append(action_record)
-                messages.append({"role": "user", "content": tool_results})
+                early_complete = True
                 completed = True
                 break
 
@@ -881,19 +991,26 @@ async def execute_template(
                     iteration=iteration,
                     tool=tool_name,
                 )
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_id,
-                    "content": f"Unknown tool: {tool_name}",
-                    "is_error": True,
-                })
+                messages.append(
+                    ToolMessage(
+                        content=f"Unknown tool: {tool_name}",
+                        tool_call_id=tool_id,
+                        name=tool_name,
+                        status="error",
+                    )
+                )
 
             actions.append(action_record)
 
-        if completed:
-            break
+        # Append screenshot follow-ups AFTER all tool results for this turn,
+        # so the sequence is:
+        #    AIMessage(tool_calls=[...])
+        #    ToolMessage(...) * N
+        #    HumanMessage(screenshot) * N
+        messages.extend(followups)
 
-        messages.append({"role": "user", "content": tool_results})
+        if early_complete:
+            break
 
     loop_elapsed = time.time() - loop_t0
 

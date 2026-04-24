@@ -11,7 +11,8 @@ Two concerns live here:
 
 2. `process_chat_turn` / `process_nightly_job` — chat orchestration. Durable
    replacement for the old Next.js `/api/chat` path so chat turns survive
-   hard refresh / tab close. Runs a LangGraph StateGraph against Claude.
+   hard refresh / tab close. Runs a LangGraph StateGraph against Gemini
+   3.1 Pro (with Gemini 3 Flash for summarization subtasks).
 
 They share a secret ("atlas-secrets") but intentionally use separate images
 so the chat path doesn't pay for the Playwright / browser toolchain cold
@@ -36,12 +37,22 @@ runner_image = (
     .pip_install(
         "stagehand>=3.19,<4",
         "supabase",
+        # `anthropic` is still required by the Stagehand session/agent path —
+        # Stagehand forwards API calls through its own client configured with
+        # ANTHROPIC_API_KEY. The outer QA ReAct loop itself uses Gemini via
+        # LangChain.
         "anthropic",
         "agentmail>=0.4",
         "httpx",
         "pydantic",
         "browserbase",
         "playwright",
+        # Outer ReAct loop model (Gemini 3.1 Pro) + reporter summary model
+        # (Gemini 3 Flash) go through langchain-google-genai.
+        "langchain>=1.0.0,<2.0.0",
+        "langchain-core>=1.0.0,<2.0.0",
+        "langchain-google-genai>=3.1.0,<4.0.0",
+        "google-genai>=1.0.0,<2.0.0",
     )
     .run_commands("playwright install --with-deps chromium")
     .add_local_python_source("runner")
@@ -98,7 +109,7 @@ async def execute_test_run(test_run_id: str, project_id: str):
 
 
 # -----------------------------------------------------------------------------
-# Image 2: chat runner (LangGraph + LangChain + Anthropic)
+# Image 2: chat runner (LangGraph + LangChain + Google Gemini)
 # -----------------------------------------------------------------------------
 # Separate image because:
 #   * The chat workload doesn't need Playwright/Chromium/Stagehand.
@@ -108,13 +119,19 @@ async def execute_test_run(test_run_id: str, project_id: str):
 #
 # Version pinning: we pin the LangChain family to a known-good minor range
 # so upgrades are a conscious decision. langgraph 1.0.x, langchain 1.0.x,
-# langchain-anthropic 1.1.x all compose cleanly as of this writing.
+# langchain-google-genai 3.1.x all compose cleanly as of this writing.
+# `langchain-anthropic` is still included because `runner.chat.models`
+# exposes a `get_claude_opus()` helper for Anthropic-backed paths (the
+# Stagehand browser agent lives in the runner_image, but `get_claude_opus`
+# may be reached from chat-side helpers during future work).
 chat_image = (
     modal.Image.debian_slim(python_version="3.13")
     .pip_install(
         "langgraph>=1.0.0,<2.0.0",
         "langchain>=1.0.0,<2.0.0",
         "langchain-core>=1.0.0,<2.0.0",
+        "langchain-google-genai>=3.1.0,<4.0.0",
+        "google-genai>=1.0.0,<2.0.0",
         "langchain-anthropic>=1.1.0,<2.0.0",
         "langsmith>=0.4.0",
         "anthropic>=0.76.0",

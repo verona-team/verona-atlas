@@ -1,6 +1,6 @@
 """Codebase exploration sub-agent.
 
-A Sonnet 4.6 ReAct-style loop that walks the linked GitHub repo and
+A Gemini 3.1 Pro ReAct-style loop that walks the linked GitHub repo and
 produces a `CodebaseExplorationResult`. Port of
 `lib/research-agent/codebase-exploration-agent.ts`.
 
@@ -16,7 +16,7 @@ Rather than a LangGraph StateGraph for this sub-agent we use a simple
 manual loop — it's conceptually a single node ("iterate tool calls until
 done") and wrapping that in a StateGraph adds ceremony without helping
 observability. LangSmith still traces each LLM call cleanly via
-`ChatAnthropic`'s native integration.
+`ChatGoogleGenerativeAI`'s native integration.
 
 ## Tool shapes
 
@@ -41,7 +41,7 @@ from langchain.tools import tool
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from runner.chat.logging import chat_log
-from runner.chat.models import get_sonnet
+from runner.chat.models import get_gemini_pro
 from runner.research.github_client import get_installation_token
 from runner.research.github_repo_explorer import (
     DEFAULT_MAX_LIST_PATHS,
@@ -170,7 +170,7 @@ async def run_codebase_exploration_agent(
     Steps:
 
     1. Resolve an installation token.
-    2. Build a Sonnet 4.6 ChatAnthropic bound to our closure-backed tools.
+    2. Build a Gemini 3.1 Pro ChatGoogleGenerativeAI bound to our closure-backed tools.
     3. Loop: invoke(messages) -> if tool_calls, execute them and append
        ToolMessages; else done. Stop on `finish_codebase_exploration` or
        after `RESEARCH_CODEBASE_MAX_STEPS` iterations.
@@ -365,7 +365,7 @@ async def run_codebase_exploration_agent(
         ]
         tools_by_name = {t.name: t for t in tools}
 
-        model = get_sonnet(max_tokens=4096, temperature=0.1).bind_tools(tools)
+        model = get_gemini_pro(max_tokens=4096).bind_tools(tools)
 
         messages: list = [
             SystemMessage(content=_build_system_prompt(repo_full_name)),
@@ -438,7 +438,7 @@ async def run_codebase_exploration_agent(
         if tree_truncated:
             merged_warnings.append("GitHub tree API marked truncated=true.")
         # Defensive snippet-length cap. The prompt asks for ≤400 chars but
-        # Sonnet occasionally ignores length hints; capping here keeps the
+        # the model occasionally ignores length hints; capping here keeps the
         # eventual orchestrator prompt bounded no matter what.
         _SNIPPET_MAX = 600
         key_evidence = [

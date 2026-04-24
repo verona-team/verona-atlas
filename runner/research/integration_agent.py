@@ -7,40 +7,36 @@ combining three passes:
        obvious first-layer signal (recent PRs, top rage-click URLs,
        top unresolved issues, etc.).
 
-    2. **Research loop (ReAct over Modal Sandbox).** A Sonnet 4.6
+    2. **Research loop (ReAct over Modal Sandbox).** A Gemini 3.1 Pro
        orchestrator iteratively calls one tool, `execute_code(purpose)`,
        with a natural-language goal. The tool delegates CODE GENERATION
-       to an Opus 4.6 code writer (see `code_writer.py`), executes the
-       resulting Python inside a gVisor-isolated Modal Sandbox with
-       creds preloaded as env vars, and returns `{exit_code, stdout,
-       stderr, explanation}`. The orchestrator decides what to ask next
-       based on everything it has seen so far — including correlating
-       signals ACROSS integrations (e.g. a rage-clicked URL from call #2
-       matching a GitHub PR from call #4). Loops up to
-       `RESEARCH_INTEGRATION_MAX_STEPS` (default 20) times.
+       to a separate Gemini 3.1 Pro code writer (see `code_writer.py`),
+       executes the resulting Python inside a gVisor-isolated Modal
+       Sandbox with creds preloaded as env vars, and returns
+       `{exit_code, stdout, stderr, explanation}`. The orchestrator
+       decides what to ask next based on everything it has seen so far
+       — including correlating signals ACROSS integrations (e.g. a
+       rage-clicked URL from call #2 matching a GitHub PR from call
+       #4). Loops up to `RESEARCH_INTEGRATION_MAX_STEPS` (default 20)
+       times.
 
-    3. **Synthesis** — a single Sonnet structured-output call that
-       turns preflight data + research notes (purpose + result for
+    3. **Synthesis** — a single Gemini 3.1 Pro structured-output call
+       that turns preflight data + research notes (purpose + result for
        each call) into the final `IntegrationResearchReport`.
 
 ## Why code writing is split out of the orchestrator
 
 The orchestrator's job is deciding WHAT to investigate — scanning
 signals, correlating across providers, choosing the next question.
-Asking the same LLM call to also WRITE the Python was bad for two
-reasons:
-
-1. **Context bloat.** Each prior exec appends (AIMessage with full
-   code) + (ToolMessage with stdout) — over 20 steps that buries the
-   signal in raw code the orchestrator doesn't need for routing.
-2. **Quality mismatch.** Opus writes substantially better Python for
-   non-trivial httpx flows (HogQL joins, GitHub pagination, LangSmith's
-   session-first-then-runs pattern). Specializing Opus on code and
-   Sonnet on orchestration plays to both strengths.
+Asking the same LLM call to also WRITE the Python was bad because
+each prior exec appends (AIMessage with full code) + (ToolMessage
+with stdout) — over 20 steps that buries the signal in raw code the
+orchestrator doesn't need for routing. Splitting the two roles keeps
+each prompt tight and lets us evolve them independently.
 
 So `execute_code(purpose="...")` takes only a natural-language goal,
-and the tool body uses Opus to write the script before running it.
-See `runner.research.code_writer` for the code generator.
+and the tool body uses the code writer to produce the script before
+running it. See `runner.research.code_writer` for the code generator.
 
 ## Error handling
 
@@ -53,7 +49,7 @@ Every layer has a graceful-degradation path:
 - The sandbox itself fails to create (Modal outage, bad image) -> we
   log and fall back to "preflight-only synthesis" so the run still
   produces a usable report.
-- Opus code generation fails -> the tool returns a stub result the
+- Code generation fails -> the tool returns a stub result the
   orchestrator can see, so the ReAct loop isn't derailed.
 - A single exec fails -> stderr surfaced back to the orchestrator as
   a ToolMessage; the code writer also gets to see the failure on its
@@ -73,7 +69,7 @@ from langchain.tools import tool
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from runner.chat.logging import chat_log
-from runner.chat.models import get_sonnet
+from runner.chat.models import get_gemini_pro
 from runner.encryption import decrypt
 from runner.research.code_writer import (
     CodeWriterOutput,
@@ -105,7 +101,7 @@ from runner.research.types import (
 
 
 # ---------------------------------------------------------------------------
-# Pydantic schemas for Sonnet structured output
+# Pydantic schemas for Gemini structured output
 # ---------------------------------------------------------------------------
 
 
@@ -265,9 +261,9 @@ async def _build_sandbox_env(
     """Build the env var set that gets injected into the research sandbox.
 
     The contract with the LLM is documented in the system prompt: every
-    integration has a predictable env var naming scheme so Claude can
-    write scripts like `os.environ["POSTHOG_API_KEY"]` without having
-    to be told the value up-front.
+    integration has a predictable env var naming scheme so the code
+    writer can produce scripts like `os.environ["POSTHOG_API_KEY"]`
+    without having to be told the value up-front.
 
     Public vs. secret split matters:
     - `public` vars (hostnames, project IDs) go via plain env dict.
@@ -337,11 +333,11 @@ def _build_orchestrator_system_prompt(
     app_url: str,
     integrations_covered: list[str],
 ) -> str:
-    """System prompt for the Sonnet orchestrator.
+    """System prompt for the Gemini 3.1 Pro orchestrator.
 
     The orchestrator does NOT write Python. It issues natural-language
-    research goals via `execute_code(purpose=...)`; a separate Opus
-    code writer turns each goal into a script and runs it.
+    research goals via `execute_code(purpose=...)`; a separate code
+    writer turns each goal into a script and runs it.
 
     The prompt emphasizes two things:
 
@@ -496,7 +492,7 @@ def _resolve_configs(active_integrations: list[dict[str, Any]]) -> dict[str, dic
 
 def _truncate(s: str, limit: int) -> str:
     """Truncate a string with a visible marker, used on tool output that goes
-    back into the LLM context window (Claude chokes on multi-MB stdout)."""
+    back into the LLM context window (models choke on multi-MB stdout)."""
     if len(s) <= limit:
         return s
     return s[:limit] + f"\n\n[...truncated {len(s) - limit} more chars]"
@@ -508,9 +504,9 @@ async def _run_research_loop(
     preflight_results: dict[str, dict[str, Any]],
     env: IntegrationEnv,
 ) -> list[str]:
-    """ReAct loop where a Sonnet orchestrator issues natural-language
-    research goals and Opus writes the code that gets run in a Modal
-    sandbox.
+    """ReAct loop where a Gemini 3.1 Pro orchestrator issues natural-language
+    research goals and a separate Gemini 3.1 Pro code-writer produces the
+    code that gets run in a Modal sandbox.
 
     Returns a list of "research notes" strings — one per execute_code
     call (purpose, code-writer explanation, exit_code, stdout, stderr)
@@ -558,7 +554,7 @@ async def _run_research_loop(
     previous_exec: PreviousExec | None = None
 
     # The tool is declared as `async def` so its body can await the
-    # Opus code-writer call directly. `@tool` preserves the signature
+    # code-writer call directly. `@tool` preserves the signature
     # (`purpose: str`) and docstring for schema/binding purposes;
     # `bind_tools` accepts async tools, and the loop invokes them via
     # `await execute_code.ainvoke({...})`.
@@ -587,7 +583,7 @@ async def _run_research_loop(
         """
         nonlocal previous_exec
 
-        # Phase A: Opus writes the code for this purpose.
+        # Phase A: code writer produces the Python for this purpose.
         code_output: CodeWriterOutput = await write_research_code(
             purpose=purpose,
             docs_block=docs_block,
@@ -644,7 +640,7 @@ async def _run_research_loop(
         )
 
     try:
-        model = get_sonnet(max_tokens=4096, temperature=0.1).bind_tools([execute_code])
+        model = get_gemini_pro(max_tokens=4096).bind_tools([execute_code])
 
         # Build the initial user message: every integration's preflight
         # result as fenced JSON blocks.
@@ -811,7 +807,7 @@ Skipped (no data or errors):
 
 {notes_block}"""
 
-    model = get_sonnet(max_tokens=4096, temperature=0.1)
+    model = get_gemini_pro(max_tokens=4096)
     structured = model.with_structured_output(_AgentReport, method="json_schema")
     try:
         agent_report: _AgentReport = await structured.ainvoke(
@@ -900,8 +896,9 @@ async def run_integration_research(
             "general best practices.",
         )
 
-    # Phase 2: sandbox-backed research loop. Orchestrator (Sonnet)
-    # picks the next question; Opus writes the code; sandbox runs it.
+    # Phase 2: sandbox-backed research loop. Orchestrator (Gemini 3.1 Pro)
+    # picks the next question; the code-writer produces the code; sandbox
+    # runs it.
     env = await _build_sandbox_env(resolved)
     try:
         research_notes = await _run_research_loop(

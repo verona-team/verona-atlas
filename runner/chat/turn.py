@@ -43,7 +43,7 @@ async def run_chat_turn(
     that created a read-your-writes race where the Python worker's
     SELECT against `chat_messages` sometimes returned before the row the
     route had just committed was visible to this reader, leaving the
-    message history empty and causing the Claude call to 400 with
+    message history empty and causing the LLM call to 400 with
     "at least one message is required".
     """
     sb = get_supabase()

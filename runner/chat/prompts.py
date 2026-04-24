@@ -47,10 +47,10 @@ def _format_findings(findings: list[dict[str, Any]]) -> str:
     """Render findings with their supporting `rawData` when present.
 
     Historically `rawData` was stripped here, which defeated the purpose
-    of having synthesis curate JSON anchors — the orchestrator Opus call
-    never saw them. We now render each finding as a header line plus an
-    optional fenced evidence block, so Opus can cite exact numbers, IDs,
-    and URLs in its replies.
+    of having synthesis curate JSON anchors — the orchestrator call never
+    saw them. We now render each finding as a header line plus an optional
+    fenced evidence block, so the orchestrator can cite exact numbers,
+    IDs, and URLs in its replies.
     """
     if not findings:
         return "No specific findings from integrations."
@@ -112,9 +112,9 @@ def _format_code_evidence(snippets: list[dict[str, Any]] | None) -> str:
     Each snippet is rendered as a labelled code fence plus the agent's
     one-sentence relevance note. We use a plain ``` fence rather than
     inferring a per-path language because picking a language from path
-    extension is noisy for files Opus has never seen (e.g. route files
-    with unusual extensions, Go .templ, etc.) and the `path` header
-    already identifies the file.
+    extension is noisy for files the orchestrator has never seen (e.g.
+    route files with unusual extensions, Go .templ, etc.) and the `path`
+    header already identifies the file.
     """
     if not snippets:
         return ""
@@ -187,7 +187,7 @@ def build_orchestrator_system_prompt(
     context_summary: str | None,
     recent_runs: list[dict[str, Any]] | None,
 ) -> str:
-    """Return the full system prompt for the Opus orchestrator.
+    """Return the full system prompt for the chat orchestrator.
 
     Byte-compatible with the TS version's wording so behavior is stable
     across the TS->Python cutover; any behavior changes we want to make

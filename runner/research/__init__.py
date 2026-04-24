@@ -9,19 +9,20 @@ LLM calls use as grounding.
 
 - `integration_agent`: hits integration APIs directly (GitHub, PostHog,
   Sentry, LangSmith, Braintrust) via typed Python tools invoked by a
-  Claude Sonnet ReAct loop. Replaces the TS "LLM writes arbitrary JS and
+  Gemini 3.1 Pro ReAct loop. Replaces the TS "LLM writes arbitrary JS and
   we run it in a Vercel Sandbox" pattern — same signal, simpler surface,
   no sandbox dependency.
 
 - `codebase_agent`: walks the linked GitHub repo via tree/list-path/read-file
-  tools to build a `CodebaseExplorationResult`.
+  tools to build a `CodebaseExplorationResult`, also using Gemini 3.1 Pro.
 
-## Why Sonnet, not Opus
+## Model choice
 
-Both tracks are well-scoped tasks with predictable tool shapes. Sonnet gets
-them done cost-effectively and is fast enough that research doesn't
-bottleneck chat bootstrap turns. Opus is reserved for the orchestrator in
-`runner.chat.graph`.
+Both tracks run on Gemini 3.1 Pro. They are well-scoped tasks with
+predictable tool shapes, but they do nuanced cross-provider correlation
+(integration_agent) and architectural inference (codebase_agent), so we
+want the strongest reasoning model the runner ships with. The chat
+orchestrator in `runner.chat.graph` also runs on Gemini 3.1 Pro.
 
 ## Output shape parity
 
