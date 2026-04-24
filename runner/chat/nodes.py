@@ -56,7 +56,7 @@ from .flow_generator import (
     serialize_flows_for_message,
 )
 from .logging import chat_log
-from .models import get_opus
+from .models import get_gemini_pro
 from .prompts import build_orchestrator_system_prompt
 from .state import ChatTurnState
 from .supabase_client import get_supabase, iso_now, set_session_status
@@ -144,7 +144,7 @@ async def ensure_research(state: ChatTurnState) -> dict[str, Any]:
 
 
 async def agent_turn(state: ChatTurnState) -> dict[str, Any]:
-    """Call Opus with the tools bound. Append the AIMessage to state.messages."""
+    """Call Gemini 3.1 Pro with the tools bound. Append the AIMessage to state.messages."""
     system = build_orchestrator_system_prompt(
         project_name=state.get("project_name", ""),
         app_url=state.get("app_url", ""),
@@ -157,7 +157,7 @@ async def agent_turn(state: ChatTurnState) -> dict[str, Any]:
 
     messages = [SystemMessage(content=system), *state.get("messages", [])]
 
-    model = get_opus().bind_tools(ALL_TOOLS)
+    model = get_gemini_pro().bind_tools(ALL_TOOLS)
 
     chat_log(
         "info",
@@ -784,10 +784,11 @@ def _start_test_run_failure(session_id: str, message: str) -> dict[str, Any]:
 async def finalize(state: ChatTurnState) -> dict[str, Any]:
     """Persist the assistant reply and reset session status.
 
-    Extracts the final text from the most recent AIMessage — Claude's
-    `AIMessage.content` can be either a plain string (text-only turn) or
-    a list of content blocks (text + tool_use interleaved). We concatenate
-    only the text blocks.
+    Extracts the final text from the most recent AIMessage. The
+    `AIMessage.content` can be either a plain string (text-only turn) or a
+    list of content blocks (text + tool_use interleaved). Gemini 3 series
+    models always return a list of content blocks (one per thought-signed
+    text span), so we concatenate only the text blocks.
 
     Idempotency: we upsert on `(session_id, client_message_id)` so a
     Modal retry or a duplicate spawn never duplicates the assistant row.

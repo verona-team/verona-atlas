@@ -5,7 +5,7 @@ compress older messages into a persistent `chat_sessions.context_summary`
 once the message count crosses a threshold, then hard-delete the rolled-up
 rows. Keeps the per-turn token bill bounded for long-lived sessions.
 
-Uses Claude Sonnet 4.6 (cheap + fast for summarization).
+Uses Gemini 3 Flash (cheap + fast for summarization).
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from typing import Any
 from supabase import Client
 
 from .logging import chat_log
-from .models import get_sonnet
+from .models import get_gemini_flash
 from .supabase_client import iso_now
 
 
@@ -31,7 +31,7 @@ async def maybe_summarize_older_messages(sb: Client, session_id: str) -> None:
 
     1. Pull all messages in order.
     2. Take everything except the most recent `RECENT_MESSAGE_LIMIT`.
-    3. Merge with the existing summary via a Sonnet call.
+    3. Merge with the existing summary via a Gemini Flash call.
     4. Write the new summary and delete the summarized rows.
 
     Errors are logged but not raised — summarization is best-effort; failing
@@ -126,11 +126,17 @@ async def maybe_summarize_older_messages(sb: Client, session_id: str) -> None:
 {conversation_text}"""
 
     try:
-        model = get_sonnet(max_tokens=2048, temperature=0.1)
+        # No max_tokens override: the prompt asks for "under 1000 words" but
+        # Gemini 3 Flash burns output tokens on reasoning BEFORE emitting the
+        # final summary, so a tight cap silently clips the visible summary.
+        # The helper default (66k, the model's ceiling) lets the model
+        # self-terminate on the natural stop token — the prompt is what
+        # enforces length, not the token cap.
+        model = get_gemini_flash()
         response = await model.ainvoke(prompt)
         new_summary = (response.content or "").strip() if isinstance(response.content, str) else ""
-        # Sonnet may return list content blocks for tool-aware responses;
-        # fallback to join those when plain string unavailable.
+        # Gemini 3 returns list content blocks (one per thought-signed text
+        # span); join the text blocks when plain string is unavailable.
         if not new_summary and isinstance(response.content, list):
             new_summary = "\n".join(
                 str(b.get("text", "")) if isinstance(b, dict) else str(b)

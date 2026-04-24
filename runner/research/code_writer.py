@@ -1,8 +1,8 @@
-"""Opus-backed code writer for the integration research sandbox.
+"""Gemini-backed code writer for the integration research sandbox.
 
 When the research orchestrator calls `execute_code(purpose="...")`, the
 tool doesn't ask the orchestrator to write Python itself. Instead it
-delegates to this module, which asks **Claude Opus 4.6** to produce a
+delegates to this module, which asks **Gemini 3.1 Pro** to produce a
 focused Python snippet for that specific purpose, given:
 
 - The provider API docs (same ones in the orchestrator's prompt).
@@ -18,12 +18,11 @@ question. Mixing that with code generation has two costs:
 
 1. **Context bloat.** Every prior tool call appends `(AIMessage with
    full code string) + (ToolMessage with stdout)` to the orchestrator's
-   messages. Over 20 steps that's meaningful token weight on Sonnet
-   that has nothing to do with routing decisions.
-2. **Quality.** Opus writes substantially better Python for non-trivial
-   tasks (HogQL with joins, GitHub pagination, LangSmith session-first
-   run queries) than Sonnet. Using Sonnet for "decide what to ask" +
-   Opus for "write the code" plays to both models' strengths.
+   messages. Over 20 steps that's meaningful token weight that has
+   nothing to do with routing decisions.
+2. **Focus.** Even within a single model family, splitting "decide what
+   to ask" from "write the code" keeps each prompt tight and lets us
+   evolve the two prompts independently.
 
 ## Statelessness
 
@@ -40,7 +39,7 @@ keeps the code writer fast and predictable.
 
 ## Output shape
 
-`with_structured_output(CodeWriterOutput)` forces Opus to emit
+`with_structured_output(CodeWriterOutput)` forces Gemini to emit
 `{code: str, explanation: str}` — no markdown fences, no preamble.
 `explanation` is surfaced back to the orchestrator in the tool result
 so it can see what the code writer actually produced and correct course
@@ -53,7 +52,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from runner.chat.logging import chat_log
-from runner.chat.models import get_opus
+from runner.chat.models import get_gemini_pro
 
 
 class CodeWriterOutput(BaseModel):
@@ -209,9 +208,9 @@ async def write_research_code(
     env_description: str,
     previous_exec: PreviousExec | None = None,
 ) -> CodeWriterOutput:
-    """Ask Opus to produce Python that fulfills the given research goal.
+    """Ask Gemini to produce Python that fulfills the given research goal.
 
-    Always returns a `CodeWriterOutput`. If Opus errors or returns
+    Always returns a `CodeWriterOutput`. If the model errors or returns
     unusable output (empty code, obvious truncation), we still return a
     valid `CodeWriterOutput` whose `code` is a stub that prints an
     informative error to stdout — this keeps the outer ReAct loop
@@ -228,7 +227,7 @@ async def write_research_code(
         ),
     )
 
-    model = get_opus(max_tokens=4096, temperature=0.1)
+    model = get_gemini_pro()
     structured = model.with_structured_output(CodeWriterOutput, method="json_schema")
 
     user_message = _build_user_message(
@@ -248,14 +247,14 @@ async def write_research_code(
     except Exception as e:
         chat_log("error", "research_code_writer_llm_failed", err=repr(e))
         return _error_stub(
-            f"Opus refused to generate code for purpose {purpose!r}: "
+            f"Code writer refused to generate code for purpose {purpose!r}: "
             f"{type(e).__name__}: {e}"
         )
 
     if not output.code.strip():
         chat_log("warn", "research_code_writer_empty_output", purpose=purpose[:200])
         return _error_stub(
-            f"Opus returned empty code for purpose {purpose!r}."
+            f"Code writer returned empty code for purpose {purpose!r}."
         )
 
     # Sometimes models ignore instructions and wrap output in markdown
@@ -283,7 +282,7 @@ async def write_research_code(
 
 
 def _strip_markdown_fences(code: str) -> str:
-    """Remove leading/trailing ```python ... ``` fences if Opus added them."""
+    """Remove leading/trailing ```python ... ``` fences if the model added them."""
     stripped = code.strip()
     if stripped.startswith("```"):
         # Drop the opening fence line.

@@ -31,8 +31,9 @@ class ResearchFinding(BaseModel):
     `posthog`, `sentry`, `langsmith`, `braintrust`.
 
     `rawData` is a JSON-encoded string (not an object) — matches the TS
-    schema which had to do this to keep Anthropic structured-output happy.
-    We don't parse it on write; treat it as opaque supporting evidence.
+    schema which had to do this to keep provider structured-output happy
+    (and existing rows in the DB encode it the same way). We don't parse
+    it on write; treat it as opaque supporting evidence.
     """
 
     source: str

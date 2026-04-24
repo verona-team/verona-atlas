@@ -1,15 +1,23 @@
 """
-Prompt definitions and tool schemas for the outer QA ReAct agent (Claude Opus)
+Prompt definitions and tool schemas for the outer QA ReAct agent (Gemini 3.1 Pro)
 that drives the agentic test execution loop.
+
+The Stagehand browser-agent model remains Claude Opus (bumped to 4.7) because
+Stagehand's CUA / agent mode is currently tuned for Claude-family models. The
+outer ReAct loop has been migrated to Gemini 3.1 Pro via LangChain; the raw
+Anthropic SDK is no longer used here.
 """
 import json
 from typing import Any
 
 # Stagehand session + inner execute agent (Browserbase). Provider/model form per Stagehand API.
-STAGEHAND_AGENT_MODEL = "anthropic/claude-opus-4-6"
+STAGEHAND_AGENT_MODEL = "anthropic/claude-opus-4-7"
 STAGEHAND_SESSION_MODEL = STAGEHAND_AGENT_MODEL
 
-OUTER_AGENT_MODEL = "claude-opus-4-6"
+# Outer ReAct loop model — used by test_executor as a langchain model id string
+# for logging; the actual model instance is obtained via
+# `runner.chat.models.get_gemini_pro()`.
+OUTER_AGENT_MODEL = "gemini-3.1-pro-preview"
 
 TOOLS: list[dict[str, Any]] = [
     {
@@ -388,27 +396,9 @@ Repeat this observe → reason → act cycle until the entire test flow is compl
 - **Handle loading states.** After navigation or form submissions the page may take a moment to load. If a screenshot shows a loading/spinner state, you may need to wait and re-check by performing another browser_action."""
 
 
-def build_tool_result_content(
-    screenshot_b64: str | None,
-    url: str,
-    result_text: str,
-) -> list[dict]:
-    """Build tool-result content blocks including the post-action screenshot."""
-    blocks: list[dict] = [
-        {
-            "type": "text",
-            "text": f"Current URL: {url}\n\nResult: {result_text}",
-        },
-    ]
-    if screenshot_b64:
-        blocks.append(
-            {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": "image/png",
-                    "data": screenshot_b64,
-                },
-            }
-        )
-    return blocks
+# `build_tool_result_content` was previously exported here for the raw
+# Anthropic SDK loop. The outer executor now uses LangChain + Gemini 3 Pro
+# and builds multimodal messages inline with LangChain's unified content
+# block shape (`{type: "image", base64, mime_type}`), so that helper is
+# gone. If you need a similar helper for a new provider, add it here
+# rather than duplicating the content-block construction at call sites.

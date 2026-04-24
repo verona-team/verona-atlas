@@ -1,8 +1,9 @@
 """Modal Sandbox for arbitrary LLM-written integration research code.
 
-The integration research agent lets Claude drill deep into each connected
-integration by writing ad-hoc Python that calls the provider's API. Running
-that Python inside a Modal Sandbox buys us:
+The integration research agent lets the code-writer model (Gemini 3.1 Pro)
+drill deep into each connected integration by writing ad-hoc Python that
+calls the provider's API. Running that Python inside a Modal Sandbox
+buys us:
 
 - **Isolation.** LLM-generated code can do whatever it wants within the
   sandbox's gVisor container without touching our Modal function's process
@@ -10,13 +11,13 @@ that Python inside a Modal Sandbox buys us:
 - **Ephemerality.** Sandboxes are bounded (10min here) and torn down at
   the end of every research run; leaked state is impossible.
 - **Reproducibility.** The sandbox image is pinned (`debian_slim(py=3.13)`
-  + `httpx`), so Claude's code sees the same runtime every invocation.
+  + `httpx`), so the generated code sees the same runtime every invocation.
 
 ## Design choices
 
-- **Language inside the sandbox: Python.** The old TS agent had Claude
+- **Language inside the sandbox: Python.** The old TS agent had the model
   write JS because Vercel Sandbox was Node. We're free to pick, and
-  Python wins for us because our whole runner is Python and Claude
+  Python wins for us because our whole runner is Python and the model
   writes idiomatic httpx calls with less ceremony than `fetch`.
 
 - **Credentials via env vars, not injected headers.** The old Vercel
@@ -25,7 +26,7 @@ that Python inside a Modal Sandbox buys us:
   Modal doesn't have an equivalent, so instead we:
     1. Decrypt credentials in the parent process.
     2. Pass them as env vars to the sandbox via `Secret.from_dict`.
-    3. Tell Claude exactly which env var → which header in the system
+    3. Tell the model exactly which env var → which header in the system
        prompt (e.g. `Authorization: Bearer $POSTHOG_API_KEY`).
   This is actually cleaner — the LLM sees what it's using and we can
   check the generated code for anything suspicious before it runs (we
@@ -84,8 +85,8 @@ class IntegrationEnv:
 
     Kept as a typed dataclass rather than `dict[str, str]` so it's
     obvious what shape the downstream sandbox will see; the values
-    here are exactly what ends up in `os.environ` inside Claude's
-    execute_code calls.
+    here are exactly what ends up in `os.environ` inside every
+    `execute_code` call.
     """
 
     # Non-secret configuration (host URLs, project IDs, org slugs).
@@ -93,8 +94,8 @@ class IntegrationEnv:
     # because they're not sensitive.
     public: dict[str, str]
     # Decrypted credentials. Passed via modal.Secret.from_dict so
-    # they're never logged by Modal's own instrumentation (though
-    # Claude's code can obviously read them from os.environ — that's
+    # they're never logged by Modal's own instrumentation (though the
+    # generated code can obviously read them from os.environ — that's
     # the whole point).
     secret: dict[str, str]
 
@@ -120,7 +121,7 @@ class ExecResult:
 def _build_sandbox_image() -> modal.Image:
     """Debian slim + httpx. Cached across runs once Modal has built it once.
 
-    We intentionally keep the dependency list minimal. Claude's research
+    We intentionally keep the dependency list minimal. The research
     scripts only need to speak HTTPS; anything heavier (pandas etc.)
     would bloat cold starts with zero research-agent benefit.
     """
@@ -142,7 +143,7 @@ async def create_research_sandbox(env: IntegrationEnv) -> modal.Sandbox:
     Uses Modal's async interface (`.aio`) throughout so this coroutine
     never blocks the parent event loop. The blocking Modal client would
     otherwise run a full gRPC round-trip on the chat worker's single
-    thread, pausing every other async task (Supabase writes, Anthropic
+    thread, pausing every other async task (Supabase writes, LLM provider
     streams, sibling research tasks) until it returned.
     """
     app = await modal.App.lookup.aio(_SANDBOX_APP_NAME, create_if_missing=True)

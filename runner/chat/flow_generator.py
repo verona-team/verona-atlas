@@ -1,10 +1,11 @@
 """Flow-proposal generation — called by the `tool_generate_flow_proposals` node.
 
-Uses Claude Sonnet with structured output (`with_structured_output`) to produce
-up to 3 proposed flows from a ResearchReport. On replace-style regenerations,
-the generator also receives the prior row's flows + the orchestrator's intent
-string so it can decide which ids to re-emit verbatim (preservation) vs.
-invent new ones (clean-slate).
+Port of `lib/chat/flow-generator.ts`. Uses Gemini 3.1 Pro with structured
+output (`with_structured_output`) to produce up to 3 proposed flows from a
+ResearchReport. On replace-style regenerations, the generator also receives
+the prior row's flows + the orchestrator's intent string so it can decide
+which ids to re-emit verbatim (preservation) vs. invent new ones
+(clean-slate).
 
 ## Output shape parity
 
@@ -45,7 +46,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from runner.chat.logging import chat_log
-from runner.chat.models import get_sonnet
+from runner.chat.models import get_gemini_pro
 
 
 # ----- Pydantic schemas -----
@@ -105,23 +106,23 @@ async def generate_flow_proposals(
     avoid_ids: list[str] | None = None,
     intent: str | None = None,
 ) -> FlowProposals:
-    """Call Sonnet to produce up to 3 concrete, approvable flow proposals.
+    """Call Gemini 3.1 Pro to produce up to 3 concrete, approvable flow proposals.
 
     Args:
         app_url: Base URL the agent will navigate from.
         research_report: ResearchReport dict for the project.
         prior_flows: On replace-style regenerations, the summary of the
             (soon-to-be-superseded) active row's flows, INCLUDING each
-            flow's current approval state. Sonnet uses this to decide
-            which to re-emit verbatim (preservation) and which to drop
-            or replace.
+            flow's current approval state. The generator uses this to
+            decide which to re-emit verbatim (preservation) and which to
+            drop or replace.
         avoid_ids: Ids the generator must NOT reuse except for intentional
             re-emission (same id, same steps) to preserve a flow. Typically
             the ids from `prior_flows`.
         intent: The orchestrator's one-line summary of user intent
             (`reason` from the `generate_flow_proposals` tool call).
-            Embedded verbatim so Sonnet knows whether the user wants
-            additive preservation or a clean slate.
+            Embedded verbatim so the generator knows whether the user
+            wants additive preservation or a clean slate.
     """
     report = research_report or {}
     findings = report.get("findings") or []
@@ -265,7 +266,7 @@ Skipped: {', '.join(integrations_skipped) or 'none'}
 
 Do not include any emoji characters in the analysis, flow names, descriptions, rationales, or steps. Use plain text only."""
 
-    model = get_sonnet(max_tokens=4096, temperature=0.2)
+    model = get_gemini_pro()
     structured = model.with_structured_output(FlowProposals, method="json_schema")
     chat_log(
         "info",
