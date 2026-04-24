@@ -41,12 +41,12 @@ def stagehand_agent_model_config(
     ``modelName`` / ``apiKey`` / ``provider`` in the JSON body.
 
     The ``execute`` (agentExecute) endpoint requires the **bare** model id
-    (e.g. ``claude-opus-4-7``) with the provider supplied separately —
+    (e.g. ``claude-opus-4-6``) with the provider supplied separately —
     passing the prefixed form caused a 404 because the server forwarded it
     verbatim to the provider API.
 
     The ``observe`` endpoint, conversely, expects ``model_name`` in
-    ``provider/model`` format (e.g. ``anthropic/claude-opus-4-7``) and
+    ``provider/model`` format (e.g. ``anthropic/claude-opus-4-6``) and
     returns an ``UnsupportedModelError`` if only the bare id is given.
 
     Set *prefixed* to ``True`` when building config for ``observe`` calls.

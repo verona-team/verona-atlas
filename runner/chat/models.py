@@ -10,27 +10,42 @@ All LLM calls from the Modal runner MUST go through these helpers so that:
 
 ## Model selection rules
 
-- **Gemini 3.1 Pro** (`gemini-3.1-pro-preview`) is used for the main reasoning
-  workloads that previously ran on Claude Opus/Sonnet: chat orchestrator,
+- **Gemini 3.1 Pro** (`gemini-3.1-pro-preview`) is used for the main
+  reasoning workloads that stay on Google: chat orchestrator,
   integration-research orchestrator, integration-research code writer,
-  codebase exploration agent, flow-proposal generator, and the outer QA
-  test-executor ReAct loop.
+  codebase exploration agent, and flow-proposal generator.
 
 - **Gemini 3 Flash** (`gemini-3-flash-preview`) is the workhorse for the
-  lighter-weight, well-scoped summarization tasks: rolling-context compaction
-  and the post-run Slack executive summary.
+  lighter-weight, well-scoped summarization tasks: rolling-context
+  compaction and the post-run Slack executive summary.
 
-- **Claude Opus 4.7** (`claude-opus-4-7`, via Anthropic) is used ONLY for the
-  Stagehand browser agent (session + inner execute agent). Stagehand's CUA
-  mode is currently tuned for Claude-family models, so this call path stays
-  on Anthropic. The model id is defined in `runner/prompts.py` because the
-  Stagehand SDK wants the raw `provider/model-id` string, not a LangChain
-  `BaseChatModel` — `get_claude_opus()` below is only used if a future
-  non-Stagehand path wants a LangChain-wrapped Opus call.
+- **Claude Opus 4.7** (`claude-opus-4-7`, via Anthropic) drives the outer
+  QA test-executor ReAct loop inside `execute_test_run` — the agent that
+  observes screenshots, reasons about page state, and decides which of
+  our `browser_action` / `navigate_to_url` / `observe_dom` / `check_email`
+  / `save_credentials` / `complete_test` tools to call next. Opus 4.7 is
+  the current Anthropic flagship for agentic tool use and screenshot
+  reasoning and does NOT collide with the Stagehand CUA
+  `computer_20250124` issue because this layer uses our own custom tool
+  schema, not Anthropic's native computer-use tool. Exposed via
+  `get_claude_opus_outer()`.
+
+- **Claude Opus 4.6** (`claude-opus-4-6`, via Anthropic) is used ONLY for
+  the Stagehand browser agent (session + inner execute agent). Stagehand's
+  CUA mode is currently tuned for Claude-family models, and Stagehand v3's
+  supported CUA-model list
+  (https://docs.stagehand.dev/v3/configuration/models) tops out at Opus 4.6
+  — the SDK still emits the legacy `computer_20250124` tool schema, which
+  Opus 4.7 refuses. The model id is defined in `runner/prompts.py` because
+  the Stagehand SDK wants the raw `provider/model-id` string, not a
+  LangChain `BaseChatModel`. `get_claude_opus()` below returns a LangChain
+  wrapper around this same 4.6 id for any future non-Stagehand, CUA-adjacent
+  path that wants to run on the same model as the inner browser agent.
 
 If a future task needs something even stronger or a new provider, add a
 helper here and keep the call sites declarative (`get_gemini_pro()` /
-`get_gemini_flash()` / `get_claude_opus()`), not model-name-sprinkled.
+`get_gemini_flash()` / `get_claude_opus()` / `get_claude_opus_outer()`),
+not model-name-sprinkled.
 
 ## A note on temperature
 
@@ -54,7 +69,8 @@ if TYPE_CHECKING:
 # place if they want to hit a cheaper / different model.
 GEMINI_PRO_MODEL = "gemini-3.1-pro-preview"
 GEMINI_FLASH_MODEL = "gemini-3-flash-preview"
-CLAUDE_OPUS_MODEL = "claude-opus-4-7"
+CLAUDE_OPUS_MODEL = "claude-opus-4-6"
+CLAUDE_OPUS_OUTER_MODEL = "claude-opus-4-7"
 
 
 def get_gemini_pro(
@@ -64,11 +80,12 @@ def get_gemini_pro(
     timeout: float | None = 300.0,
     max_retries: int = 2,
 ) -> "ChatGoogleGenerativeAI":
-    """Gemini 3.1 Pro — the main reasoning model.
+    """Gemini 3.1 Pro — the main Google-side reasoning model.
 
     Used for the chat orchestrator, research orchestrator, research code
-    writer, codebase explorer, flow-proposal generator, and the outer QA
-    test-executor ReAct loop.
+    writer, codebase explorer, and flow-proposal generator. The outer QA
+    test-executor ReAct loop lives on Anthropic Opus 4.7 via
+    `get_claude_opus_outer()` instead.
 
     Defaults are set to the model's full envelope rather than a
     conservative fraction of it:
@@ -143,7 +160,7 @@ def get_claude_opus(
     timeout: float = 300.0,
     max_retries: int = 2,
 ) -> "ChatAnthropic":
-    """Claude Opus 4.7 — reserved for the Stagehand browser agent path.
+    """Claude Opus 4.6 — reserved for the Stagehand browser agent path.
 
     The Stagehand SDK consumes this model via its own agent/session config
     (see `runner/prompts.py` + `runner/browser.py`) which speaks directly
@@ -151,7 +168,7 @@ def get_claude_opus(
     LangChain path that needs Opus can get a configured `ChatAnthropic`
     without re-pinning the model id.
 
-    `max_tokens=128_000` matches Opus 4.7's maximum output ceiling;
+    `max_tokens=128_000` matches Opus 4.6's maximum output ceiling;
     `timeout=300.0` (5 minutes) matches the Gemini Pro reasoning budget.
     Both are the safe defaults for any non-Stagehand Opus call we might
     add later — override downward on specific call sites if you need
@@ -163,6 +180,49 @@ def get_claude_opus(
         model=CLAUDE_OPUS_MODEL,
         max_tokens=max_tokens,
         temperature=temperature,
+        timeout=timeout,
+        max_retries=max_retries,
+    )
+
+
+def get_claude_opus_outer(
+    *,
+    max_tokens: int = 32_000,
+    timeout: float = 300.0,
+    max_retries: int = 2,
+) -> "ChatAnthropic":
+    """Claude Opus 4.7 — the outer QA test-executor ReAct loop model.
+
+    Drives the agent inside `runner.test_executor.execute_template` that
+    observes browser screenshots, reasons about page state, and picks the
+    next tool to call (`browser_action`, `navigate_to_url`, `observe_dom`,
+    `check_email`, `save_credentials`, or `complete_test`). Unlike the
+    Stagehand inner agent, this layer uses our own tool schema (authored
+    in `runner/prompts.py::TOOLS` in Anthropic's native
+    `{name, description, input_schema}` shape), so it does NOT collide
+    with Stagehand's legacy `computer_20250124` tool-schema issue and can
+    safely run on 4.7.
+
+    Defaults rationale:
+
+    - `max_tokens=32_000`: per-turn output cap. Opus 4.7 supports up to
+      128k output tokens, but a single ReAct turn in this loop typically
+      emits a short natural-language observation + one tool call. 32k
+      gives adaptive-thinking plenty of room to reason without letting a
+      runaway turn burn our entire budget. Override upward only if you
+      observe premature truncation.
+    - `timeout=300.0` (5 minutes): matches the reasoning-model budget we
+      use everywhere else in the runner. A turn that reasons hard before
+      picking a tool can legitimately take over a minute.
+    - **No `temperature` kwarg:** Opus 4.7 does not accept `temperature`
+      (see `langchain-anthropic` model profile `"temperature": False`).
+      Setting it raises at request time.
+    """
+    from langchain_anthropic import ChatAnthropic
+
+    return ChatAnthropic(
+        model=CLAUDE_OPUS_OUTER_MODEL,
+        max_tokens=max_tokens,
         timeout=timeout,
         max_retries=max_retries,
     )
