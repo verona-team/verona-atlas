@@ -4,6 +4,7 @@ import { Children, useEffect, useRef, useState } from 'react'
 import { ChevronDown, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
+import { GitHubInstallationPicker } from '@/components/integrations/github-installation-picker'
 import { SlackChannelPicker } from '@/components/integrations/slack-channel-picker'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -161,6 +162,7 @@ export function GitHubCard({
   returnTo?: string
 }) {
   const [waiting, setWaiting] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
   const installPopupRef = useRef<Window | null>(null)
 
   function openGitHubInstall() {
@@ -208,10 +210,13 @@ export function GitHubCard({
           setWaiting(false)
           installPopupRef.current?.close()
           installPopupRef.current = null
-          toast.message(
-            'Multiple GitHub installations found for your account. Complete the install flow from the popup to pick which one to link here.',
-            { duration: 8000 },
-          )
+          // Surface the in-app picker instead of leaving the user on
+          // GitHub's "configure installation" screen with no next
+          // step. The picker reads the stored OAuth token to list
+          // installations and lets the user pick one; without it the
+          // multi-install case would dead-end the same way the
+          // original single-install "second account" bug did.
+          setPickerOpen(true)
           return
         }
       } catch {
@@ -312,6 +317,12 @@ export function GitHubCard({
         </div>
       )}
       {integration && <GitHubRepoPicker projectId={projectId} onSaved={onRefresh} />}
+      <GitHubInstallationPicker
+        open={pickerOpen}
+        projectId={projectId}
+        onOpenChange={setPickerOpen}
+        onLinked={onRefresh}
+      />
     </IntegrationCard>
   )
 }
