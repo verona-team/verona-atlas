@@ -64,6 +64,44 @@ from .tools import ALL_TOOLS
 from .context import maybe_summarize_older_messages
 
 
+# ----- helpers -----
+
+
+def extract_ai_message_text(message: AIMessage) -> str:
+    """Concatenate the text blocks from an AIMessage, ignoring tool_use blocks.
+
+    `AIMessage.content` can be either a plain string (rare, text-only turns
+    from older model families) or a list of content blocks interleaving
+    text and tool_use. Gemini 3 series models always return the list form
+    — one text block per thought-signed span — so after the Gemini
+    migration this helper almost exclusively takes the list branch. We
+    still handle the string case for forward/back compatibility with other
+    model providers.
+
+    When the model emits both — e.g. "Here's my analysis..." followed by a
+    tool_use block calling `generate_flow_proposals` — the text blocks
+    appear in the order the model wrote them; we concatenate those and
+    drop everything else.
+
+    Empty / whitespace-only results return "" so callers can skip the DB
+    write without an extra truthiness dance.
+    """
+    content = message.content
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                t = block.get("text")
+                if isinstance(t, str):
+                    parts.append(t)
+            elif isinstance(block, str):
+                parts.append(block)
+        return "".join(parts).strip()
+    return ""
+
+
 # ----- ensure_research -----
 
 
@@ -186,6 +224,7 @@ async def agent_turn(state: ChatTurnState) -> dict[str, Any]:
         raise
 
     tool_calls = getattr(response, "tool_calls", None) or []
+    assistant_text = extract_ai_message_text(response)
     chat_log(
         "info",
         "chat_agent_llm_ok",
@@ -196,15 +235,68 @@ async def agent_turn(state: ChatTurnState) -> dict[str, Any]:
         tool_call_count=len(tool_calls),
         tool_names=[tc.get("name") for tc in tool_calls],
         tool_args=[tc.get("args") for tc in tool_calls],
-        has_text_content=bool(
-            response.content
-            if isinstance(response.content, str)
-            else any(
-                isinstance(b, dict) and b.get("type") == "text"
-                for b in (response.content or [])
-            )
-        ),
+        has_text_content=bool(assistant_text),
     )
+
+    # Persist the opening assistant text NOW — before any downstream tool
+    # node writes a row of its own. The model's AIMessage is structured
+    # as [text_block, tool_use_block] (it narrates, then calls the tool),
+    # and the user-visible ordering should match.
+    #
+    # Without this early persist, the ordering in the DB was reversed on
+    # every bootstrap turn:
+    #
+    #   tool_generate_flow_proposals.insert()  →  flow_proposals row @ T1
+    #   finalize.upsert()                      →  opening text row   @ T2 > T1
+    #
+    # ORDER BY created_at ASC in the UI then rendered the cards ABOVE
+    # the opening text, inverting what the model wrote. Persisting here
+    # assigns the text row the earlier created_at, so the cards land
+    # below it naturally.
+    #
+    # Soft-fail on exception: we log at error level and move on rather
+    # than aborting the whole turn. There is NO fallback upsert in
+    # finalize — a late-firing retry would give the text row a
+    # created_at AFTER the tool node's row, silently re-introducing the
+    # reverse-ordering bug this code exists to prevent. A missing text
+    # bubble on a rare write failure is a visible, debuggable failure
+    # mode; silently-reversed ordering is not. The error log below is
+    # the observability breadcrumb for those cases.
+    #
+    # Idempotency: upsert on (session_id, client_message_id) with
+    # ignore_duplicates=True, so a Modal retry that re-spawns the same
+    # turn can't produce a duplicate row here.
+    sb = get_supabase()
+    assistant_message_id = state.get("assistant_message_id")
+    if assistant_text and assistant_message_id:
+        try:
+            sb.table("chat_messages").upsert(
+                {
+                    "session_id": state["session_id"],
+                    "role": "assistant",
+                    "content": assistant_text,
+                    "client_message_id": assistant_message_id,
+                },
+                on_conflict="session_id,client_message_id",
+                ignore_duplicates=True,
+            ).execute()
+            chat_log(
+                "info",
+                "chat_agent_text_persisted",
+                session_id=state.get("session_id"),
+                turn_id=state.get("turn_id"),
+                client_message_id=assistant_message_id,
+                text_len=len(assistant_text),
+            )
+        except Exception as e:
+            chat_log(
+                "error",
+                "chat_agent_text_persist_failed",
+                session_id=state.get("session_id"),
+                turn_id=state.get("turn_id"),
+                client_message_id=assistant_message_id,
+                err=repr(e),
+            )
 
     return {
         "messages": [response],
@@ -782,59 +874,27 @@ def _start_test_run_failure(session_id: str, message: str) -> dict[str, Any]:
 
 
 async def finalize(state: ChatTurnState) -> dict[str, Any]:
-    """Persist the assistant reply and reset session status.
+    """Compact history (best-effort) and reset session status.
 
-    Extracts the final text from the most recent AIMessage. The
-    `AIMessage.content` can be either a plain string (text-only turn) or a
-    list of content blocks (text + tool_use interleaved). Gemini 3 series
-    models always return a list of content blocks (one per thought-signed
-    text span), so we concatenate only the text blocks.
+    Assistant text persistence is NOT this node's responsibility — it
+    happens inside `agent_turn`, immediately after the LLM returns, so the
+    text row's `created_at` naturally precedes any tool-generated row's.
 
-    Idempotency: we upsert on `(session_id, client_message_id)` so a
-    Modal retry or a duplicate spawn never duplicates the assistant row.
+    We deliberately do NOT write the text again here as a "fallback." A
+    late-firing fallback upsert would be triggered precisely when the
+    earlier write failed — and its effect would be to give the text row a
+    `created_at` later than the tool node's row, re-introducing the
+    reverse-ordering bug we fixed. A missing text bubble on a rare write
+    failure is a visible, debuggable failure mode; silently-reversed
+    ordering is the original bug dressed up. Preferring the former.
+
+    If `agent_turn`'s write failed, the user will see the tool-generated
+    row (cards / test_run_started bubble) without the opening narration,
+    and the observability breadcrumb is the `chat_agent_text_persist_failed`
+    error log emitted at the failure site.
     """
     sb = get_supabase()
     session_id = state["session_id"]
-    messages = state.get("messages") or []
-
-    assistant_text = ""
-    for m in reversed(messages):
-        if isinstance(m, AIMessage):
-            if isinstance(m.content, str):
-                assistant_text = m.content.strip()
-            elif isinstance(m.content, list):
-                parts: list[str] = []
-                for block in m.content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        t = block.get("text")
-                        if isinstance(t, str):
-                            parts.append(t)
-                    elif isinstance(block, str):
-                        parts.append(block)
-                assistant_text = "".join(parts).strip()
-            break
-
-    assistant_message_id = state.get("assistant_message_id")
-
-    if assistant_text:
-        try:
-            sb.table("chat_messages").upsert(
-                {
-                    "session_id": session_id,
-                    "role": "assistant",
-                    "content": assistant_text,
-                    "client_message_id": assistant_message_id,
-                },
-                on_conflict="session_id,client_message_id",
-                ignore_duplicates=True,
-            ).execute()
-        except Exception as e:
-            chat_log(
-                "error",
-                "chat_finalize_assistant_persist_failed",
-                session_id=session_id,
-                err=repr(e),
-            )
 
     try:
         await maybe_summarize_older_messages(sb, session_id)
