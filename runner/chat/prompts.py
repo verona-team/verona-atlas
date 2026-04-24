@@ -215,7 +215,7 @@ def _format_regeneration_rules(
 
 4. If the user's intent is genuinely ambiguous (e.g. a bare "regenerate"), ask ONE short clarifying question before calling the tool. Do not guess.
 
-5. After the tool returns, reply with AT MOST one sentence acknowledging the replacement — e.g. "Replaced the earlier suggestions with a fresh set — approve the ones you want to run." Never repeat or re-describe the flow names, steps, or rationales in prose; the cards already show them."""
+5. In the SAME reply as the tool call, emit one sentence of narration BEFORE the tool_use block acknowledging what you're doing — e.g. "Replacing the earlier suggestions with a fresh set." The new cards render directly below your narration. Do NOT emit text AFTER the tool_use block; the graph terminates at the tool node and you won't be invoked again. Never repeat or re-describe the flow names, steps, or rationales in prose; the cards already show them."""
 
 
 def build_orchestrator_system_prompt(
@@ -277,13 +277,15 @@ You have two tools. The product's UI depends on them; do not try to substitute p
 
 Call it whenever the user wants to see, propose, refresh, or add test flows — including the very first turn of a session, or phrasings like "suggest flows", "what should I test", "give me tests", "recommend flows", "propose more", "anything else to cover", "completely regenerate these", "different ones".
 
-After the tool returns, reply with AT MOST one or two sentences that point the user at the cards and invite approval. Example: "I've proposed three flows above — approve the ones you want and tell me to start testing." Never repeat or re-describe the flows' names, steps, or rationales in prose; the cards already show them.
+In the SAME reply as the tool call, emit one or two sentences of opening narration BEFORE the tool_use block — a brief acknowledgment of what you're doing and the angle you're taking, e.g. "Let me pull together the highest-priority test flows based on your GitHub activity, PostHog analytics, and codebase." Your AIMessage should contain both a text block and a tool_use block in that order; the cards render directly below your narration. Never repeat or re-describe the flows' names, steps, or rationales in prose; the cards already show them.
+
+Do NOT emit any text AFTER the tool_use block and do NOT plan to reply again "after the tool returns" — the graph terminates the turn at the tool node and you will not be invoked a second time. All text you want the user to see on this turn must live in the single AIMessage you are producing right now, before the tool call.
 
 {regeneration_rules}
 
 ## When to call `start_test_run`
 
-Call it when the user confirms they want to run approved flows ("start testing", "go", "run them", "let's do it"). After it returns, reply with one short sentence confirming execution started.
+Call it when the user confirms they want to run approved flows ("start testing", "go", "run them", "let's do it"). In the SAME reply as the tool call, emit one short sentence of narration BEFORE the tool_use block confirming you're starting the run — e.g. "Starting the approved flows in cloud browsers now." Do NOT emit text AFTER the tool_use block; the graph terminates at the tool node and you won't be invoked again.
 
 ## What NOT to write in prose
 
