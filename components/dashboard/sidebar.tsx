@@ -111,7 +111,7 @@ export function AppSidebar() {
                   href={`/projects/${project.id}`}
                   tabIndex={sidebarCollapsed ? -1 : 0}
                   className={cn(
-                    'flex items-start gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
+                    'flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
                     isActive
                       ? 'bg-sidebar-accent text-sidebar-foreground'
                       : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground/80',
@@ -129,7 +129,7 @@ export function AppSidebar() {
                     <span
                       aria-label="Setup incomplete"
                       title="Setup incomplete"
-                      className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary"
+                      className="size-1.5 shrink-0 rounded-full bg-primary"
                     />
                   )}
                 </Link>
