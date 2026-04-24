@@ -2,16 +2,27 @@
 Prompt definitions and tool schemas for the outer QA ReAct agent (Gemini 3.1 Pro)
 that drives the agentic test execution loop.
 
-The Stagehand browser-agent model remains Claude Opus (bumped to 4.7) because
-Stagehand's CUA / agent mode is currently tuned for Claude-family models. The
-outer ReAct loop has been migrated to Gemini 3.1 Pro via LangChain; the raw
-Anthropic SDK is no longer used here.
+The Stagehand browser-agent model is Claude Opus 4.6 because Stagehand's CUA /
+agent mode is currently tuned for Claude-family models *and* the Stagehand v3
+SDK only lists Opus up to 4.6 as a supported CUA model. Attempting to use
+Opus 4.7 fails at the Anthropic API layer because Stagehand still emits the
+legacy ``computer_20250124`` tool schema, which 4.7 no longer accepts
+(4.7 requires ``computer_20251124`` + the ``computer-use-2025-11-24`` beta
+header). See Browserbase's CUA-model list:
+https://docs.stagehand.dev/v3/configuration/models
+
+The outer ReAct loop has been migrated to Gemini 3.1 Pro via LangChain; the
+raw Anthropic SDK is no longer used here.
 """
 import json
 from typing import Any
 
 # Stagehand session + inner execute agent (Browserbase). Provider/model form per Stagehand API.
-STAGEHAND_AGENT_MODEL = "anthropic/claude-opus-4-7"
+# Must be one of Stagehand v3's supported CUA models
+# (https://docs.stagehand.dev/v3/configuration/models). Opus 4.7 is NOT on
+# that list yet — do not bump this until Stagehand ships an Opus-4.7-compatible
+# CUA integration.
+STAGEHAND_AGENT_MODEL = "anthropic/claude-opus-4-6"
 STAGEHAND_SESSION_MODEL = STAGEHAND_AGENT_MODEL
 
 # Outer ReAct loop model — used by test_executor as a langchain model id string

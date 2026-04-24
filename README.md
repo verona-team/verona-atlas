@@ -137,7 +137,7 @@ See `.env.example` for the full list. Key variables:
 | `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` | Modal compute credentials |
 | `AGENTMAIL_API_KEY` | AgentMail for 2FA handling |
 | `GOOGLE_API_KEY` | Google Gemini API (chat orchestrator, research agents, flow generator, outer QA loop, post-run summaries) |
-| `ANTHROPIC_API_KEY` | Claude Opus 4.7 API — only used by the Stagehand inner browser agent |
+| `ANTHROPIC_API_KEY` | Claude Opus 4.6 API — only used by the Stagehand inner browser agent |
 | `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` | GitHub App for repo access |
 | `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` | Slack for reporting |
 | `BROWSERBASE_API_KEY` / `BROWSERBASE_PROJECT_ID` | Cloud browsers |

@@ -20,13 +20,17 @@ All LLM calls from the Modal runner MUST go through these helpers so that:
   lighter-weight, well-scoped summarization tasks: rolling-context compaction
   and the post-run Slack executive summary.
 
-- **Claude Opus 4.7** (`claude-opus-4-7`, via Anthropic) is used ONLY for the
+- **Claude Opus 4.6** (`claude-opus-4-6`, via Anthropic) is used ONLY for the
   Stagehand browser agent (session + inner execute agent). Stagehand's CUA
   mode is currently tuned for Claude-family models, so this call path stays
-  on Anthropic. The model id is defined in `runner/prompts.py` because the
-  Stagehand SDK wants the raw `provider/model-id` string, not a LangChain
-  `BaseChatModel` — `get_claude_opus()` below is only used if a future
-  non-Stagehand path wants a LangChain-wrapped Opus call.
+  on Anthropic. We pin to 4.6 rather than 4.7 because Stagehand v3's
+  supported CUA-model list
+  (https://docs.stagehand.dev/v3/configuration/models) tops out at Opus 4.6
+  — the SDK still emits the legacy `computer_20250124` tool schema, which
+  Opus 4.7 refuses. The model id is defined in `runner/prompts.py` because
+  the Stagehand SDK wants the raw `provider/model-id` string, not a
+  LangChain `BaseChatModel` — `get_claude_opus()` below is only used if a
+  future non-Stagehand path wants a LangChain-wrapped Opus call.
 
 If a future task needs something even stronger or a new provider, add a
 helper here and keep the call sites declarative (`get_gemini_pro()` /
@@ -54,7 +58,7 @@ if TYPE_CHECKING:
 # place if they want to hit a cheaper / different model.
 GEMINI_PRO_MODEL = "gemini-3.1-pro-preview"
 GEMINI_FLASH_MODEL = "gemini-3-flash-preview"
-CLAUDE_OPUS_MODEL = "claude-opus-4-7"
+CLAUDE_OPUS_MODEL = "claude-opus-4-6"
 
 
 def get_gemini_pro(
@@ -143,7 +147,7 @@ def get_claude_opus(
     timeout: float = 300.0,
     max_retries: int = 2,
 ) -> "ChatAnthropic":
-    """Claude Opus 4.7 — reserved for the Stagehand browser agent path.
+    """Claude Opus 4.6 — reserved for the Stagehand browser agent path.
 
     The Stagehand SDK consumes this model via its own agent/session config
     (see `runner/prompts.py` + `runner/browser.py`) which speaks directly
@@ -151,7 +155,7 @@ def get_claude_opus(
     LangChain path that needs Opus can get a configured `ChatAnthropic`
     without re-pinning the model id.
 
-    `max_tokens=128_000` matches Opus 4.7's maximum output ceiling;
+    `max_tokens=128_000` matches Opus 4.6's maximum output ceiling;
     `timeout=300.0` (5 minutes) matches the Gemini Pro reasoning budget.
     Both are the safe defaults for any non-Stagehand Opus call we might
     add later — override downward on specific call sites if you need

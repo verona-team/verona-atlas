@@ -1,11 +1,11 @@
 """
 Agentic test executor — ReAct loop powered by Gemini 3.1 Pro (outer reasoning,
 via LangChain) and Stagehand session.execute() (inner browser actions via
-Stagehand v3 API, backed by Claude Opus 4.7).
+Stagehand v3 API, backed by Claude Opus 4.6).
 
 Architecture:
   Outer loop (Gemini 3.1 Pro): observe screenshot → reason → pick tool → repeat
-  Inner loop (Stagehand v3 + Claude Opus 4.7): session.execute(instruction)
+  Inner loop (Stagehand v3 + Claude Opus 4.6): session.execute(instruction)
     performs multi-step browser interactions within a single action.
 """
 import asyncio
