@@ -21,24 +21,8 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import type { Json, ChatMessage } from '@/lib/supabase/types'
-import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { useGithubReady } from '@/lib/settings-prefetch'
-
-/**
- * Supabase UPDATE payloads may include only changed columns; merge so we
- * never drop `content` when a late status-only update arrives.
- */
-function mergeChatMessageRow(prev: ChatMessage, patch: ChatMessage): ChatMessage {
-  const defined = Object.fromEntries(
-    Object.entries(patch).filter(([, v]) => v !== undefined),
-  ) as Partial<ChatMessage>
-  const merged = { ...prev, ...defined }
-  if (merged.content == null) {
-    merged.content = prev.content ?? ''
-  }
-  return merged
-}
 
 const STALE_THINKING_MS = 15 * 60 * 1000
 const NEAR_BOTTOM_THRESHOLD_PX = 96
@@ -458,139 +442,61 @@ export function ChatInterface({
     sendChatMessage,
   ])
 
-  // Realtime subscription to chat_messages — the only source of visible bubbles.
-  useEffect(() => {
-    const supabase = createClient()
-    const channel = supabase
-      .channel(`chat-${sessionId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'chat_messages',
-          filter: `session_id=eq.${sessionId}`,
-        },
-        (payload) => {
-          const newMsg = payload.new as ChatMessage
-          setDbMessages((prev) => {
-            if (prev.some((m) => m.id === newMsg.id)) return prev
-            const safe: ChatMessage = {
-              ...newMsg,
-              content: newMsg.content ?? '',
-            }
-            return [...prev, safe]
-          })
-
-          // Reconcile optimistic bubbles: if the server-persisted row
-          // matches one we were tracking, drop the placeholder.
-          if (newMsg.client_message_id) {
-            setPendingUserMessages((prev) =>
-              prev.filter((m) => m.clientId !== newMsg.client_message_id),
-            )
-          }
-
-          if ((newMsg.metadata as Record<string, Json> | null)?.type === 'flow_proposals') {
-            setFlowStatesOverride(null)
-          }
-        },
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'chat_messages',
-          filter: `session_id=eq.${sessionId}`,
-        },
-        (payload) => {
-          const updated = payload.new as ChatMessage
-          setDbMessages((prev) =>
-            prev.map((m) =>
-              m.id === updated.id ? mergeChatMessageRow(m, updated) : m,
-            ),
-          )
-          if ((updated.metadata as Record<string, Json> | null)?.flow_states) {
-            setFlowStatesOverride(null)
-          }
-        },
-      )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [sessionId])
-
-  // Session status Realtime — drives the `thinking` indicator.
+  // Poll `/api/chat/session-state` while a turn is in flight.
   //
-  // Realtime does NOT replay events that occurred before the channel reached
-  // SUBSCRIBED. Between page mount and WS handshake completion there is a
-  // window (typically a few hundred ms, longer on cold connections) where any
-  // UPDATE to `chat_sessions` is silently dropped. To stay consistent across
-  // that window we:
-  //   1. Listen to live UPDATEs as before.
-  //   2. On SUBSCRIBED, do a one-shot catch-up read of the row to pick up
-  //      anything that changed between SSR and channel-join — covers refresh
-  //      mid-turn, a turn that finished very quickly, WS reconnects, and
-  //      another tab flipping the session.
+  // Replaces the previous Supabase Realtime subscriptions + 3-timer REST
+  // fallback. `postgres_changes` is too unreliable for a handful of events
+  // spread over 60-120 s — a single missed INSERT/UPDATE left the UI stuck
+  // on "thinking" until a full page reload. Polling against a single
+  // combined endpoint is deterministic, debuggable, and bounded by turn
+  // duration.
+  //
+  // Each tick gets back `{ status, statusUpdatedAt, newMessages }` in one
+  // atomic snapshot. The server orders finalize's message upsert BEFORE
+  // flipping status to 'idle' (runner/chat/nodes.py), so the "status=idle"
+  // response always carries the final message rows — no extra flush tick
+  // needed.
+  //
+  // Cadence: 2.5 s baseline, with an immediate first tick so short
+  // follow-up turns don't block on a delay. Tab backgrounding is handled
+  // implicitly by browser setTimeout throttling; a `visibilitychange`
+  // listener kicks a one-shot catch-up poll on refocus so the UI feels
+  // snappy when returning to a backgrounded tab.
+  //
+  // Completion reconciliation:
+  //   - Optimistic user bubbles are dropped by the existing dbMessages-
+  //     reconciliation effect above (matches on client_message_id).
+  //   - `flowStatesOverride` is cleared here when an incoming row carries
+  //     flow_states metadata, matching the old Realtime behavior so
+  //     approve/reject round-trips stop masking the server truth.
+  const isTurnInFlight = isPosting || backendThinking
   useEffect(() => {
-    const supabase = createClient()
+    if (!isTurnInFlight) return
+
     let cancelled = false
+    const abortController = new AbortController()
 
-    const refetchStatus = async () => {
-      const { data } = await supabase
-        .from('chat_sessions')
-        .select('status, status_updated_at')
-        .eq('id', sessionId)
-        .maybeSingle()
-      if (cancelled || !data) return
-      setBackendThinking(
-        computeSessionThinking(data.status ?? 'idle', data.status_updated_at ?? null),
-      )
-    }
+    // Cursor held in closure, advanced after each successful merge. We
+    // intentionally do NOT depend on `dbMessages` in the effect deps —
+    // that would tear down and rebuild the loop on every tick.
+    let sinceCursor: string | null = (() => {
+      if (dbMessages.length === 0) return null
+      const last = dbMessages[dbMessages.length - 1]
+      return last?.created_at ?? null
+    })()
 
-    const channel = supabase
-      .channel(`session-status-${sessionId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'chat_sessions',
-          filter: `id=eq.${sessionId}`,
-        },
-        (payload) => {
-          const row = payload.new as { status?: string; status_updated_at?: string }
-          if (row.status) {
-            setBackendThinking(
-              computeSessionThinking(row.status, row.status_updated_at ?? null),
-            )
-          }
-        },
-      )
-      .subscribe((state) => {
-        if (state === 'SUBSCRIBED') {
-          void refetchStatus()
-        }
-      })
-
-    return () => {
-      cancelled = true
-      supabase.removeChannel(channel)
-    }
-  }, [sessionId, computeSessionThinking])
-
-  // Realtime-fallback poll: occasionally re-fetch chat messages by REST
-  // in case a Realtime message was dropped (e.g. during a brief WS hiccup).
-  // Kept as a safety net — shouldn't be needed in the happy path, but
-  // inexpensive and invisible when Realtime is healthy.
-  useEffect(() => {
-    const mergeFromServer = (rows: ChatMessage[]) => {
+    const mergeMessages = (rows: ChatMessage[]) => {
+      if (rows.length === 0) return
+      let sawFlowStates = false
       setDbMessages((prev) => {
         const byId = new Map(prev.map((m) => [m.id, m]))
         for (const row of rows) {
-          byId.set(row.id, row)
+          const safe: ChatMessage = { ...row, content: row.content ?? '' }
+          byId.set(row.id, safe)
+          const meta = row.metadata as Record<string, Json> | null
+          if (meta?.flow_states || meta?.type === 'flow_proposals') {
+            sawFlowStates = true
+          }
         }
         return Array.from(byId.values()).sort(
           (a, b) =>
@@ -598,27 +504,109 @@ export function ChatInterface({
             new Date(b.created_at ?? 0).getTime(),
         )
       })
+      const lastNew = rows[rows.length - 1]
+      if (lastNew?.created_at) sinceCursor = lastNew.created_at
+      if (sawFlowStates) setFlowStatesOverride(null)
     }
 
-    const load = async () => {
+    const pollOnce = async (): Promise<'stop' | 'continue'> => {
+      const url = new URL('/api/chat/session-state', window.location.origin)
+      url.searchParams.set('sessionId', sessionId)
+      if (sinceCursor) url.searchParams.set('since', sinceCursor)
+
+      let res: Response
       try {
-        const res = await fetch(
-          `/api/chat/messages?sessionId=${encodeURIComponent(sessionId)}&limit=100`,
+        res = await fetch(url.toString(), { signal: abortController.signal })
+      } catch (err) {
+        if (abortController.signal.aborted) return 'stop'
+        // Transient network error — log and let the loop retry on the
+        // next tick. No backoff: the 2.5 s cadence is already gentle and
+        // giving up on a flaky connection is worse UX than re-trying.
+        console.warn('session-state fetch failed', err)
+        return 'continue'
+      }
+
+      if (res.status === 404) {
+        // Session was deleted out from under us. Nothing more to poll.
+        return 'stop'
+      }
+      if (!res.ok) {
+        console.warn('session-state fetch non-ok', res.status)
+        return 'continue'
+      }
+
+      let data: {
+        status: 'idle' | 'thinking' | 'error'
+        statusUpdatedAt: string | null
+        newMessages: ChatMessage[]
+      }
+      try {
+        data = (await res.json()) as typeof data
+      } catch (err) {
+        console.warn('session-state parse failed', err)
+        return 'continue'
+      }
+
+      if (cancelled) return 'stop'
+
+      mergeMessages(data.newMessages)
+
+      const stillThinking = computeSessionThinking(
+        data.status,
+        data.statusUpdatedAt,
+      )
+      setBackendThinking(stillThinking)
+
+      return stillThinking ? 'continue' : 'stop'
+    }
+
+    const POLL_INTERVAL_MS = 2500
+
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => {
+        const t = window.setTimeout(resolve, ms)
+        abortController.signal.addEventListener(
+          'abort',
+          () => {
+            window.clearTimeout(t)
+            resolve()
+          },
+          { once: true },
         )
-        if (!res.ok) return
-        const rows = (await res.json()) as ChatMessage[]
-        if (Array.isArray(rows)) mergeFromServer(rows)
-      } catch {
-        /* ignore */
+      })
+
+    void (async () => {
+      // Fire the first tick immediately — no reason to wait 2.5 s for
+      // the first update, and short follow-up turns often finish in
+      // under a second.
+      while (!cancelled) {
+        const decision = await pollOnce()
+        if (decision === 'stop' || cancelled) return
+        await sleep(POLL_INTERVAL_MS)
+      }
+    })()
+
+    // Refocus catch-up: when the user returns to a backgrounded tab,
+    // the throttled setTimeout may be seconds behind. A single immediate
+    // poll makes the UI feel current on refocus without changing the
+    // steady-state cadence.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && !cancelled) {
+        void pollOnce()
       }
     }
+    document.addEventListener('visibilitychange', onVisibilityChange)
 
-    // Run a few catch-up fetches after mount; nothing fancy.
-    const timeouts = [2000, 8000, 20000].map((ms) =>
-      window.setTimeout(() => void load(), ms),
-    )
-    return () => timeouts.forEach(clearTimeout)
-  }, [sessionId])
+    return () => {
+      cancelled = true
+      abortController.abort()
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+    // We intentionally omit `dbMessages` from deps; the cursor is a
+    // closure local advanced by mergeMessages. Re-running on every
+    // message arrival would tear down the poll loop on each tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTurnInFlight, sessionId, computeSessionThinking])
 
   const [showJumpToBottom, setShowJumpToBottom] = useState(false)
 
@@ -738,7 +726,7 @@ export function ChatInterface({
   }
 
   const approvedCount = Object.values(flowStates).filter((s) => s === 'approved').length
-  const isProcessing = isPosting || backendThinking
+  const isProcessing = isTurnInFlight
 
   const displayMessages = useMemo(() => {
     const dbRendered = dbMessages
