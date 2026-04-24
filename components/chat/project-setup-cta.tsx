@@ -1,8 +1,8 @@
-'use client'
+"use client";
 
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Loader2 } from 'lucide-react'
-import { toast } from 'sonner'
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import {
   AdvancedIntegrationsSection,
   BraintrustCard,
@@ -14,9 +14,9 @@ import {
   SentryCard,
   SlackCard,
   type IntegrationStatus,
-} from '@/components/integrations/integration-cards'
-import { Button } from '@/components/ui/button'
-import { useWorkspace } from '@/lib/workspace-context'
+} from "@/components/integrations/integration-cards";
+import { Button } from "@/components/ui/button";
+import { useWorkspace } from "@/lib/workspace-context";
 
 /**
  * Landing surface for a newly-created project that hasn't armed its
@@ -44,104 +44,103 @@ export function ProjectSetupCTA({
   initialGithubReady,
   onDispatched,
 }: {
-  projectId: string
-  projectName: string
-  appUrl: string
+  projectId: string;
+  projectName: string;
+  appUrl: string;
   /** Server-rendered GitHub readiness — avoids a first-paint flicker where the
    *  button is incorrectly disabled before the client fetch resolves. */
-  initialGithubReady: boolean
-  onDispatched: () => void
+  initialGithubReady: boolean;
+  onDispatched: () => void;
 }) {
-  const { refreshProjects } = useWorkspace()
+  const { refreshProjects } = useWorkspace();
 
-  const [integrations, setIntegrations] = useState<IntegrationStatus[]>([])
-  const [continuing, setContinuing] = useState(false)
-  const lastIntegrationsKeyRef = useRef<string>('')
+  const [integrations, setIntegrations] = useState<IntegrationStatus[]>([]);
+  const [continuing, setContinuing] = useState(false);
+  const lastIntegrationsKeyRef = useRef<string>("");
 
   const loadIntegrations = useCallback(async () => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/integrations`)
-      if (!res.ok) return
-      const data = await res.json()
-      const next = (data.integrations || []) as IntegrationStatus[]
+      const res = await fetch(`/api/projects/${projectId}/integrations`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const next = (data.integrations || []) as IntegrationStatus[];
       const key = next
         .map((i) => `${i.id}:${i.status}:${JSON.stringify(i.meta ?? {})}`)
         .sort()
-        .join('|')
+        .join("|");
       if (key !== lastIntegrationsKeyRef.current) {
-        lastIntegrationsKeyRef.current = key
-        setIntegrations(next)
+        lastIntegrationsKeyRef.current = key;
+        setIntegrations(next);
       }
     } catch {
       /* ignore — initial render already has SSR-derived `initialGithubReady`,
          and the visibility/focus listeners below will retry on re-engagement */
     }
-  }, [projectId])
+  }, [projectId]);
 
   useEffect(() => {
-    loadIntegrations()
-  }, [loadIntegrations])
+    loadIntegrations();
+  }, [loadIntegrations]);
 
   useEffect(() => {
     // NOTE: same pattern as `NewProjectModal` — named handlers so the same
     // references reach `removeEventListener`. Arrow wrappers would leak
     // listeners across projectId changes if this component were ever reused.
     function handleVisibilityChange() {
-      if (document.visibilityState === 'visible') loadIntegrations()
+      if (document.visibilityState === "visible") loadIntegrations();
     }
     function handleFocus() {
-      loadIntegrations()
+      loadIntegrations();
     }
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    window.addEventListener('focus', handleFocus)
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleFocus);
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-      window.removeEventListener('focus', handleFocus)
-    }
-  }, [loadIntegrations])
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [loadIntegrations]);
 
   // `isGitHubComplete` checks both presence AND that a repo has been picked.
   // Fall back to the SSR-derived value until the first fetch lands, so the
   // Continue button isn't incorrectly disabled on initial paint for users
   // arriving from a working setup.
-  const clientGithubReady = isGitHubComplete(integrations)
+  const clientGithubReady = isGitHubComplete(integrations);
   const githubReady =
-    integrations.length === 0 ? initialGithubReady : clientGithubReady
+    integrations.length === 0 ? initialGithubReady : clientGithubReady;
 
   const getStatus = useCallback(
     (type: string) =>
-      integrations.find((i) => i.type === type && i.status === 'active'),
+      integrations.find((i) => i.type === type && i.status === "active"),
     [integrations],
-  )
+  );
 
   const handleContinue = useCallback(async () => {
-    if (!githubReady || continuing) return
-    setContinuing(true)
+    if (!githubReady || continuing) return;
+    setContinuing(true);
     try {
-      const res = await fetch(
-        `/api/projects/${projectId}/dispatch-bootstrap`,
-        { method: 'POST' },
-      )
+      const res = await fetch(`/api/projects/${projectId}/dispatch-bootstrap`, {
+        method: "POST",
+      });
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
+        const body = await res.json().catch(() => ({}));
         throw new Error(
-          typeof body.error === 'string'
+          typeof body.error === "string"
             ? body.error
-            : 'Could not start chat. Please try again.',
-        )
+            : "Could not start chat. Please try again.",
+        );
       }
       // Refresh the sidebar so the "setup incomplete" dot disappears in sync
       // with the local mount swap. `router.refresh()` would also re-run this
       // page's SSR and render `<ChatInterface />` there — but we prefer the
       // in-memory swap so the user sees the chat view instantly, with no
       // second server round-trip.
-      void refreshProjects()
-      onDispatched()
+      void refreshProjects();
+      onDispatched();
     } catch (err) {
-      setContinuing(false)
-      toast.error(err instanceof Error ? err.message : 'Something went wrong')
+      setContinuing(false);
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
     }
-  }, [githubReady, continuing, projectId, refreshProjects, onDispatched])
+  }, [githubReady, continuing, projectId, refreshProjects, onDispatched]);
 
   // Heading + subcopy branch on GitHub status. Even though GitHub can be
   // completed inline via `<GitHubCard>`, the initial framing matters: a user
@@ -149,17 +148,17 @@ export function ProjectSetupCTA({
   // "Connect GitHub to continue" prompt rather than a generic one.
   const heading = githubReady
     ? `${projectName} is almost ready`
-    : `Finish setting up ${projectName}`
+    : `Finish setting up ${projectName}`;
   const subcopy = githubReady
-    ? 'You\u2019ve connected GitHub. Connect Slack, PostHog, or Sentry now for richer analysis, or jump straight into chat and add them later.'
-    : 'Connect GitHub so the agent can read your repo. Other integrations are optional and can be added anytime.'
+    ? "You\u2019ve connected GitHub. Connect Slack, PostHog, or Sentry now for richer analysis, or jump straight into chat and add them later."
+    : "Connect GitHub so the agent can read your repo. Other integrations are optional and can be added anytime.";
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-2xl px-6 py-10 sm:py-14">
         <header className="mb-6">
           <p className="text-xs uppercase tracking-wider text-muted-foreground">
-            {appUrl.replace(/^https?:\/\//, '')}
+            {appUrl.replace(/^https?:\/\//, "")}
           </p>
           <h1 className="mt-2 text-2xl font-medium tracking-tight">
             {heading}
@@ -170,18 +169,18 @@ export function ProjectSetupCTA({
         <div className="space-y-3">
           <GitHubCard
             projectId={projectId}
-            integration={getStatus('github')}
+            integration={getStatus("github")}
             onRefresh={loadIntegrations}
             returnTo={`/projects/${projectId}`}
           />
           <PostHogCard
             projectId={projectId}
-            integration={getStatus('posthog')}
+            integration={getStatus("posthog")}
             onRefresh={loadIntegrations}
           />
           <SlackCard
             projectId={projectId}
-            integration={getStatus('slack')}
+            integration={getStatus("slack")}
             onRefresh={loadIntegrations}
           />
           <AdvancedIntegrationsSection
@@ -189,17 +188,17 @@ export function ProjectSetupCTA({
           >
             <SentryCard
               projectId={projectId}
-              integration={getStatus('sentry')}
+              integration={getStatus("sentry")}
               onRefresh={loadIntegrations}
             />
             <LangSmithCard
               projectId={projectId}
-              integration={getStatus('langsmith')}
+              integration={getStatus("langsmith")}
               onRefresh={loadIntegrations}
             />
             <BraintrustCard
               projectId={projectId}
-              integration={getStatus('braintrust')}
+              integration={getStatus("braintrust")}
               onRefresh={loadIntegrations}
             />
           </AdvancedIntegrationsSection>
@@ -218,16 +217,16 @@ export function ProjectSetupCTA({
                 Starting...
               </>
             ) : (
-              <>Continue to chat →</>
+              <>Continue</>
             )}
           </Button>
           {!githubReady && !continuing && (
             <p className="mt-2 text-center text-xs text-muted-foreground">
-              Connect GitHub above to enable chat.
+              Connect GitHub above to continue.
             </p>
           )}
         </div>
       </div>
     </div>
-  )
+  );
 }
