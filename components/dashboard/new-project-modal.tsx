@@ -294,7 +294,7 @@ export function NewProjectModal() {
                   required
                   value={appUrl}
                   onChange={(e) => setAppUrl(e.target.value)}
-                  placeholder="example.com or https://app.example.com"
+                  placeholder="example.com"
                   autoComplete="off"
                   spellCheck={false}
                 />
