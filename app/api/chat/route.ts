@@ -69,6 +69,24 @@ function extractMessageText(msg: IncomingMessage): string {
  */
 const THINKING_MAX_AGE_MS = 60 * 60 * 1000
 
+/**
+ * How long we treat a non-terminal `test_runs` row (status in
+ * 'pending'/'planning'/'running') as still genuinely in flight for the
+ * purpose of rejecting new chat messages.
+ *
+ * `execute_test_run` budgets 1 hour per template and its top-level
+ * `except` handler unconditionally flips the row to 'failed' on crash —
+ * so in steady state this guard never fires. 4 hours is the belt-and-
+ * suspenders cap for the case where the Modal worker dies so hard it
+ * can't even update its own row; we don't want that to permanently
+ * lock the chat input.
+ *
+ * Kept in sync with `ACTIVE_TEST_RUN_MAX_AGE_MS` in
+ * `app/api/chat/session-state/route.ts` so the "is busy" decision is
+ * consistent across the POST guard and the client-facing poll.
+ */
+const ACTIVE_TEST_RUN_MAX_AGE_MS = 4 * 60 * 60 * 1000
+
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
   const user = await getServerUser(supabase)
@@ -135,16 +153,38 @@ export async function POST(request: NextRequest) {
     const session = await getOrCreateSession(service, projectId)
 
     // -------- Load current session state for the dedup guard --------
-    // We use `status == 'thinking'` as the source of truth for "a turn is
-    // currently in flight." See the THINKING_MAX_AGE_MS doc for why this
-    // beats gating on active_chat_call_id (which is susceptible to a
-    // write-after-finalize race).
-    const { data: existingSession } = await service
-      .from('chat_sessions')
-      .select('status, status_updated_at, active_chat_call_id')
-      .eq('id', session.id)
-      .single()
+    // We use `status == 'thinking'` as the source of truth for "a chat
+    // turn is currently in flight." See the THINKING_MAX_AGE_MS doc for
+    // why this beats gating on active_chat_call_id (which is susceptible
+    // to a write-after-finalize race).
+    //
+    // We ALSO check for an active chat-triggered test run on the same
+    // project. The chat turn finalizes (flipping session.status back to
+    // idle) immediately after spawning `execute_test_run` — long before
+    // the browser session and live_session chat bubble are actually
+    // ready. If we only gated on session.status we'd accept follow-up
+    // messages while the cloud browser is still running, which both
+    // races against the user's ability to watch the live view AND would
+    // be confusing UX (tests running, chat accepting new work at the
+    // same time).
+    const [existingSessionResult, activeRunResult] = await Promise.all([
+      service
+        .from('chat_sessions')
+        .select('status, status_updated_at, active_chat_call_id')
+        .eq('id', session.id)
+        .single(),
+      service
+        .from('test_runs')
+        .select('id, created_at')
+        .eq('project_id', projectId)
+        .eq('trigger', 'chat')
+        .in('status', ['pending', 'planning', 'running'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ])
 
+    const existingSession = existingSessionResult.data
     const statusUpdatedAtMs = existingSession?.status_updated_at
       ? new Date(existingSession.status_updated_at).getTime()
       : null
@@ -152,6 +192,15 @@ export async function POST(request: NextRequest) {
       existingSession?.status === 'thinking' &&
       !!statusUpdatedAtMs &&
       Date.now() - statusUpdatedAtMs < THINKING_MAX_AGE_MS
+
+    const activeRun = activeRunResult.data
+    const activeRunAgeMs = activeRun?.created_at
+      ? Date.now() - new Date(activeRun.created_at).getTime()
+      : null
+    const testRunInFlight =
+      !!activeRun &&
+      !!activeRunAgeMs &&
+      activeRunAgeMs < ACTIVE_TEST_RUN_MAX_AGE_MS
 
     if (turnInFlight) {
       // Two sub-cases:
@@ -204,6 +253,30 @@ export async function POST(request: NextRequest) {
         {
           error:
             'Verona is still working on your previous message. Please wait for it to finish before sending another.',
+          code: 'TURN_IN_FLIGHT',
+        },
+        { status: 409 },
+      )
+    }
+
+    if (testRunInFlight) {
+      // A chat-spawned test run is still executing in the cloud browser.
+      // There's no "duplicate re-fire" sub-case here the way there is
+      // for in-flight chat turns: by the time a test run is active, the
+      // user's original chat message that triggered it has long since
+      // been persisted, and any new POST is a genuine follow-up the user
+      // will need to re-send after the run finishes.
+      chatServerLog('info', 'chat_test_run_in_flight_rejected', {
+        projectId,
+        sessionId: session.id,
+        userId: user.id,
+        clientMessageId: message.id,
+        activeRunId: activeRun!.id,
+      })
+      return NextResponse.json(
+        {
+          error:
+            'Verona is running your tests. Please wait for them to finish before sending another message.',
           code: 'TURN_IN_FLIGHT',
         },
         { status: 409 },

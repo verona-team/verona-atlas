@@ -139,6 +139,14 @@ interface ChatInterfaceProps {
   initialMessages: ChatMessage[]
   initialSessionStatus: 'idle' | 'thinking' | 'error'
   initialStatusUpdatedAt: string | null
+  /**
+   * Whether a chat-triggered test run for this project was already in
+   * flight at SSR time. Used to seed the "backend busy" gate so a hard
+   * refresh during a running test keeps the input disabled and the poll
+   * loop active from the first paint, without waiting a full poll
+   * interval for the server to confirm.
+   */
+  initialHasActiveTestRun: boolean
   projectName: string
   appUrl: string
   /**
@@ -156,6 +164,7 @@ export function ChatInterface({
   initialMessages,
   initialSessionStatus,
   initialStatusUpdatedAt,
+  initialHasActiveTestRun,
   projectName,
   appUrl,
   githubReady: initialGithubReady,
@@ -208,6 +217,30 @@ export function ChatInterface({
 
   const [backendThinking, setBackendThinking] = useState(() =>
     computeSessionThinking(initialSessionStatus, initialStatusUpdatedAt),
+  )
+
+  /**
+   * Whether a chat-triggered test run is currently executing on Modal.
+   *
+   * This is a separate axis of "backend is busy" from `backendThinking`.
+   * The LangGraph chat turn finalizes (flipping `chat_sessions.status`
+   * back to `'idle'`) immediately after spawning `execute_test_run` —
+   * long before the cloud browser is actually ready. Gating solely on
+   * `backendThinking` would stop the poll loop at that point, and the
+   * `live_session` chat bubble inserted a few seconds later by
+   * `runner/execute.py` would never reach the UI until the user
+   * refreshed or sent a follow-up message.
+   *
+   * We treat a run as active while `test_runs.status` is in
+   * `pending`/`planning`/`running` (for a `trigger='chat'` row on this
+   * session's project). The `/api/chat/session-state` endpoint returns
+   * that signal on every poll tick; a non-null `activeTestRun` keeps
+   * this true. See that route for the `ACTIVE_TEST_RUN_MAX_AGE_MS`
+   * safety cap that prevents a stuck worker from permanently disabling
+   * the chat input.
+   */
+  const [backendTestRunActive, setBackendTestRunActive] = useState(
+    initialHasActiveTestRun,
   )
 
   useEffect(() => {
@@ -465,7 +498,8 @@ export function ChatInterface({
     sendChatMessage,
   ])
 
-  // Poll `/api/chat/session-state` while a turn is in flight.
+  // Poll `/api/chat/session-state` while any backend work for this
+  // session is in flight.
   //
   // Replaces the previous Supabase Realtime subscriptions + 3-timer REST
   // fallback. `postgres_changes` is too unreliable for a handful of events
@@ -474,11 +508,25 @@ export function ChatInterface({
   // combined endpoint is deterministic, debuggable, and bounded by turn
   // duration.
   //
-  // Each tick gets back `{ status, statusUpdatedAt, newMessages }` in one
-  // atomic snapshot. The server orders finalize's message upsert BEFORE
-  // flipping status to 'idle' (runner/chat/nodes.py), so the "status=idle"
-  // response always carries the final message rows — no extra flush tick
-  // needed.
+  // "In flight" here spans TWO kinds of Modal work:
+  //   1. The LangGraph chat turn (`chat_sessions.status='thinking'`).
+  //   2. A chat-triggered test run (`test_runs.status IN
+  //      ('pending','planning','running')` with `trigger='chat'` on
+  //      this session's project).
+  //
+  // Both surface via the single `/api/chat/session-state` response. We
+  // keep polling until both are clear — otherwise the `live_session`
+  // chat bubble that `execute_test_run` inserts AFTER the chat-turn
+  // finalize would never be observed in realtime.
+  //
+  // Each tick gets back `{ status, statusUpdatedAt, newMessages, activeTestRun }`
+  // in one atomic snapshot. The server orders finalize's message upsert
+  // BEFORE flipping session status to 'idle' (runner/chat/nodes.py), so
+  // the "status=idle" response always carries the final chat-turn
+  // message rows — no extra flush tick needed. Similarly, the runner
+  // updates the `live_session` chat_messages row BEFORE flipping
+  // `test_runs.status` to a terminal state, so the "activeTestRun=null"
+  // response always carries the final run-status update on the bubble.
   //
   // Cadence: 2.5 s baseline, with an immediate first tick so short
   // follow-up turns don't block on a delay. Tab backgrounding is handled
@@ -495,7 +543,7 @@ export function ChatInterface({
   //     messageId (not a blanket reset) because multiple `flow_proposals`
   //     rows can coexist — one active + zero or more superseded — and
   //     only the clicked row's overrides should drop.
-  const isTurnInFlight = isPosting || backendThinking
+  const isTurnInFlight = isPosting || backendThinking || backendTestRunActive
   useEffect(() => {
     if (!isTurnInFlight) return
 
@@ -590,6 +638,11 @@ export function ChatInterface({
         status: 'idle' | 'thinking' | 'error'
         statusUpdatedAt: string | null
         newMessages: ChatMessage[]
+        activeTestRun: {
+          id: string
+          status: string
+          createdAt: string
+        } | null
       }
       try {
         data = (await res.json()) as typeof data
@@ -608,7 +661,14 @@ export function ChatInterface({
       )
       setBackendThinking(stillThinking)
 
-      return stillThinking ? 'continue' : 'stop'
+      const stillRunningTest = data.activeTestRun !== null
+      setBackendTestRunActive(stillRunningTest)
+
+      // Keep polling while EITHER axis of backend work is active. The
+      // chat-turn finalize races the test-run start, so we can't
+      // collapse these into a single "busy" flag server-side without
+      // losing correctness — the client has to observe both.
+      return stillThinking || stillRunningTest ? 'continue' : 'stop'
     }
 
     const POLL_INTERVAL_MS = 2500
