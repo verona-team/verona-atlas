@@ -1,6 +1,5 @@
 """System prompt + formatting helpers for the orchestrator agent.
 
-Ported from the TS system prompt in `app/api/chat/route.ts` (lines 323-376).
 Kept as a function rather than a template string so future nodes that need
 a variant (e.g. the nightly job's synthetic bootstrap) can compose from the
 same building blocks.
@@ -169,13 +168,54 @@ def _format_flow_status_summary(
     flow_states = latest_flow_proposals.get("flow_states") or {}
     if not isinstance(flows, list) or not flows:
         return ""
-    lines = ["", "", "Current flow states:"]
+    lines = ["", "", "Current flow states (on the active proposals row):"]
     for f in flows:
         fid = f.get("id") if isinstance(f, dict) else None
         name = f.get("name") if isinstance(f, dict) else None
         state = flow_states.get(fid, "pending") if isinstance(fid, str) else "pending"
-        lines.append(f"- {name}: {state}")
+        lines.append(f"- {fid}: {name} — {state}")
     return "\n".join(lines)
+
+
+def _format_regeneration_rules(
+    *,
+    has_active_proposals: bool,
+    active_flow_proposal_message_id: str | None,
+) -> str:
+    """Instructions the orchestrator must follow when calling `generate_flow_proposals`.
+
+    The mode choice is trivial (bootstrap if no active row, else replace).
+    The *real* decision is the preservation intent, which the orchestrator
+    conveys to the nested flow generator through the `reason` string. The
+    server's carry-over rule is id-matched and opt-in: whatever ids the
+    flow generator chooses to re-emit inherit their prior approval state;
+    everything else starts pending.
+    """
+    if not has_active_proposals:
+        return (
+            "No flow proposals exist yet for this session. When the user wants "
+            "to see test flows, call `generate_flow_proposals(mode=\"bootstrap\")`."
+        )
+
+    active_hint = (
+        f" (active proposals row id: {active_flow_proposal_message_id})"
+        if active_flow_proposal_message_id
+        else ""
+    )
+    return f"""An active flow_proposals row exists for this session{active_hint}. Follow these rules precisely when the user asks for different, more, or refined flows:
+
+1. Always call `generate_flow_proposals(mode="replace", ...)`. This atomically supersedes the active row and inserts a new one. Never call mode="bootstrap" when an active row already exists.
+
+2. The nested flow-generator LLM decides WHICH prior flows to preserve by re-emitting their exact ids. Re-emitted ids inherit their prior approval state on the new row; everything else starts `pending`. You convey the user's preservation intent to that generator through the `reason` argument — write `reason` as a one-line summary of what the user wants and what (if anything) to keep.
+
+3. Classify the user's intent and write `reason` accordingly:
+   - Additive ("also", "more", "add", "plus", "and"): `reason` should explicitly name the approved flows to preserve, e.g. "user asked to add signup-funnel coverage while preserving approved flows `login-happy-path` and `checkout-smoke`".
+   - Refinement ("swap", "replace flow 2", "change the checkout one"): name which prior flows to preserve and which to drop.
+   - Clean-slate ("fresh", "new", "start over", "different", "completely regenerate"): `reason` should explicitly tell the generator to discard everything, e.g. "user wants a completely fresh set of flows; discard all prior proposals and use all new ids".
+
+4. If the user's intent is genuinely ambiguous (e.g. a bare "regenerate"), ask ONE short clarifying question before calling the tool. Do not guess.
+
+5. After the tool returns, reply with AT MOST one sentence acknowledging the replacement — e.g. "Replaced the earlier suggestions with a fresh set — approve the ones you want to run." Never repeat or re-describe the flow names, steps, or rationales in prose; the cards already show them."""
 
 
 def build_orchestrator_system_prompt(
@@ -186,6 +226,7 @@ def build_orchestrator_system_prompt(
     latest_flow_proposals: dict[str, Any] | None,
     context_summary: str | None,
     recent_runs: list[dict[str, Any]] | None,
+    active_flow_proposal_message_id: str | None = None,
 ) -> str:
     """Return the full system prompt for the chat orchestrator.
 
@@ -193,7 +234,7 @@ def build_orchestrator_system_prompt(
     across the TS->Python cutover; any behavior changes we want to make
     should be done as follow-up commits we can A/B.
     """
-    has_existing_proposals = bool(
+    has_active_proposals = bool(
         latest_flow_proposals and latest_flow_proposals.get("type") == "flow_proposals"
     )
 
@@ -216,6 +257,10 @@ def build_orchestrator_system_prompt(
     )
 
     flow_status = _format_flow_status_summary(latest_flow_proposals)
+    regeneration_rules = _format_regeneration_rules(
+        has_active_proposals=has_active_proposals,
+        active_flow_proposal_message_id=active_flow_proposal_message_id,
+    )
 
     return f"""You are Verona, an AI QA strategist helping teams plan and execute UI testing for their web app.
 
@@ -226,13 +271,15 @@ Project: "{project_name}" ({app_url})
 You have two tools. The product's UI depends on them; do not try to substitute prose for tool output.
 
 1. `generate_flow_proposals` — renders proposed test flows as structured, approvable cards in the chat UI. This is the ONLY way the user can approve a flow.
-2. `start_test_run` — executes the flows the user has approved.
+2. `start_test_run` — executes the flows the user has approved on the active proposals row.
 
 ## When to call `generate_flow_proposals`
 
-Call it whenever the user wants to see, propose, refresh, or add test flows — including the very first turn of a session, or phrasings like "suggest flows", "what should I test", "give me tests", "recommend flows", "propose more", "anything else to cover".
+Call it whenever the user wants to see, propose, refresh, or add test flows — including the very first turn of a session, or phrasings like "suggest flows", "what should I test", "give me tests", "recommend flows", "propose more", "anything else to cover", "completely regenerate these", "different ones".
 
-After the tool returns, reply with AT MOST two sentences that point the user at the cards and invite approval. Example: "I've proposed three flows above — approve the ones you want and tell me to start testing." Never repeat or re-describe the flows' names, steps, or rationales in prose; the cards already show them.
+After the tool returns, reply with AT MOST one or two sentences that point the user at the cards and invite approval. Example: "I've proposed three flows above — approve the ones you want and tell me to start testing." Never repeat or re-describe the flows' names, steps, or rationales in prose; the cards already show them.
+
+{regeneration_rules}
 
 ## When to call `start_test_run`
 
@@ -266,5 +313,4 @@ Never write numbered lists, bullets, or prose that describes candidate flows ("F
 
 Integrations covered: {', '.join(integrations_covered) or 'none'}
 
-# Session state
-{'Flow proposals already exist for this session. Refer to them by name rather than regenerating, unless the user explicitly asks to refresh or add more.' if has_existing_proposals else 'No flow proposals exist yet for this session.'}{flow_status}{context_block}{runs_block}"""
+# Session state{flow_status}{context_block}{runs_block}"""

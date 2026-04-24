@@ -6,6 +6,7 @@ import type { Json } from '@/lib/supabase/types'
 import { clearResearchReportsForProject } from '@/lib/github-integration-guard'
 import {
   exchangeOAuthCode,
+  getAppSlug,
   getGitHubUser,
   listUserInstallations,
   type GitHubUserInstallation,
@@ -14,20 +15,33 @@ import { encrypt } from '@/lib/encryption'
 import { chatServerLog } from '@/lib/chat/server-log'
 
 /**
- * Post-install setup URL + user-auth callback for the Verona GitHub App.
+ * Post-install / post-authorize callback for the Verona GitHub App.
  *
- * Requires the GitHub App to have "Request user authorization (OAuth)
- * during installation" enabled, so every trip through
- * `github.com/apps/<slug>/installations/new` returns a `code` in the
- * query string. We exchange that code for a user access token, then
- * cross-check the query's `installation_id` against
- * `GET /user/installations` — which is scoped to the authenticated
- * GitHub user by the OAuth token, so we can never link an installation
- * the user doesn't actually own.
+ * This single route handles two entry paths:
  *
- * The old "no-code, trust the query" path has been removed; a missing
- * `code` indicates a misconfigured GitHub App and surfaces a 400 rather
- * than silently writing an unverified installation row.
+ *   1. Pure OAuth authorize (primary): the user clicks "Connect
+ *      GitHub" and we send them through
+ *      `https://github.com/login/oauth/authorize`. GitHub always
+ *      returns a `code` here regardless of whether the app is
+ *      already installed on their GitHub account — this is what
+ *      fixes the "infinite loading on a second Verona account"
+ *      bug (the old install URL silently showed a "configure" page
+ *      instead of redirecting back when the app was already
+ *      installed).
+ *
+ *   2. App install flow: the user's first time installing the app.
+ *      GitHub hits us with `code` + `installation_id` once the
+ *      install completes. Same code path — we exchange the code
+ *      and match the installation_id against the user's reachable
+ *      installations.
+ *
+ * Requires the GitHub App to have "Request user authorization
+ * (OAuth) during installation" enabled, so both paths return a
+ * `code`. We exchange it for a user access token, then cross-check
+ * any query `installation_id` against `GET /user/installations`
+ * (which is scoped to the authenticated GitHub user by the OAuth
+ * token) so we can never link an installation the user doesn't
+ * actually own.
  */
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -95,44 +109,24 @@ export async function GET(request: NextRequest) {
       ? Number(installationIdRaw)
       : null
 
-  let resolvedInstallationId: number
-  let linkedGitHubIdentity: { id: number; login: string }
-
+  // Exchange the OAuth code + fetch the user's identity and
+  // reachable installations up front. We persist the identity
+  // unconditionally (before any routing decision) so that:
+  //   - If we end up surfacing a picker to the user for the
+  //     multi-installation case, the picker's backend call can
+  //     re-use this token without a second OAuth round trip.
+  //   - The status endpoint's auto-link layer becomes usable for
+  //     subsequent polls even if this request itself doesn't
+  //     resolve to a single installation.
+  let ghUser: { id: number; login: string }
+  let ghInstallations: GitHubUserInstallation[]
   try {
     const token = await exchangeOAuthCode(code)
-    const [ghUser, ghInstallations] = await Promise.all([
+    ;[ghUser, ghInstallations] = await Promise.all([
       getGitHubUser(token.accessToken),
       listUserInstallations(token.accessToken),
     ])
-    linkedGitHubIdentity = { id: ghUser.id, login: ghUser.login }
 
-    const picked = pickInstallation({
-      installationIdFromQuery,
-      userInstallations: ghInstallations,
-    })
-
-    if (picked === null) {
-      chatServerLog('warn', 'github_callback_no_installation_candidate', {
-        userId: user.id,
-        projectId,
-        installationIdFromQuery,
-        userInstallationCount: ghInstallations.length,
-        setupAction,
-      })
-      // Redirect back with a structured marker so the UI can prompt the
-      // user to finish installing or pick an installation. The chat
-      // page's settings overlay is the natural landing place.
-      const redirectPath = returnTo || `/projects/${projectId}/chat?settings=1`
-      const redirect = new URL(redirectPath, request.nextUrl.origin)
-      redirect.searchParams.set('github', 'needs_installation')
-      return NextResponse.redirect(redirect)
-    }
-
-    resolvedInstallationId = picked
-
-    // Persist the GitHub user identity + encrypted tokens so later calls
-    // (the status endpoint, future settings views) can re-use it without
-    // driving the user through OAuth again.
     const service = createServiceRoleClient()
     try {
       await service
@@ -153,9 +147,9 @@ export async function GET(request: NextRequest) {
           { onConflict: 'user_id' },
         )
     } catch (e) {
-      // Failing to persist the identity should NOT block the main
-      // connect flow — the integration row is still the authoritative
-      // "you are connected" signal. Log for debugging.
+      // Failing to persist the identity should NOT block the flow —
+      // the integration row is still the authoritative "you are
+      // connected" signal. Log for debugging.
       chatServerLog('warn', 'github_callback_identity_persist_failed', {
         err: e,
         userId: user.id,
@@ -177,12 +171,59 @@ export async function GET(request: NextRequest) {
     )
   }
 
+  const picked = pickInstallation({
+    installationIdFromQuery,
+    userInstallations: ghInstallations,
+  })
+
+  // 0-install case: the authenticated GitHub user doesn't have
+  // the Verona app installed anywhere. Bounce the popup into the
+  // actual install flow so they can install the app. GitHub will
+  // re-hit this same callback with `installation_id` + a fresh
+  // `code` once the install completes, at which point we take the
+  // normal auto-link path below.
+  if (picked === null && ghInstallations.length === 0) {
+    chatServerLog('info', 'github_callback_redirect_to_install', {
+      userId: user.id,
+      projectId,
+      githubLogin: ghUser.login,
+    })
+    const slug = await getAppSlug()
+    const installUrl = new URL(
+      `https://github.com/apps/${slug}/installations/new`,
+    )
+    const nextState = returnTo ? `${projectId}::${returnTo}` : projectId
+    installUrl.searchParams.set('state', nextState)
+    return NextResponse.redirect(installUrl)
+  }
+
+  // Multi-install case: the user has the app on more than one
+  // GitHub account/org and we have no hint which one to pick.
+  // Surface a picker in the UI rather than guessing. The settings
+  // overlay reads the `github=pick_installation` marker and calls
+  // `/api/integrations/github/installations` + the
+  // `link-installation` endpoint to complete the connect.
+  if (picked === null) {
+    chatServerLog('warn', 'github_callback_ambiguous_installations', {
+      userId: user.id,
+      projectId,
+      userInstallationCount: ghInstallations.length,
+      setupAction,
+    })
+    const redirectPath = returnTo || `/projects/${projectId}/chat?settings=1`
+    const redirect = new URL(redirectPath, request.nextUrl.origin)
+    redirect.searchParams.set('github', 'pick_installation')
+    return NextResponse.redirect(redirect)
+  }
+
+  const resolvedInstallationId = picked
+
   const config: Json = {
     installation_id: resolvedInstallationId,
     setup_action: setupAction,
     repo: null,
-    linked_github_user_id: linkedGitHubIdentity.id,
-    linked_github_login: linkedGitHubIdentity.login,
+    linked_github_user_id: ghUser.id,
+    linked_github_login: ghUser.login,
   }
 
   const { data: existing } = await supabase
@@ -217,7 +258,7 @@ export async function GET(request: NextRequest) {
     projectId,
     installationId: resolvedInstallationId,
     setupAction,
-    githubLogin: linkedGitHubIdentity.login,
+    githubLogin: ghUser.login,
   })
 
   const redirectPath = returnTo || `/projects/${projectId}/chat?settings=1`
@@ -237,7 +278,9 @@ export async function GET(request: NextRequest) {
  *      customer's installation won't pass this check.
  *   2. Else, if the user has exactly one installation accessible, pick it.
  *      Covers the pure-OAuth round-trip where no installation_id query
- *      param is present.
+ *      param is present — this is the path that fixes the bug where a
+ *      second Verona account couldn't connect GitHub because the app
+ *      was already installed on the same GitHub user.
  *   3. Otherwise return null (no installation / multiple with no hint).
  */
 function pickInstallation(opts: {

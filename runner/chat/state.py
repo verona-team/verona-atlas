@@ -64,7 +64,8 @@ class ChatTurnState(TypedDict, total=False):
     # -------- loaded once from DB --------
     context_summary: str | None
     research_report: dict | None  # ResearchReport.model_dump(mode='json')
-    latest_flow_proposals: dict | None  # chat_messages.metadata for the last proposal
+    latest_flow_proposals: dict | None  # chat_messages.metadata for the active proposals row, or None
+    active_flow_proposal_message_id: str | None  # id of the single status='active' row, or None
     recent_runs: list[dict]
     github_ready: dict  # {ok, reason?, installation_id?, repo_full_name?}
 
@@ -204,22 +205,36 @@ async def build_initial_state(
             user_message_client_id=user_message_client_id,
         )
 
-    # Latest flow proposal metadata (if any) — used by tools to compute
-    # approved flows and by the orchestrator to avoid regenerating stale.
+    # Active flow proposal metadata (if any) — used by tools to compute
+    # approved flows and by the orchestrator to decide between bootstrap
+    # and replace mode. We load ONLY the `status='active'` row; superseded
+    # rows are historical and must never feed back into tool decisions.
+    # Invariant: at most one active row per session.
     latest_proposals: dict | None = None
+    active_flow_proposal_message_id: str | None = None
     try:
         proposals_resp = (
             sb.table("chat_messages")
-            .select("id, metadata")
+            .select("id, metadata, created_at")
             .eq("session_id", session_id)
             .eq("metadata->>type", "flow_proposals")
+            .eq("metadata->>status", "active")
             .order("created_at", desc=True)
-            .limit(1)
             .execute()
         )
         prows = proposals_resp.data or []
+        if len(prows) > 1:
+            chat_log(
+                "error",
+                "chat_load_multiple_active_flow_proposals",
+                project_id=project_id,
+                session_id=session_id,
+                count=len(prows),
+                row_ids=[r.get("id") for r in prows],
+            )
         if prows:
             latest_proposals = prows[0].get("metadata")
+            active_flow_proposal_message_id = prows[0].get("id")
     except Exception as e:
         chat_log(
             "warn",
@@ -273,6 +288,7 @@ async def build_initial_state(
         "context_summary": session.get("context_summary"),
         "research_report": session.get("research_report"),
         "latest_flow_proposals": latest_proposals,
+        "active_flow_proposal_message_id": active_flow_proposal_message_id,
         "recent_runs": recent_runs,
         "github_ready": github_ready,
         "assistant_message_id": generate_assistant_message_id(),
