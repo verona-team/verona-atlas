@@ -1,7 +1,7 @@
 """Integration research sub-agent.
 
-Produces a structured `IntegrationResearchReport` for a project by
-combining three passes:
+Produces an `IntegrationTranscript` for a project by combining two
+phases:
 
     1. **Preflight** — fixed httpx calls per integration that gather the
        obvious first-layer signal (recent PRs, top rage-click URLs,
@@ -20,9 +20,10 @@ combining three passes:
        #4). Loops up to `RESEARCH_INTEGRATION_MAX_STEPS` (default 20)
        times.
 
-    3. **Synthesis** — a single Gemini 3.1 Pro structured-output call
-       that turns preflight data + research notes (purpose + result for
-       each call) into the final `IntegrationResearchReport`.
+The agent no longer runs its own synthesis pass. Instead it returns the
+full investigation transcript (preflight + all tool calls + every
+orchestrator thought) for the unified synthesis stage
+(`runner.research.synthesizer.generate_flow_report`) to consume.
 
 ## Why code writing is split out of the orchestrator
 
@@ -38,32 +39,42 @@ So `execute_code(purpose="...")` takes only a natural-language goal,
 and the tool body uses the code writer to produce the script before
 running it. See `runner.research.code_writer` for the code generator.
 
+## Per-exec field sizing: orchestrator-visible vs transcript-visible
+
+Each `execute_code` invocation produces three raw artifacts: the
+generated `code`, and the exec's `stdout` / `stderr`. These land in
+two distinct places with different size budgets:
+
+- **Orchestrator-visible** (returned from the tool as a JSON string
+  that becomes a ToolMessage): this lands in every subsequent turn's
+  context. Kept tight (`stdout[:4000]`, `stderr[:1000]`) so a 20-step
+  loop's context doesn't balloon.
+- **Transcript-visible** (the `TranscriptEntry.result` dict): this is
+  what the final synthesizer reads, exactly once. Kept generous
+  (`stdout[:60_000]`, `stderr[:4000]`, `code` un-truncated) because the
+  synthesizer has a 1M context window and the signal that matters for
+  flow generation often lives in the long tail of a stdout payload.
+
 ## Error handling
 
 Every layer has a graceful-degradation path:
 
 - Credential decryption fails -> integration is dropped from the run,
-  ends up in `integrationsSkipped`.
+  ends up in `integrations_skipped`.
 - A single preflight fails -> that integration shows up as
-  `success: False` in the context block but the run continues.
+  `success: False` in the preflight block but the run continues.
 - The sandbox itself fails to create (Modal outage, bad image) -> we
-  log and fall back to "preflight-only synthesis" so the run still
-  produces a usable report.
-- Code generation fails -> the tool returns a stub result the
-  orchestrator can see, so the ReAct loop isn't derailed.
+  log, mark `sandbox_available=False`, and return a transcript with
+  just the preflight data. The synthesizer handles it.
 - A single exec fails -> stderr surfaced back to the orchestrator as
   a ToolMessage; the code writer also gets to see the failure on its
   next call for self-correction.
-- Synthesis fails -> shaped `IntegrationResearchReport` with the
-  error in summary rather than raising.
 """
 from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Literal
-
-from pydantic import BaseModel, Field
+from typing import Any
 
 from langchain.tools import tool
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -95,63 +106,35 @@ from runner.research.sandbox import (
     teardown_sandbox,
 )
 from runner.research.types import (
-    IntegrationResearchReport,
-    ResearchFinding,
+    IntegrationTranscript,
+    TranscriptEntry,
 )
 
 
 # ---------------------------------------------------------------------------
-# Pydantic schemas for Gemini structured output
+# Per-call sizing
 # ---------------------------------------------------------------------------
+#
+# Two sets of limits. Keep them distinct from each other on purpose.
 
+# What the orchestrator sees on every subsequent turn. Tight — compounds.
+_ORCH_STDOUT_CAP = 4_000
+_ORCH_STDERR_CAP = 1_000
 
-class _AgentFinding(BaseModel):
-    source: str = Field(
-        description="Integration id: github, posthog, sentry, langsmith, braintrust."
-    )
-    category: str = Field(
-        description=(
-            "recent_changes, errors, user_behavior, performance, llm_failures, test_gaps"
-        )
-    )
-    details: str = Field(
-        description=(
-            "One or two sentences describing the finding, ending with a concrete "
-            "anchor (commit SHA, PR #, URL, error count, session ID)."
-        )
-    )
-    severity: Literal["critical", "high", "medium", "low"]
-    rawData: str | None = Field(
-        default=None,
-        description=(
-            "Optional JSON string of supporting data (NOT natural language). "
-            "Use this only when the anchor doesn't fit in `details`."
-        ),
-    )
+# What the synthesizer sees once. Generous — Gemini 1M context window.
+_TRANSCRIPT_STDOUT_CAP = 60_000
+_TRANSCRIPT_STDERR_CAP = 4_000
+# `code` is un-truncated in the transcript; kept small by construction
+# (the code writer emits one focused script per call, ~0.5-3K typical).
 
-
-class _AgentReport(BaseModel):
-    summary: str = Field(description="3-6 sentences. Lead with the biggest risk.")
-    findings: list[_AgentFinding] = Field(default_factory=list)
-    recommendedFlows: list[str] = Field(default_factory=list)
-    drillInHighlights: list[str] = Field(
-        default_factory=list,
-        description=(
-            "3-6 one-sentence highlights naming SPECIFIC drill-in results "
-            "worth surfacing to the chat orchestrator. Each must cite a "
-            "concrete number or anchor from the research notes below (e.g. "
-            "'PostHog: 48 `$exception` events on `/w/*/sheets/*` in the "
-            "last 7 days, up from 2 the prior week'). Use this for signals "
-            "too concrete to live in `summary` but that don't fit the "
-            "categorical `findings` shape. Skip if no drill-ins produced "
-            "useful output."
-        ),
-    )
+# Code-writer self-correction context. Unchanged. Stays tight because
+# the code writer only needs enough stderr to diagnose the prior
+# failure; the full stderr is preserved in the transcript anyway.
+_CODE_WRITER_STDERR_HEAD = 1_000
 
 
 # ---------------------------------------------------------------------------
-# Preflight dispatch (unchanged from previous version — still our starting
-# signal layer; the LLM drill-in sits on top of this, not in place of it.)
+# Preflight dispatch
 # ---------------------------------------------------------------------------
 
 
@@ -170,7 +153,7 @@ async def _run_preflights(
     app_url: str,
     integration_configs: dict[str, dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
-    """Fire all integration preflights in parallel. Same shape as before."""
+    """Fire all integration preflights in parallel."""
     jobs: dict[str, asyncio.Task] = {}
 
     for t, cfg in integration_configs.items():
@@ -277,9 +260,7 @@ async def _build_sandbox_env(
         if t == "github":
             # GitHub is special: we mint a short-lived installation token
             # at build time rather than passing raw App credentials to
-            # the sandbox. That way the sandbox gets something narrowly
-            # scoped (1h TTL, repo-specific) and can't impersonate the
-            # whole GitHub App.
+            # the sandbox.
             installation_id = cfg.get("installation_id")
             repo_full_name = cfg.get("repo_full_name") or ""
             if installation_id and repo_full_name:
@@ -325,7 +306,7 @@ async def _build_sandbox_env(
 
 
 # ---------------------------------------------------------------------------
-# System prompt for the orchestrator ReAct loop
+# Orchestrator system prompt
 # ---------------------------------------------------------------------------
 
 
@@ -339,17 +320,18 @@ def _build_orchestrator_system_prompt(
     research goals via `execute_code(purpose=...)`; a separate code
     writer turns each goal into a script and runs it.
 
-    The prompt emphasizes two things:
-
+    Emphasis on two things:
     1. **Cross-source ReAct.** The orchestrator can keep calling the
        tool across different integrations in any order, including
-       correlating findings (e.g. GitHub PR #206 touched
-       `app/checkout/` → let me ask PostHog whether `/checkout/*` has
-       spiking rage-clicks in the same window).
+       correlating findings.
     2. **Writing GOALS, not CODE.** The tool contract is purpose-based;
        any code-level details belong in the purpose as natural-language
-       intent ("fetch the PR's changed files, filter to app/checkout/*,
-       return filenames"), not Python.
+       intent, not Python.
+
+    Unlike the pre-revamp prompt this one does NOT ask the orchestrator
+    to produce structured output at the end — its last turn is simply
+    a natural-language summary of what it learned. That summary becomes
+    the transcript's `orientation` blurb for the downstream synthesizer.
     """
     return f"""You are the research orchestrator for QA planning on {app_url}. Your job is to decide WHAT to investigate across the connected integrations, not to write code.
 
@@ -360,7 +342,7 @@ You have one tool:
 Pass a clear, natural-language research goal as `purpose`. A specialized code-writer model will translate your purpose into a focused Python script and run it inside an isolated sandbox against the connected integration APIs, with credentials already preloaded as environment variables. You will see:
 
 - `exit_code` — 0 on success, non-zero on failure (HTTP 4xx/5xx wrapped as JSON errors still count as success here; actual Python exceptions are non-zero).
-- `stdout` — the script's printed JSON output (truncated to ~4KB if huge).
+- `stdout` — the script's printed JSON output (truncated to ~4KB for your context; the full stdout is preserved for the downstream synthesizer).
 - `stderr` — any Python exception traceback or error stream (truncated).
 - `explanation` — one-sentence note from the code writer describing what the script did (useful for verifying the code writer understood your goal).
 
@@ -392,42 +374,26 @@ The orchestrator that DOES correlate across providers surfaces much stronger QA 
 # Loop discipline
 
 - Each tool call is sequential. Wait for the previous result, read stdout, decide the next question.
-- Stop calling tools when your next call wouldn't change the conclusions you'd write up. Don't pad.
+- Stop calling tools when your next call wouldn't change the conclusions a synthesizer would write up. Don't pad.
 - Step budget is ~20 total. Spend it on surfacing new anchored evidence, not re-verifying preflight numbers.
+- Narrate your plan in short text blocks between tool calls when it helps — those thoughts are preserved for the downstream synthesizer.
 
 # What preflight already gave you
 
 The user message below contains each integration's preflight result (recent commits/PRs, top rage-clicks, top unresolved Sentry issues, etc.) as JSON. Read it first; don't waste calls re-fetching what it already has.
 
-When you have enough evidence-backed findings, stop calling tools. You'll then be asked for the structured report."""
+# How to finish
+
+When you have enough evidence-backed findings, stop calling tools and emit a final message with no tool calls. In that final message, write a 3-5 sentence summary of the biggest signals you found (which issue, which rage-click, which PR — with concrete numbers/anchors). That summary becomes your handoff to the synthesizer. Do NOT try to produce a structured report — that's the synthesizer's job. Just a clear, anchored narrative paragraph."""
 
 
 # ---------------------------------------------------------------------------
-# Main entry point
+# Config resolution (decrypt + flatten)
 # ---------------------------------------------------------------------------
-
-
-def _fallback_report(app_url: str, reason: str) -> IntegrationResearchReport:
-    return IntegrationResearchReport(
-        summary=reason,
-        findings=[],
-        recommendedFlows=[
-            f"Homepage smoke test — open {app_url} and verify critical UI",
-            "Primary navigation — exercise main routes and links",
-            "Core user journey — sign-in, forms, or checkout if applicable",
-        ],
-        integrationsCovered=[],
-        integrationsSkipped=[],
-        drillInHighlights=[],
-    )
 
 
 def _resolve_configs(active_integrations: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Decrypt and flatten active integration configs into `{type -> plain dict}`.
-
-    Same as the previous version — the sandbox env construction uses the
-    same `integration_configs` shape preflight uses.
-    """
+    """Decrypt and flatten active integration configs into `{type -> plain dict}`."""
     resolved: dict[str, dict[str, Any]] = {}
     for row in active_integrations:
         t = row.get("type")
@@ -491,11 +457,37 @@ def _resolve_configs(active_integrations: list[dict[str, Any]]) -> dict[str, dic
 
 
 def _truncate(s: str, limit: int) -> str:
-    """Truncate a string with a visible marker, used on tool output that goes
-    back into the LLM context window (models choke on multi-MB stdout)."""
+    """Truncate a string with a visible marker."""
+    if s is None:
+        return ""
     if len(s) <= limit:
         return s
     return s[:limit] + f"\n\n[...truncated {len(s) - limit} more chars]"
+
+
+# ---------------------------------------------------------------------------
+# Extract text blocks from AIMessage (for orientation + thought capture)
+# ---------------------------------------------------------------------------
+
+
+def _extract_text_blocks(response: AIMessage) -> list[str]:
+    content = response.content
+    out: list[str] = []
+    if isinstance(content, str):
+        if content.strip():
+            out.append(content.strip())
+    elif isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                t = block.get("text")
+                if isinstance(t, str) and t.strip():
+                    out.append(t.strip())
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Main research loop
+# ---------------------------------------------------------------------------
 
 
 async def _run_research_loop(
@@ -503,27 +495,27 @@ async def _run_research_loop(
     integrations_covered: list[str],
     preflight_results: dict[str, dict[str, Any]],
     env: IntegrationEnv,
-) -> list[str]:
-    """ReAct loop where a Gemini 3.1 Pro orchestrator issues natural-language
-    research goals and a separate Gemini 3.1 Pro code-writer produces the
-    code that gets run in a Modal sandbox.
+) -> tuple[list[TranscriptEntry], str, bool, bool]:
+    """ReAct loop where the orchestrator issues natural-language goals.
 
-    Returns a list of "research notes" strings — one per execute_code
-    call (purpose, code-writer explanation, exit_code, stdout, stderr)
-    plus any intermediate orchestrator thoughts. These notes are what
-    the synthesis pass reads.
+    Returns (entries, orientation, step_budget_exhausted, sandbox_available).
+
+    `entries` is the ordered transcript — each tool call produces a
+    `kind="tool_call"` entry with the full un-truncated-at-this-stage
+    `{purpose, explanation, code, stdout, stderr}` in `result`, and each
+    orchestrator text block produces a `kind="thought"` entry.
 
     Cross-source ReAct works here because every prior tool call's
     result is appended to the orchestrator's `messages`, so turn N sees
-    turns 1..N-1 in context. The orchestrator can pivot between
-    providers freely and correlate findings across them.
+    turns 1..N-1 in context.
     """
     max_steps = env_key_int("RESEARCH_INTEGRATION_MAX_STEPS", 20)
 
-    import modal as _modal  # local import so module loads even if modal isn't importable elsewhere
+    import modal as _modal
 
     sb: _modal.Sandbox | None = None
-    notes: list[str] = []
+    entries: list[TranscriptEntry] = []
+    orientation = ""
 
     try:
         sb = await create_research_sandbox(env)
@@ -533,14 +525,23 @@ async def _run_research_loop(
             "research_sandbox_create_failed",
             err=repr(e),
         )
-        return [
-            f"[sandbox unavailable: {type(e).__name__}: {e}]\n"
-            "Skipping research loop; falling back to preflight-only synthesis."
-        ]
+        entries.append(
+            TranscriptEntry(
+                kind="thought",
+                text=(
+                    f"[sandbox unavailable: {type(e).__name__}: {e}] "
+                    "Skipping drill-in loop; synthesizer will fall back to "
+                    "preflight-only reasoning."
+                ),
+            )
+        )
+        return entries, (
+            "Sandbox was unavailable; no drill-in evidence was gathered. "
+            "Synthesize from preflight alone."
+        ), False, False
 
     # Pre-compute the provider docs block + env description once so the
-    # code writer can re-use them on every call without the orchestrator
-    # having to thread them through.
+    # code writer can re-use them on every call.
     docs_block = "\n\n---\n\n".join(
         f"## {t.upper()} API docs\n\n{doc}"
         for t, doc in get_integration_docs_bundle(integrations_covered).items()
@@ -548,23 +549,9 @@ async def _run_research_loop(
     env_description = env.describe()
 
     # Tracks the immediately-previous exec so the code writer can
-    # self-correct on transient failures (wrong field name, missing
-    # query param, etc.). One call's history only — we don't want the
-    # code writer's prompt to balloon over the loop.
+    # self-correct on transient failures. One call's history only.
     previous_exec: PreviousExec | None = None
 
-    # The tool is declared as `async def` so its body can await the
-    # code-writer call directly. `@tool` preserves the signature
-    # (`purpose: str`) and docstring for schema/binding purposes;
-    # `bind_tools` accepts async tools, and the loop invokes them via
-    # `await execute_code.ainvoke({...})`.
-    #
-    # The closure captures `sb`, `docs_block`, `env_description`,
-    # `previous_exec`, and `notes` from the outer scope so the tool can
-    # update loop-level state (carrying forward the previous exec for
-    # code-writer self-correction, accumulating research notes for the
-    # synthesis pass) without the orchestrator having to thread any of
-    # it through.
     @tool
     async def execute_code(purpose: str) -> str:
         """Execute a research investigation step against the connected integrations.
@@ -583,7 +570,7 @@ async def _run_research_loop(
         """
         nonlocal previous_exec
 
-        # Phase A: code writer produces the Python for this purpose.
+        # Phase A: code writer produces the Python.
         code_output: CodeWriterOutput = await write_research_code(
             purpose=purpose,
             docs_block=docs_block,
@@ -592,27 +579,34 @@ async def _run_research_loop(
         )
 
         # Phase B: run the code in the sandbox.
-        assert sb is not None  # create succeeded (else we bailed earlier)
+        assert sb is not None
         result: ExecResult = await execute_in_sandbox(sb, code_output.code)
 
         # Remember for the code writer's next call.
         previous_exec = PreviousExec(
             purpose=purpose,
             exit_code=result.exit_code,
-            stderr_head=_truncate(result.stderr, 1000),
+            stderr_head=_truncate(result.stderr, _CODE_WRITER_STDERR_HEAD),
         )
 
-        # Record a note for the synthesis pass. We INCLUDE the generated
-        # code here (truncated) because synthesis may want to cite
-        # "the script that ran HogQL X found..." even if the orchestrator
-        # never saw the raw code.
-        notes.append(
-            f"[execute_code: {purpose}] exit {result.exit_code}\n"
-            f"explanation: {code_output.explanation}\n"
-            f"code ({len(code_output.code)} chars, truncated):\n"
-            f"{_truncate(code_output.code, 2000)}\n"
-            f"stdout:\n{_truncate(result.stdout, 8000)}\n"
-            f"stderr:\n{_truncate(result.stderr, 2000)}"
+        # Record a transcript entry. This is what the SYNTHESIZER will
+        # see — generous caps, code un-truncated.
+        transcript_result = {
+            "purpose": purpose,
+            "explanation": code_output.explanation,
+            "exit_code": result.exit_code,
+            "code": code_output.code,
+            "stdout": _truncate(result.stdout, _TRANSCRIPT_STDOUT_CAP),
+            "stderr": _truncate(result.stderr, _TRANSCRIPT_STDERR_CAP),
+        }
+        entries.append(
+            TranscriptEntry(
+                kind="tool_call",
+                tool="execute_code",
+                args={"purpose": purpose},
+                result=transcript_result,
+                exit_code=result.exit_code,
+            )
         )
 
         chat_log(
@@ -626,24 +620,22 @@ async def _run_research_loop(
             explanation=code_output.explanation,
         )
 
-        # What the orchestrator sees. Keep it tight — this lands in
-        # context on every subsequent turn.
+        # What the ORCHESTRATOR sees. Tight — compounds over 20 turns.
         return json.dumps(
             {
                 "purpose": purpose,
                 "explanation": code_output.explanation,
                 "exit_code": result.exit_code,
-                "stdout": _truncate(result.stdout, 4000),
-                "stderr": _truncate(result.stderr, 1000),
+                "stdout": _truncate(result.stdout, _ORCH_STDOUT_CAP),
+                "stderr": _truncate(result.stderr, _ORCH_STDERR_CAP),
             },
             default=str,
         )
 
+    step_budget_exhausted = False
     try:
         model = get_gemini_pro().bind_tools([execute_code])
 
-        # Build the initial user message: every integration's preflight
-        # result as fenced JSON blocks.
         preflight_block = "\n\n".join(
             f"## {t.upper()} preflight\n\n```json\n{json.dumps(preflight_results[t], indent=2, default=str)}\n```"
             for t in integrations_covered
@@ -663,7 +655,8 @@ async def _run_research_loop(
                     "pick the most promising signals, and call `execute_code` with "
                     "clear research goals — including cross-provider correlations "
                     "where they reveal more than single-source drill-ins. Stop "
-                    "when you have enough evidence-backed findings.\n\n"
+                    "when you have enough evidence-backed findings, and emit a "
+                    "3-5 sentence handoff summary.\n\n"
                     "# Preflight data\n\n"
                     f"{preflight_block}"
                 )
@@ -674,28 +667,19 @@ async def _run_research_loop(
             response: AIMessage = await model.ainvoke(messages)
             messages.append(response)
 
-            # Capture any natural-language text blocks the orchestrator
-            # emitted. These often contain the reasoning for the next
-            # tool call, which is useful for synthesis.
-            text_content: list[str] = []
-            if isinstance(response.content, str) and response.content.strip():
-                text_content.append(response.content.strip())
-            elif isinstance(response.content, list):
-                for block in response.content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        t = block.get("text")
-                        if isinstance(t, str) and t.strip():
-                            text_content.append(t.strip())
-            if text_content:
-                notes.append("[orchestrator_thought]\n" + "\n".join(text_content))
+            text_blocks = _extract_text_blocks(response)
+            for text in text_blocks:
+                entries.append(TranscriptEntry(kind="thought", text=text))
 
             tool_calls = getattr(response, "tool_calls", None) or []
             if not tool_calls:
+                orientation = "\n\n".join(text_blocks)
                 chat_log(
                     "info",
                     "research_loop_done",
                     step=step,
-                    total_execs=sum(1 for n in notes if n.startswith("[execute_code:")),
+                    total_execs=sum(1 for e in entries if e.kind == "tool_call"),
+                    orientation_chars=len(orientation),
                 )
                 break
 
@@ -706,9 +690,15 @@ async def _run_research_loop(
                     tool_result = json.dumps(
                         {"error": f"Unknown tool '{name}'. Only execute_code is available."}
                     )
+                    entries.append(
+                        TranscriptEntry(
+                            kind="tool_call",
+                            tool=str(name),
+                            args=dict(args) if isinstance(args, dict) else {"raw": args},
+                            result={"error": f"Unknown tool '{name}'."},
+                        )
+                    )
                 elif not str(args.get("purpose") or "").strip():
-                    # Defend against the model hallucinating a call with an
-                    # empty purpose. Tell it why the call was a no-op.
                     tool_result = json.dumps(
                         {
                             "error": (
@@ -716,6 +706,14 @@ async def _run_research_loop(
                                 "`purpose` string describing the research goal."
                             )
                         }
+                    )
+                    entries.append(
+                        TranscriptEntry(
+                            kind="tool_call",
+                            tool="execute_code",
+                            args=dict(args) if isinstance(args, dict) else {},
+                            result={"error": "empty purpose"},
+                        )
                     )
                 else:
                     try:
@@ -733,6 +731,15 @@ async def _run_research_loop(
                                 "error": f"{type(e).__name__}: {e}",
                             }
                         )
+                        entries.append(
+                            TranscriptEntry(
+                                kind="tool_call",
+                                tool="execute_code",
+                                args={"purpose": args.get("purpose")},
+                                result={"error": f"{type(e).__name__}: {e}"},
+                                exit_code=1,
+                            )
+                        )
                 messages.append(
                     ToolMessage(
                         content=tool_result,
@@ -741,141 +748,74 @@ async def _run_research_loop(
                     )
                 )
         else:
+            step_budget_exhausted = True
             chat_log(
                 "warn",
                 "research_loop_step_budget_exhausted",
                 max_steps=max_steps,
-                total_execs=sum(1 for n in notes if n.startswith("[execute_code:")),
+                total_execs=sum(1 for e in entries if e.kind == "tool_call"),
             )
 
-        return notes
+        return entries, orientation, step_budget_exhausted, True
 
     finally:
         await teardown_sandbox(sb)
 
 
-async def _synthesize_report(
-    *,
-    app_url: str,
-    integrations_covered: list[str],
-    integrations_skipped: list[str],
-    preflight_results: dict[str, dict[str, Any]],
-    research_notes: list[str],
-) -> IntegrationResearchReport:
-    """Second LLM call: structured output synthesis of preflight + notes.
-
-    This is the piece that actually populates `IntegrationResearchReport`.
-    Using `with_structured_output(..., method="json_schema")` forces the
-    output into the right shape so the downstream flow-proposal generator
-    can trust it.
-    """
-    preflight_block = "\n\n".join(
-        f"## {t.upper()} preflight\n\n```json\n{json.dumps(preflight_results[t], indent=2, default=str)}\n```"
-        for t in integrations_covered
-    )
-    notes_block = "\n\n---\n\n".join(research_notes) or "(No drill-in results.)"
-
-    system = f"""You are a QA research agent synthesizing evidence-backed signals about {app_url} into a structured report. Your output feeds a downstream flow-proposer; be specific and anchored, not narrative.
-
-# Output requirements
-
-- `summary`: 3-6 sentences. Lead with the single biggest risk, then the next 1-2 themes. No preamble, no "this report covers...".
-- `findings`: one entry per distinct, actionable signal. Each needs `source`, `category`, `severity`, a one- or two-sentence `details` that ends with a concrete anchor (commit SHA, PR #, URL, error count, session ID). Populate `rawData` (JSON string) whenever you have supporting numbers, IDs, URLs, or short lists that would help a downstream reviewer verify the finding — this field is rendered to the chat orchestrator, so prefer including it over omitting it. Keep each `rawData` under ~500 chars; just enough to ground the `details`.
-- `recommendedFlows`: short phrases naming user-facing flows a QA human could recognize ("Autosave under concurrent editing", "Magic-link expiration recovery"). Prefer 5-10 strong candidates over 20 weak ones. Each must be traceable to at least one finding.
-- `drillInHighlights`: 3-6 one-sentence callouts of SPECIFIC drill-in results from the research notes that are worth surfacing to the chat orchestrator verbatim. Each MUST cite a concrete number or anchor pulled from the `Drill-in research notes` section below (e.g. "PostHog: 48 $exception events on /w/*/sheets/* in the last 7 days, up from 2 the prior week" or "GitHub PR #412 touched 11 files under app/checkout/; largest diff was CheckoutFlow.tsx (+214/-38)"). This is the channel by which sandbox stdout evidence reaches downstream consumers — do not leave it empty unless drill-ins genuinely produced nothing useful.
-
-# Prioritization
-
-1. Regressions on recently merged PRs — especially large diffs, bug-fix series, or infra overhauls.
-2. Pages with concrete user pain (rage clicks, exceptions, drop-off).
-3. High-traffic journeys that would be embarrassing to break.
-4. AI/LLM features with failing runs or score regressions."""
-
-    human = f"""Produce the structured research report for {app_url} now.
-
-Connected integrations with preflight data:
-{', '.join(integrations_covered)}
-
-Skipped (no data or errors):
-{', '.join(integrations_skipped) or 'none'}
-
-# Preflight data
-
-{preflight_block}
-
-# Drill-in research notes (what the investigator actually found)
-
-{notes_block}"""
-
-    model = get_gemini_pro()
-    structured = model.with_structured_output(_AgentReport, method="json_schema")
-    try:
-        agent_report: _AgentReport = await structured.ainvoke(
-            [
-                {"role": "system", "content": system},
-                {"role": "user", "content": human},
-            ]
-        )
-    except Exception as e:
-        chat_log("error", "research_integration_synthesis_failed", err=repr(e))
-        return IntegrationResearchReport(
-            summary=(
-                f"Integration research synthesis failed: {type(e).__name__}: {e}. "
-                f"Preflight data was collected for {', '.join(integrations_covered)}."
-            ),
-            findings=[],
-            recommendedFlows=[],
-            integrationsCovered=integrations_covered,
-            integrationsSkipped=integrations_skipped,
-            drillInHighlights=[],
-        )
-
-    findings = [
-        ResearchFinding(
-            source=f.source,
-            category=f.category,
-            details=f.details,
-            severity=f.severity,
-            rawData=f.rawData,
-        )
-        for f in agent_report.findings
-    ]
-
-    return IntegrationResearchReport(
-        summary=agent_report.summary,
-        findings=findings,
-        recommendedFlows=agent_report.recommendedFlows,
-        integrationsCovered=integrations_covered,
-        integrationsSkipped=integrations_skipped,
-        drillInHighlights=list(agent_report.drillInHighlights or []),
-    )
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
 
 
-async def run_integration_research(
+async def run_integration_research_transcript(
     *,
     app_url: str,
     active_integrations: list[dict[str, Any]],
-) -> IntegrationResearchReport:
+) -> IntegrationTranscript:
     """End-to-end integration research pass.
 
-    Orchestrates the three phases (preflight -> sandbox drill-in ->
-    synthesis) and the graceful-degradation paths between them. Never
-    raises; callers always get a shaped `IntegrationResearchReport`
-    (possibly with error text in `summary` if everything failed).
+    Returns an `IntegrationTranscript` carrying preflight data, the full
+    drill-in log, and a natural-language orientation blurb. Never
+    raises — callers always get a shaped transcript (possibly with
+    error text in `orientation` if everything failed).
+
+    Orchestrates two phases (preflight -> sandbox drill-in) and the
+    graceful-degradation paths between them. The synthesis step lives
+    in `runner.research.synthesizer.generate_flow_report`.
     """
     if not active_integrations:
-        return _fallback_report(
-            app_url,
-            "No integrations are connected. Recommendations are based on general "
-            "best practices for the application URL.",
+        return IntegrationTranscript(
+            app_url=app_url,
+            integrations_covered=[],
+            integrations_skipped=[],
+            preflight_results={},
+            orientation=(
+                "No integrations are connected. Synthesizer should produce "
+                "flows based on the codebase track and general best practices."
+            ),
+            entries=[],
+            step_budget_exhausted=False,
+            sandbox_available=False,
         )
 
     resolved = _resolve_configs(active_integrations)
     if not resolved:
-        return _fallback_report(
-            app_url,
-            "Integrations are connected but credentials could not be resolved. "
-            "Recommendations are based on general best practices.",
+        return IntegrationTranscript(
+            app_url=app_url,
+            integrations_covered=[],
+            integrations_skipped=[
+                str(r.get("type"))
+                for r in active_integrations
+                if isinstance(r.get("type"), str)
+            ],
+            preflight_results={},
+            orientation=(
+                "Integrations are connected but credentials could not be "
+                "resolved. Synthesizer should rely on the codebase track."
+            ),
+            entries=[],
+            step_budget_exhausted=False,
+            sandbox_available=False,
         )
 
     # Phase 1: preflight.
@@ -890,39 +830,86 @@ async def run_integration_research(
             integrations_skipped.append(t)
 
     if not integrations_covered:
-        return _fallback_report(
-            app_url,
-            "All integration preflights failed. Recommendations are based on "
-            "general best practices.",
+        return IntegrationTranscript(
+            app_url=app_url,
+            integrations_covered=[],
+            integrations_skipped=integrations_skipped,
+            preflight_results=preflight_results,
+            orientation=(
+                "All integration preflights failed. Synthesizer should rely "
+                "on the codebase track."
+            ),
+            entries=[],
+            step_budget_exhausted=False,
+            sandbox_available=False,
         )
 
-    # Phase 2: sandbox-backed research loop. Orchestrator (Gemini 3.1 Pro)
-    # picks the next question; the code-writer produces the code; sandbox
-    # runs it.
+    # Phase 2: sandbox-backed research loop.
     env = await _build_sandbox_env(resolved)
     try:
-        research_notes = await _run_research_loop(
-            app_url=app_url,
-            integrations_covered=integrations_covered,
-            preflight_results=preflight_results,
-            env=env,
+        entries, orientation, step_budget_exhausted, sandbox_available = (
+            await _run_research_loop(
+                app_url=app_url,
+                integrations_covered=integrations_covered,
+                preflight_results=preflight_results,
+                env=env,
+            )
         )
     except Exception as e:
         chat_log("error", "research_loop_uncaught", err=repr(e))
-        research_notes = [f"[research loop failed: {type(e).__name__}: {e}]"]
+        entries = [
+            TranscriptEntry(
+                kind="thought",
+                text=f"[research loop failed: {type(e).__name__}: {e}]",
+            )
+        ]
+        orientation = f"Research loop failed: {type(e).__name__}: {e}"
+        step_budget_exhausted = False
+        sandbox_available = False
+
+    # Collect pre-truncation stdout stats for observability.
+    exec_entries = [
+        e for e in entries if e.kind == "tool_call" and e.tool == "execute_code"
+    ]
+    stdout_lens = [
+        len(str((e.result or {}).get("stdout") or ""))
+        for e in exec_entries
+        if isinstance(e.result, dict)
+    ]
+    max_stdout = max(stdout_lens) if stdout_lens else 0
+    # Rough p95 without numpy — sort + index at 95th percentile.
+    p95_stdout = 0
+    if stdout_lens:
+        sorted_lens = sorted(stdout_lens)
+        idx = min(
+            len(sorted_lens) - 1,
+            max(0, int(round(0.95 * (len(sorted_lens) - 1)))),
+        )
+        p95_stdout = sorted_lens[idx]
 
     chat_log(
         "info",
-        "research_integration_loop_complete",
-        note_count=len(research_notes),
-        exec_count=sum(1 for n in research_notes if n.startswith("[execute_code:")),
+        "research_integration_transcript_built",
+        app_url=app_url,
+        integrations_covered=integrations_covered,
+        integrations_skipped=integrations_skipped,
+        entries_count=len(entries),
+        exec_count=len(exec_entries),
+        thoughts=sum(1 for e in entries if e.kind == "thought"),
+        max_stdout_chars=max_stdout,
+        p95_stdout_chars=p95_stdout,
+        step_budget_exhausted=step_budget_exhausted,
+        sandbox_available=sandbox_available,
+        orientation_chars=len(orientation),
     )
 
-    # Phase 3: synthesize.
-    return await _synthesize_report(
+    return IntegrationTranscript(
         app_url=app_url,
         integrations_covered=integrations_covered,
         integrations_skipped=integrations_skipped,
         preflight_results=preflight_results,
-        research_notes=research_notes,
+        orientation=orientation,
+        entries=entries,
+        step_budget_exhausted=step_budget_exhausted,
+        sandbox_available=sandbox_available,
     )
