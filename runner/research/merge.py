@@ -102,5 +102,6 @@ def merge_integration_and_codebase(
         recommendedFlows=recommended_flows,
         integrationsCovered=integrations_covered,
         integrationsSkipped=integrations_skipped,
+        drillInHighlights=list(integration.drillInHighlights),
         codebaseExploration=codebase,
     )

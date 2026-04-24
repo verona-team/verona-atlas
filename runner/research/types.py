@@ -42,6 +42,34 @@ class ResearchFinding(BaseModel):
     rawData: str | None = None
 
 
+class CodebaseEvidenceSnippet(BaseModel):
+    """A short, quoted snippet from a file the codebase agent actually read.
+
+    Added so the final chat orchestrator (and the flow generator) can cite
+    code-level evidence that no other track can produce — integration
+    sub-agents never see file contents, and the compressed
+    `architecture` / `testingImplications` paragraphs lose per-file nuance.
+
+    The agent self-curates these at finish time: it's looking back at the
+    handful of files that most informed its conclusions and pulling a
+    representative line or two from each. Capped in size by prompt, not
+    code, so we preserve whatever the model chose.
+    """
+
+    path: str = Field(description="Repository path this snippet came from.")
+    snippet: str = Field(
+        description=(
+            "Verbatim excerpt (≤ ~400 chars) from the file showing what "
+            "informed the finding."
+        )
+    )
+    relevance: str = Field(
+        description=(
+            "One short sentence on why this snippet matters for QA planning."
+        )
+    )
+
+
 class CodebaseExplorationResult(BaseModel):
     """Output of the codebase-exploration sub-agent.
 
@@ -49,6 +77,11 @@ class CodebaseExplorationResult(BaseModel):
     reflects how much coverage the agent got — low means GitHub errored,
     the repo was huge and truncated, or the step budget ran out before a
     meaningful cross-section was read.
+
+    `keyEvidence` is optional (empty list on older rows) and carries a
+    few short, self-curated code snippets the agent read. This is the
+    one channel that survives the "sub-agent compressed raw evidence
+    into prose" step with actual, quoteable code preserved.
     """
 
     summary: str
@@ -59,16 +92,28 @@ class CodebaseExplorationResult(BaseModel):
     confidence: Confidence
     truncationWarnings: list[str]
     toolStepsUsed: int
+    keyEvidence: list[CodebaseEvidenceSnippet] = Field(default_factory=list)
 
 
 class IntegrationResearchReport(BaseModel):
-    """Output of the integration-research sub-agent (pre-merge with codebase)."""
+    """Output of the integration-research sub-agent (pre-merge with codebase).
+
+    `drillInHighlights` is a small list of synthesis-curated one-liners
+    naming specific sandbox drill-in results worth surfacing (e.g.
+    "PostHog confirms 48 `$exception` events on `/w/*/sheets/*` post-PR
+    #206, up from 2 the prior week"). This is a dedicated channel for
+    signals that don't fit the `ResearchFinding` shape but are too
+    concrete to fold into the top-level `summary`. Empty list on older
+    rows; see `drill-in research notes` in the synthesis prompt for the
+    contract.
+    """
 
     summary: str
     findings: list[ResearchFinding]
     recommendedFlows: list[str]
     integrationsCovered: list[str]
     integrationsSkipped: list[str]
+    drillInHighlights: list[str] = Field(default_factory=list)
 
 
 class ResearchReport(IntegrationResearchReport):
@@ -91,6 +136,7 @@ def empty_codebase_exploration(
     confidence: Confidence = "low",
     truncation_warnings: list[str] | None = None,
     tool_steps_used: int = 0,
+    key_evidence: list[CodebaseEvidenceSnippet] | None = None,
 ) -> CodebaseExplorationResult:
     """Default / error-case codebase exploration result.
 
@@ -106,6 +152,7 @@ def empty_codebase_exploration(
         confidence=confidence,
         truncationWarnings=list(truncation_warnings or []),
         toolStepsUsed=tool_steps_used,
+        keyEvidence=list(key_evidence or []),
     )
 
 
@@ -140,9 +187,14 @@ def normalize_research_report(raw: object | None) -> ResearchReport | None:
         patched.setdefault("recommendedFlows", [])
         patched.setdefault("integrationsCovered", [])
         patched.setdefault("integrationsSkipped", [])
+        patched.setdefault("drillInHighlights", [])
         patched.setdefault(
             "codebaseExploration",
             empty_codebase_exploration().model_dump(mode="json"),
         )
+        # Back-compat: older rows predate keyEvidence on the nested
+        # codebaseExploration object. Fill it in so validation passes.
+        if isinstance(patched.get("codebaseExploration"), dict):
+            patched["codebaseExploration"].setdefault("keyEvidence", [])
         patched.setdefault("summary", "Research report partially available.")
         return ResearchReport.model_validate(patched)
