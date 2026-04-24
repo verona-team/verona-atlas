@@ -11,15 +11,127 @@ import json
 from typing import Any
 
 
+# Per-finding rawData rendering caps. Synthesis is prompted to keep each
+# rawData blob under ~500 chars, but models occasionally ignore length
+# hints; we cap here so a single runaway finding can't drown the rest of
+# the prompt. The cap is per-finding, not per-prompt, so a report with
+# many well-sized findings still preserves each one.
+_RAW_DATA_PER_FINDING_CHAR_CAP = 600
+
+
+def _format_raw_data(raw: Any) -> str:
+    """Best-effort render of a finding's `rawData` for a human/LLM reader.
+
+    `rawData` is stored as a JSON-encoded string by synthesis (matches the
+    TS schema's "string, not object" shape — Anthropic structured-output
+    chokes on unconstrained nested JSON). We try to pretty-print if it
+    parses, and fall back to the raw string otherwise.
+    """
+    if raw is None:
+        return ""
+    text = raw if isinstance(raw, str) else json.dumps(raw, default=str)
+    try:
+        parsed = json.loads(text)
+        text = json.dumps(parsed, indent=2, default=str)
+    except (TypeError, ValueError):
+        pass
+    if len(text) > _RAW_DATA_PER_FINDING_CHAR_CAP:
+        text = (
+            text[:_RAW_DATA_PER_FINDING_CHAR_CAP]
+            + f"\n[...truncated {len(text) - _RAW_DATA_PER_FINDING_CHAR_CAP} more chars]"
+        )
+    return text
+
+
 def _format_findings(findings: list[dict[str, Any]]) -> str:
+    """Render findings with their supporting `rawData` when present.
+
+    Historically `rawData` was stripped here, which defeated the purpose
+    of having synthesis curate JSON anchors — the orchestrator Opus call
+    never saw them. We now render each finding as a header line plus an
+    optional fenced evidence block, so Opus can cite exact numbers, IDs,
+    and URLs in its replies.
+    """
     if not findings:
         return "No specific findings from integrations."
-    lines: list[str] = []
+    blocks: list[str] = []
     for f in findings:
         src = f.get("source", "?")
         sev = f.get("severity", "?")
+        cat = f.get("category", "")
         details = f.get("details", "")
-        lines.append(f"- [{src}/{sev}] {details}")
+        header = (
+            f"- [{src}/{sev}{'/' + cat if cat else ''}] {details}"
+        )
+        raw = _format_raw_data(f.get("rawData"))
+        if raw.strip():
+            fence = "```"
+            # Use json fence when parse succeeded (has `{` or `[` prefix
+            # after formatting), text fence otherwise. Lets chat readers
+            # still render monospace when we fall back to a non-JSON blob.
+            lang = "json" if raw.lstrip().startswith(("{", "[")) else ""
+            blocks.append(f"{header}\n  {fence}{lang}\n{raw}\n  {fence}")
+        else:
+            blocks.append(header)
+    return "\n".join(blocks)
+
+
+def _format_drill_in_highlights(highlights: list[str] | None) -> str:
+    """Render synthesis-curated integration drill-in highlights.
+
+    Empty list / legacy-row-without-the-field => empty string, so the
+    prompt doesn't sprout a dangling header. Non-empty list renders as a
+    numbered section under a dedicated header.
+    """
+    if not highlights:
+        return ""
+    lines = [
+        "## Drill-in highlights (specific evidence from sandbox research)",
+    ]
+    for i, h in enumerate(highlights):
+        s = (h or "").strip()
+        if not s:
+            continue
+        lines.append(f"{i + 1}. {s}")
+    if len(lines) == 1:
+        return ""
+    return "\n".join(lines)
+
+
+# Codebase evidence rendering cap: each snippet is already ≤600 chars
+# (enforced in the codebase agent) but we cap the count here so the
+# orchestrator prompt stays bounded even if the agent emits more. We
+# keep the order the agent chose — it's the model's judgment of
+# priority.
+_CODE_EVIDENCE_MAX_SNIPPETS = 8
+
+
+def _format_code_evidence(snippets: list[dict[str, Any]] | None) -> str:
+    """Render the codebase agent's self-curated code snippets.
+
+    Each snippet is rendered as a labelled code fence plus the agent's
+    one-sentence relevance note. We use a plain ``` fence rather than
+    inferring a per-path language because picking a language from path
+    extension is noisy for files Opus has never seen (e.g. route files
+    with unusual extensions, Go .templ, etc.) and the `path` header
+    already identifies the file.
+    """
+    if not snippets:
+        return ""
+    lines: list[str] = ["**Code evidence (quoted from files actually read):**"]
+    for s in snippets[:_CODE_EVIDENCE_MAX_SNIPPETS]:
+        path = (s.get("path") or "").strip()
+        snippet = s.get("snippet") or ""
+        relevance = (s.get("relevance") or "").strip()
+        if not path or not snippet:
+            continue
+        lines.append(f"- `{path}` — {relevance}" if relevance else f"- `{path}`")
+        lines.append("  ```")
+        for raw_line in snippet.splitlines() or [snippet]:
+            lines.append(f"  {raw_line}")
+        lines.append("  ```")
+    if len(lines) == 1:
+        return ""
     return "\n".join(lines)
 
 
@@ -29,7 +141,10 @@ def _format_codebase_block(codebase: dict[str, Any] | None) -> str:
     flows = codebase.get("inferredUserFlows") or []
     paths = codebase.get("keyPathsExamined") or []
     warnings = codebase.get("truncationWarnings") or []
+    key_evidence = codebase.get("keyEvidence") or []
     notes = f"\n**Notes:** {' '.join(warnings)}" if warnings else ""
+    evidence_block = _format_code_evidence(key_evidence)
+    evidence_section = f"\n\n{evidence_block}" if evidence_block else ""
 
     return f"""## Repository understanding ({codebase.get('confidence', '?')} confidence)
 {codebase.get('summary', '')}
@@ -41,7 +156,7 @@ def _format_codebase_block(codebase: dict[str, Any] | None) -> str:
 
 **Testing implications:** {codebase.get('testingImplications') or '—'}
 
-**Paths examined:** {', '.join(paths[:40]) if paths else '—'}{notes}"""
+**Paths examined:** {', '.join(paths[:40]) if paths else '—'}{notes}{evidence_section}"""
 
 
 def _format_flow_status_summary(
@@ -85,6 +200,8 @@ def build_orchestrator_system_prompt(
     report = research_report or {}
     findings = _format_findings(report.get("findings") or [])
     codebase_block = _format_codebase_block(report.get("codebaseExploration"))
+    drill_in_block = _format_drill_in_highlights(report.get("drillInHighlights"))
+    drill_in_section = f"\n\n{drill_in_block}" if drill_in_block else ""
     recommended = report.get("recommendedFlows") or []
     integrations_covered = report.get("integrationsCovered") or []
     report_summary = report.get("summary") or ""
@@ -140,7 +257,7 @@ Never write numbered lists, bullets, or prose that describes candidate flows ("F
 {report_summary}
 
 ## Key findings
-{findings}
+{findings}{drill_in_section}
 
 {codebase_block}
 

@@ -95,9 +95,18 @@ async def ensure_research(state: ChatTurnState) -> dict[str, Any]:
         turn_id=state.get("turn_id"),
         elapsed_s=round(time.time() - t0, 3),
         finding_count=len(report_json.get("findings") or []),
+        findings_with_raw_data=sum(
+            1
+            for f in (report_json.get("findings") or [])
+            if isinstance(f, dict) and (f.get("rawData") or "").strip()
+        ),
+        drill_in_highlight_count=len(report_json.get("drillInHighlights") or []),
         recommended_flow_count=len(report_json.get("recommendedFlows") or []),
         integrations_covered=report_json.get("integrationsCovered") or [],
         integrations_skipped=report_json.get("integrationsSkipped") or [],
+        code_evidence_count=len(
+            (report_json.get("codebaseExploration") or {}).get("keyEvidence") or []
+        ),
     )
 
     try:

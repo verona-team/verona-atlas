@@ -21,6 +21,7 @@ are load-bearing. Do not reorganize without a matching client change.
 """
 from __future__ import annotations
 
+import json
 import time
 from typing import Any, Literal
 
@@ -75,20 +76,71 @@ async def generate_flow_proposals(
     recommended = report.get("recommendedFlows") or []
     integrations_covered = report.get("integrationsCovered") or []
     integrations_skipped = report.get("integrationsSkipped") or []
+    drill_in_highlights = report.get("drillInHighlights") or []
 
-    findings_block = (
-        "\n".join(
-            f"[{f.get('source', '?')}] ({f.get('severity', '?')}) {f.get('category', '?')}: {f.get('details', '')}"
-            for f in findings
-        )
-        if findings
-        else "No specific findings from integrations."
-    )
+    # Per-finding rawData rendering lets the flow generator ground
+    # rationales in concrete numbers/URLs/IDs. Kept small (500 chars per
+    # finding) so the synthesis-curated anchors survive to the generator
+    # without ballooning its prompt.
+    _FG_RAW_DATA_CAP = 500
+
+    def _fg_render_raw(raw: Any) -> str:
+        if raw is None:
+            return ""
+        text = raw if isinstance(raw, str) else json.dumps(raw, default=str)
+        if len(text) > _FG_RAW_DATA_CAP:
+            text = text[:_FG_RAW_DATA_CAP] + f"… [+{len(text) - _FG_RAW_DATA_CAP} chars]"
+        return text
+
+    if findings:
+        fg_lines: list[str] = []
+        for f in findings:
+            header = (
+                f"[{f.get('source', '?')}] ({f.get('severity', '?')}) "
+                f"{f.get('category', '?')}: {f.get('details', '')}"
+            )
+            raw = _fg_render_raw(f.get("rawData"))
+            if raw.strip():
+                fg_lines.append(f"{header}\n  evidence: {raw}")
+            else:
+                fg_lines.append(header)
+        findings_block = "\n".join(fg_lines)
+    else:
+        findings_block = "No specific findings from integrations."
+
+    drill_in_block = ""
+    if drill_in_highlights:
+        drill_in_lines = ["## Drill-in highlights (specific sandbox evidence)"]
+        for i, h in enumerate(drill_in_highlights):
+            s = (h or "").strip()
+            if s:
+                drill_in_lines.append(f"{i + 1}. {s}")
+        if len(drill_in_lines) > 1:
+            drill_in_block = "\n".join(drill_in_lines)
 
     codebase_block = ""
     if codebase and codebase.get("summary"):
         flows = codebase.get("inferredUserFlows") or []
         paths = codebase.get("keyPathsExamined") or []
+        key_evidence = codebase.get("keyEvidence") or []
+        evidence_lines: list[str] = []
+        for s in key_evidence[:6]:
+            path = (s.get("path") or "").strip()
+            snippet = s.get("snippet") or ""
+            relevance = (s.get("relevance") or "").strip()
+            if not path or not snippet:
+                continue
+            header = f"- `{path}` — {relevance}" if relevance else f"- `{path}`"
+            evidence_lines.append(header)
+            evidence_lines.append("  ```")
+            for raw_line in snippet.splitlines() or [snippet]:
+                evidence_lines.append(f"  {raw_line}")
+            evidence_lines.append("  ```")
+        evidence_section = (
+            "\n\nCode evidence:\n" + "\n".join(evidence_lines)
+            if evidence_lines
+            else ""
+        )
         codebase_block = f"""## Repository understanding ({codebase.get('confidence', '?')} confidence)
 {codebase.get('summary', '')}
 
@@ -97,7 +149,7 @@ Architecture: {codebase.get('architecture') or '—'}
 Inferred flows from code: {'; '.join(flows) if flows else '—'}
 
 Testing implications: {codebase.get('testingImplications') or '—'}
-Key paths: {', '.join(paths[:30]) or '—'}"""
+Key paths: {', '.join(paths[:30]) or '—'}{evidence_section}"""
 
     prompt = f"""You are a QA strategist producing UI test flow proposals for {app_url}. Your output feeds directly into approvable cards in the user's chat UI and an AI browser agent that will execute approved flows.
 
@@ -139,6 +191,7 @@ Key paths: {', '.join(paths[:30]) or '—'}"""
 
 ## Findings
 {findings_block}
+{chr(10) + drill_in_block if drill_in_block else ''}
 
 {codebase_block}
 
