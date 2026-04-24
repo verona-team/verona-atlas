@@ -17,6 +17,10 @@ import {
 } from "@/components/integrations/integration-cards";
 import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/lib/workspace-context";
+import {
+  invalidateSettingsCache,
+  prefetchSettings,
+} from "@/lib/settings-prefetch";
 
 /**
  * Landing surface for a newly-created project that hasn't armed its
@@ -50,7 +54,16 @@ export function ProjectSetupCTA({
   /** Server-rendered GitHub readiness — avoids a first-paint flicker where the
    *  button is incorrectly disabled before the client fetch resolves. */
   initialGithubReady: boolean;
-  onDispatched: () => void;
+  /**
+   * Called after `bootstrap_dispatched_at` has been armed server-side.
+   * The second argument is the CTA's live, client-known GitHub readiness
+   * at the moment of handoff — the gate uses it to override the stale
+   * SSR-time `chatProps.githubReady` prop when it mounts `<ChatInterface>`.
+   * Without this, a user who connected GitHub inline here lands on an
+   * incorrectly-disabled chat input (and an empty V-logo state) until a
+   * hard refresh re-runs SSR with fresh data.
+   */
+  onDispatched: (liveGithubReady: boolean) => void;
 }) {
   const { refreshProjects } = useWorkspace();
 
@@ -135,7 +148,25 @@ export function ProjectSetupCTA({
       // in-memory swap so the user sees the chat view instantly, with no
       // second server round-trip.
       void refreshProjects();
-      onDispatched();
+
+      // Flush the shared `settings-prefetch` cache. That cache was populated
+      // once, at chat-page mount, before the user connected GitHub inline on
+      // this CTA — so `useGithubReady` inside `<ChatInterface>` would
+      // otherwise read "not ready" from the warm-but-stale entry and drown
+      // out the (correct) initial prop we're about to pass through the gate.
+      // Invalidating drops `fetchedAt` to 0, which flips `isGithubReadyFromCache`
+      // back to `null` and lets the hook fall through to the fresh `initial`.
+      // A background `prefetchSettings({force:true})` then repopulates the
+      // cache so the Settings overlay (which also reads it) stays snappy.
+      invalidateSettingsCache(projectId);
+      void prefetchSettings(projectId, { force: true });
+
+      // Hand the CTA's live, client-known GitHub readiness up to the gate so
+      // it can override the SSR-baked `chatProps.githubReady` (which was
+      // computed before the user connected GitHub here). `githubReady` is
+      // already gated to `true` above via the early-return, but we read it
+      // fresh here to stay defensively correct if that invariant ever shifts.
+      onDispatched(githubReady);
     } catch (err) {
       setContinuing(false);
       toast.error(err instanceof Error ? err.message : "Something went wrong");

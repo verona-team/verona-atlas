@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import { ChatInterface } from '@/components/chat/chat-interface'
 import { ProjectSetupCTA } from '@/components/chat/project-setup-cta'
 import type { ChatMessage } from '@/lib/supabase/types'
@@ -39,8 +39,21 @@ export function ProjectChatGate({
   chatProps,
 }: ProjectChatGateProps) {
   const [dispatched, setDispatched] = useState(bootstrapDispatched)
+  /**
+   * The CTA can finish connecting GitHub inline (no SSR re-run), so by the
+   * time we swap to `<ChatInterface>` the live GitHub-ready value is often
+   * ahead of `chatProps.githubReady` (which was baked into SSR). When the
+   * CTA calls `onDispatched(liveGithubReady)` we capture it here and use
+   * it as the override when mounting the chat. `null` means "no override"
+   * — the SSR-authoritative path (hard refresh, project already armed,
+   * etc.) stays on the server-provided value.
+   */
+  const [githubReadyOverride, setGithubReadyOverride] = useState<boolean | null>(
+    null,
+  )
 
-  const handleDispatched = useCallback(() => {
+  const handleDispatched = useCallback((liveGithubReady: boolean) => {
+    setGithubReadyOverride(liveGithubReady)
     setDispatched(true)
   }, [])
 
@@ -56,5 +69,12 @@ export function ProjectChatGate({
     )
   }
 
-  return <ChatInterface {...chatProps} initialMessages={initialMessages} />
+  const effectiveChatProps =
+    githubReadyOverride === null
+      ? chatProps
+      : { ...chatProps, githubReady: githubReadyOverride }
+
+  return (
+    <ChatInterface {...effectiveChatProps} initialMessages={initialMessages} />
+  )
 }
