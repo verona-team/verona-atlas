@@ -182,9 +182,16 @@ export function ChatInterface({
   const stickToBottomRef = useRef(true)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [input, setInput] = useState('')
+  /**
+   * Optimistic approval overrides, keyed by (messageId, flowId) so clicks
+   * on one proposal card set never spill into another's state. Realtime
+   * UPDATE events clear the matching entries once the server write lands.
+   *
+   * Shape: { [messageId]: { [flowId]: 'approved' | 'rejected' } }
+   */
   const [flowStatesOverride, setFlowStatesOverride] = useState<
-    Record<string, 'pending' | 'approved' | 'rejected'> | null
-  >(null)
+    Record<string, Record<string, 'pending' | 'approved' | 'rejected'>>
+  >({})
   const [dbMessages, setDbMessages] = useState<ChatMessage[]>(initialMessages)
   /**
    * Optimistic user-message bubbles, keyed by the `client_message_id` we
@@ -284,20 +291,36 @@ export function ChatInterface({
     })
   }, [dbMessages, sessionId])
 
-  const { flowStates, proposalMessageId } = useMemo(() => {
-    let states: Record<string, 'pending' | 'approved' | 'rejected'> = {}
-    let msgId: string | null = null
+  /**
+   * Per-message approval state map. Every `flow_proposals` row (active or
+   * superseded) gets its own entry, so a click on an old card can never
+   * mutate a new card's state. `activeProposalMessageId` identifies the
+   * single `metadata.status === 'active'` row — the one whose approvals
+   * feed `start_test_run` and the approved-count footer.
+   */
+  const { flowStatesByMessageId, activeProposalMessageId } = useMemo(() => {
+    const byMessage: Record<
+      string,
+      Record<string, 'pending' | 'approved' | 'rejected'>
+    > = {}
+    let activeId: string | null = null
     for (const msg of dbMessages) {
       const meta = msg.metadata as Record<string, Json> | null
-      if (meta?.type === 'flow_proposals' && meta.flow_states) {
-        states = meta.flow_states as Record<string, 'pending' | 'approved' | 'rejected'>
-        msgId = msg.id
-      }
+      if (meta?.type !== 'flow_proposals' || !meta.flow_states) continue
+      const baseStates = meta.flow_states as Record<
+        string,
+        'pending' | 'approved' | 'rejected'
+      >
+      const override = flowStatesOverride[msg.id] ?? {}
+      byMessage[msg.id] = { ...baseStates, ...override }
+      // "status" is optional on legacy rows; treat missing as active.
+      const status = (meta.status as string | undefined) ?? 'active'
+      if (status === 'active') activeId = msg.id
     }
-    if (flowStatesOverride) {
-      states = { ...states, ...flowStatesOverride }
+    return {
+      flowStatesByMessageId: byMessage,
+      activeProposalMessageId: activeId,
     }
-    return { flowStates: states, proposalMessageId: msgId }
   }, [dbMessages, flowStatesOverride])
 
   /**
@@ -490,9 +513,10 @@ export function ChatInterface({
             )
           }
 
-          if ((newMsg.metadata as Record<string, Json> | null)?.type === 'flow_proposals') {
-            setFlowStatesOverride(null)
-          }
+          // A brand-new proposals row landing means any stale overrides for
+          // OTHER message ids are still valid — only drop overrides scoped
+          // to messages that no longer exist in dbMessages (handled below by
+          // the dbMessages-change effect).
         },
       )
       .on(
@@ -510,8 +534,17 @@ export function ChatInterface({
               m.id === updated.id ? mergeChatMessageRow(m, updated) : m,
             ),
           )
-          if ((updated.metadata as Record<string, Json> | null)?.flow_states) {
-            setFlowStatesOverride(null)
+          const meta = updated.metadata as Record<string, Json> | null
+          if (meta?.flow_states) {
+            // Drop overrides for this specific message only, now that the
+            // server-side flow_states reflect the click. Other messages'
+            // overrides are untouched.
+            setFlowStatesOverride((prev) => {
+              if (!prev[updated.id]) return prev
+              const next = { ...prev }
+              delete next[updated.id]
+              return next
+            })
           }
         },
       )
@@ -666,38 +699,89 @@ export function ChatInterface({
     return () => ro.disconnect()
   }, [scrollPaneToBottomIfStuck])
 
-  const handleApproveFlow = useCallback(
-    async (flowId: string) => {
-      if (!proposalMessageId) return
-      setFlowStatesOverride((prev) => ({ ...prev, [flowId]: 'approved' }))
-      await fetch('/api/chat/flows', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messageId: proposalMessageId,
-          flowId,
-          action: 'approve',
-        }),
-      })
+  /**
+   * Per-card approve/reject. `messageId` is the proposals row this click
+   * belongs to — critical for correctness now that the chat can contain
+   * multiple proposals rows (one active + zero or more superseded). The
+   * server rejects writes against superseded rows with 409
+   * PROPOSALS_SUPERSEDED; we surface that and roll back the optimistic
+   * override so the UI stays consistent.
+   */
+  const patchFlowState = useCallback(
+    async (
+      messageId: string,
+      flowId: string,
+      action: 'approve' | 'reject',
+    ) => {
+      const optimisticState: 'approved' | 'rejected' =
+        action === 'approve' ? 'approved' : 'rejected'
+      setFlowStatesOverride((prev) => ({
+        ...prev,
+        [messageId]: { ...(prev[messageId] ?? {}), [flowId]: optimisticState },
+      }))
+
+      const rollback = () => {
+        setFlowStatesOverride((prev) => {
+          const forMsg = prev[messageId]
+          if (!forMsg || !(flowId in forMsg)) return prev
+          const rest = { ...forMsg }
+          delete rest[flowId]
+          const next = { ...prev }
+          if (Object.keys(rest).length === 0) {
+            delete next[messageId]
+          } else {
+            next[messageId] = rest
+          }
+          return next
+        })
+      }
+
+      try {
+        const res = await fetch('/api/chat/flows', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageId, flowId, action }),
+        })
+        if (res.ok) return
+        let code: string | undefined
+        let errorMessage = 'Could not update flow. Try again.'
+        try {
+          const ct = res.headers.get('content-type') ?? ''
+          if (ct.includes('application/json')) {
+            const data = (await res.json()) as { error?: string; code?: string }
+            if (data?.error) errorMessage = data.error
+            if (data?.code) code = data.code
+          }
+        } catch {
+          /* ignore */
+        }
+        rollback()
+        if (code === 'PROPOSALS_SUPERSEDED') {
+          toast(errorMessage)
+        } else {
+          toast.error(errorMessage)
+        }
+      } catch (err) {
+        console.error('Flow approve/reject failed:', err)
+        rollback()
+        toast.error('Could not update flow. Check your connection and try again.')
+      }
     },
-    [proposalMessageId],
+    [],
+  )
+
+  const handleApproveFlow = useCallback(
+    (messageId: string, flowId: string) => {
+      void patchFlowState(messageId, flowId, 'approve')
+    },
+    [patchFlowState],
   )
 
   const handleRejectFlow = useCallback(
-    async (flowId: string) => {
-      if (!proposalMessageId) return
-      setFlowStatesOverride((prev) => ({ ...prev, [flowId]: 'rejected' }))
-      await fetch('/api/chat/flows', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messageId: proposalMessageId,
-          flowId,
-          action: 'reject',
-        }),
-      })
+    (messageId: string, flowId: string) => {
+      void patchFlowState(messageId, flowId, 'reject')
     },
-    [proposalMessageId],
+    [patchFlowState],
   )
 
   const trySend = useCallback(() => {
@@ -737,7 +821,14 @@ export function ChatInterface({
     }
   }
 
-  const approvedCount = Object.values(flowStates).filter((s) => s === 'approved').length
+  // Approved-count reflects only the single ACTIVE proposals row. Approvals on
+  // superseded rows are historical and never execute; counting them would
+  // show a misleading footer total.
+  const approvedCount = useMemo(() => {
+    if (!activeProposalMessageId) return 0
+    const active = flowStatesByMessageId[activeProposalMessageId] ?? {}
+    return Object.values(active).filter((s) => s === 'approved').length
+  }, [activeProposalMessageId, flowStatesByMessageId])
   const isProcessing = isPosting || backendThinking
 
   const displayMessages = useMemo(() => {
@@ -790,10 +881,11 @@ export function ChatInterface({
             <MessageBubble
               key={msg.id}
               projectId={projectId}
+              messageId={msg.id}
               role={msg.role}
               content={msg.content}
               metadata={msg.metadata}
-              flowStates={flowStates}
+              flowStates={flowStatesByMessageId[msg.id]}
               onApproveFlow={handleApproveFlow}
               onRejectFlow={handleRejectFlow}
               isStreaming={false}
