@@ -101,18 +101,64 @@ async def run_nightly_pipeline(sb: Client, project_id: str, *, turn_id: str) -> 
             err=repr(e),
         )
 
-    proposals = await run_flow_generator(app_url=app_url, research_report=report_json)
-    content, metadata, flows = serialize_flows_for_message(proposals)
+    # Nightly acts as a full "replace" — always supersedes any existing
+    # active proposals row for this project's session, so users wake up
+    # to one fresh set of cards rather than an accumulating stack. We
+    # lazy-import the helpers from `nodes` to avoid an eager cycle (nodes
+    # imports from flow_generator, which this module also imports).
+    from .nodes import (
+        _fetch_active_flow_proposals_row,
+        _prior_summaries_from_row,
+    )
 
+    active_row = _fetch_active_flow_proposals_row(sb, session_id)
+    prior_flow_summaries: list = []
+    prior_flow_states: dict[str, str] = {}
+    avoid_ids: list[str] = []
+    if active_row is not None:
+        (
+            prior_flow_summaries,
+            prior_flow_states,
+            avoid_ids,
+        ) = _prior_summaries_from_row(active_row)
+
+    proposals = await run_flow_generator(
+        app_url=app_url,
+        research_report=report_json,
+        prior_flows=prior_flow_summaries or None,
+        avoid_ids=avoid_ids or None,
+        intent=(
+            "overnight analysis — regenerate from refreshed research; preserve any "
+            "currently approved flows by re-emitting them verbatim, otherwise use "
+            "all new ids"
+            if active_row is not None
+            else None
+        ),
+    )
+    content, metadata, flows = serialize_flows_for_message(
+        proposals,
+        prior_flow_states=prior_flow_states or None,
+        prior_flows=prior_flow_summaries or None,
+        avoid_ids=avoid_ids or None,
+    )
+
+    inserted_id: str | None = None
     try:
-        sb.table("chat_messages").insert(
-            {
-                "session_id": session_id,
-                "role": "assistant",
-                "content": f"Nightly analysis complete. {content}",
-                "metadata": metadata,
-            }
-        ).execute()
+        ins = (
+            sb.table("chat_messages")
+            .insert(
+                {
+                    "session_id": session_id,
+                    "role": "assistant",
+                    "content": f"Nightly analysis complete. {content}",
+                    "metadata": metadata,
+                }
+            )
+            .execute()
+        )
+        inserted_rows = ins.data or []
+        if inserted_rows:
+            inserted_id = inserted_rows[0].get("id")
     except Exception as e:
         chat_log(
             "error",
@@ -121,6 +167,24 @@ async def run_nightly_pipeline(sb: Client, project_id: str, *, turn_id: str) -> 
             err=repr(e),
         )
         return
+
+    if active_row is not None and inserted_id is not None:
+        try:
+            prior_metadata = dict(active_row.get("metadata") or {})
+            prior_metadata["status"] = "superseded"
+            prior_metadata["superseded_by_message_id"] = inserted_id
+            sb.table("chat_messages").update({"metadata": prior_metadata}).eq(
+                "id", active_row["id"]
+            ).execute()
+        except Exception as e:
+            chat_log(
+                "error",
+                "chat_nightly_supersede_failed",
+                session_id=session_id,
+                prior_message_id=active_row["id"],
+                new_message_id=inserted_id,
+                err=repr(e),
+            )
 
     chat_log(
         "info",

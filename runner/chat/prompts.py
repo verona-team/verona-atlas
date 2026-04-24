@@ -1,6 +1,5 @@
 """System prompt + formatting helpers for the orchestrator agent.
 
-Ported from the TS system prompt in `app/api/chat/route.ts` (lines 323-376).
 Kept as a function rather than a template string so future nodes that need
 a variant (e.g. the nightly job's synthetic bootstrap) can compose from the
 same building blocks.
@@ -11,15 +10,127 @@ import json
 from typing import Any
 
 
+# Per-finding rawData rendering caps. Synthesis is prompted to keep each
+# rawData blob under ~500 chars, but models occasionally ignore length
+# hints; we cap here so a single runaway finding can't drown the rest of
+# the prompt. The cap is per-finding, not per-prompt, so a report with
+# many well-sized findings still preserves each one.
+_RAW_DATA_PER_FINDING_CHAR_CAP = 600
+
+
+def _format_raw_data(raw: Any) -> str:
+    """Best-effort render of a finding's `rawData` for a human/LLM reader.
+
+    `rawData` is stored as a JSON-encoded string by synthesis (matches the
+    TS schema's "string, not object" shape — Anthropic structured-output
+    chokes on unconstrained nested JSON). We try to pretty-print if it
+    parses, and fall back to the raw string otherwise.
+    """
+    if raw is None:
+        return ""
+    text = raw if isinstance(raw, str) else json.dumps(raw, default=str)
+    try:
+        parsed = json.loads(text)
+        text = json.dumps(parsed, indent=2, default=str)
+    except (TypeError, ValueError):
+        pass
+    if len(text) > _RAW_DATA_PER_FINDING_CHAR_CAP:
+        text = (
+            text[:_RAW_DATA_PER_FINDING_CHAR_CAP]
+            + f"\n[...truncated {len(text) - _RAW_DATA_PER_FINDING_CHAR_CAP} more chars]"
+        )
+    return text
+
+
 def _format_findings(findings: list[dict[str, Any]]) -> str:
+    """Render findings with their supporting `rawData` when present.
+
+    Historically `rawData` was stripped here, which defeated the purpose
+    of having synthesis curate JSON anchors — the orchestrator Opus call
+    never saw them. We now render each finding as a header line plus an
+    optional fenced evidence block, so Opus can cite exact numbers, IDs,
+    and URLs in its replies.
+    """
     if not findings:
         return "No specific findings from integrations."
-    lines: list[str] = []
+    blocks: list[str] = []
     for f in findings:
         src = f.get("source", "?")
         sev = f.get("severity", "?")
+        cat = f.get("category", "")
         details = f.get("details", "")
-        lines.append(f"- [{src}/{sev}] {details}")
+        header = (
+            f"- [{src}/{sev}{'/' + cat if cat else ''}] {details}"
+        )
+        raw = _format_raw_data(f.get("rawData"))
+        if raw.strip():
+            fence = "```"
+            # Use json fence when parse succeeded (has `{` or `[` prefix
+            # after formatting), text fence otherwise. Lets chat readers
+            # still render monospace when we fall back to a non-JSON blob.
+            lang = "json" if raw.lstrip().startswith(("{", "[")) else ""
+            blocks.append(f"{header}\n  {fence}{lang}\n{raw}\n  {fence}")
+        else:
+            blocks.append(header)
+    return "\n".join(blocks)
+
+
+def _format_drill_in_highlights(highlights: list[str] | None) -> str:
+    """Render synthesis-curated integration drill-in highlights.
+
+    Empty list / legacy-row-without-the-field => empty string, so the
+    prompt doesn't sprout a dangling header. Non-empty list renders as a
+    numbered section under a dedicated header.
+    """
+    if not highlights:
+        return ""
+    lines = [
+        "## Drill-in highlights (specific evidence from sandbox research)",
+    ]
+    for i, h in enumerate(highlights):
+        s = (h or "").strip()
+        if not s:
+            continue
+        lines.append(f"{i + 1}. {s}")
+    if len(lines) == 1:
+        return ""
+    return "\n".join(lines)
+
+
+# Codebase evidence rendering cap: each snippet is already ≤600 chars
+# (enforced in the codebase agent) but we cap the count here so the
+# orchestrator prompt stays bounded even if the agent emits more. We
+# keep the order the agent chose — it's the model's judgment of
+# priority.
+_CODE_EVIDENCE_MAX_SNIPPETS = 8
+
+
+def _format_code_evidence(snippets: list[dict[str, Any]] | None) -> str:
+    """Render the codebase agent's self-curated code snippets.
+
+    Each snippet is rendered as a labelled code fence plus the agent's
+    one-sentence relevance note. We use a plain ``` fence rather than
+    inferring a per-path language because picking a language from path
+    extension is noisy for files Opus has never seen (e.g. route files
+    with unusual extensions, Go .templ, etc.) and the `path` header
+    already identifies the file.
+    """
+    if not snippets:
+        return ""
+    lines: list[str] = ["**Code evidence (quoted from files actually read):**"]
+    for s in snippets[:_CODE_EVIDENCE_MAX_SNIPPETS]:
+        path = (s.get("path") or "").strip()
+        snippet = s.get("snippet") or ""
+        relevance = (s.get("relevance") or "").strip()
+        if not path or not snippet:
+            continue
+        lines.append(f"- `{path}` — {relevance}" if relevance else f"- `{path}`")
+        lines.append("  ```")
+        for raw_line in snippet.splitlines() or [snippet]:
+            lines.append(f"  {raw_line}")
+        lines.append("  ```")
+    if len(lines) == 1:
+        return ""
     return "\n".join(lines)
 
 
@@ -29,7 +140,10 @@ def _format_codebase_block(codebase: dict[str, Any] | None) -> str:
     flows = codebase.get("inferredUserFlows") or []
     paths = codebase.get("keyPathsExamined") or []
     warnings = codebase.get("truncationWarnings") or []
+    key_evidence = codebase.get("keyEvidence") or []
     notes = f"\n**Notes:** {' '.join(warnings)}" if warnings else ""
+    evidence_block = _format_code_evidence(key_evidence)
+    evidence_section = f"\n\n{evidence_block}" if evidence_block else ""
 
     return f"""## Repository understanding ({codebase.get('confidence', '?')} confidence)
 {codebase.get('summary', '')}
@@ -41,7 +155,7 @@ def _format_codebase_block(codebase: dict[str, Any] | None) -> str:
 
 **Testing implications:** {codebase.get('testingImplications') or '—'}
 
-**Paths examined:** {', '.join(paths[:40]) if paths else '—'}{notes}"""
+**Paths examined:** {', '.join(paths[:40]) if paths else '—'}{notes}{evidence_section}"""
 
 
 def _format_flow_status_summary(
@@ -54,13 +168,54 @@ def _format_flow_status_summary(
     flow_states = latest_flow_proposals.get("flow_states") or {}
     if not isinstance(flows, list) or not flows:
         return ""
-    lines = ["", "", "Current flow states:"]
+    lines = ["", "", "Current flow states (on the active proposals row):"]
     for f in flows:
         fid = f.get("id") if isinstance(f, dict) else None
         name = f.get("name") if isinstance(f, dict) else None
         state = flow_states.get(fid, "pending") if isinstance(fid, str) else "pending"
-        lines.append(f"- {name}: {state}")
+        lines.append(f"- {fid}: {name} — {state}")
     return "\n".join(lines)
+
+
+def _format_regeneration_rules(
+    *,
+    has_active_proposals: bool,
+    active_flow_proposal_message_id: str | None,
+) -> str:
+    """Instructions the orchestrator must follow when calling `generate_flow_proposals`.
+
+    The mode choice is trivial (bootstrap if no active row, else replace).
+    The *real* decision is the preservation intent, which the orchestrator
+    conveys to the nested flow generator through the `reason` string. The
+    server's carry-over rule is id-matched and opt-in: whatever ids the
+    flow generator chooses to re-emit inherit their prior approval state;
+    everything else starts pending.
+    """
+    if not has_active_proposals:
+        return (
+            "No flow proposals exist yet for this session. When the user wants "
+            "to see test flows, call `generate_flow_proposals(mode=\"bootstrap\")`."
+        )
+
+    active_hint = (
+        f" (active proposals row id: {active_flow_proposal_message_id})"
+        if active_flow_proposal_message_id
+        else ""
+    )
+    return f"""An active flow_proposals row exists for this session{active_hint}. Follow these rules precisely when the user asks for different, more, or refined flows:
+
+1. Always call `generate_flow_proposals(mode="replace", ...)`. This atomically supersedes the active row and inserts a new one. Never call mode="bootstrap" when an active row already exists.
+
+2. The nested flow-generator LLM decides WHICH prior flows to preserve by re-emitting their exact ids. Re-emitted ids inherit their prior approval state on the new row; everything else starts `pending`. You convey the user's preservation intent to that generator through the `reason` argument — write `reason` as a one-line summary of what the user wants and what (if anything) to keep.
+
+3. Classify the user's intent and write `reason` accordingly:
+   - Additive ("also", "more", "add", "plus", "and"): `reason` should explicitly name the approved flows to preserve, e.g. "user asked to add signup-funnel coverage while preserving approved flows `login-happy-path` and `checkout-smoke`".
+   - Refinement ("swap", "replace flow 2", "change the checkout one"): name which prior flows to preserve and which to drop.
+   - Clean-slate ("fresh", "new", "start over", "different", "completely regenerate"): `reason` should explicitly tell the generator to discard everything, e.g. "user wants a completely fresh set of flows; discard all prior proposals and use all new ids".
+
+4. If the user's intent is genuinely ambiguous (e.g. a bare "regenerate"), ask ONE short clarifying question before calling the tool. Do not guess.
+
+5. After the tool returns, reply with AT MOST one sentence acknowledging the replacement — e.g. "Replaced the earlier suggestions with a fresh set — approve the ones you want to run." Never repeat or re-describe the flow names, steps, or rationales in prose; the cards already show them."""
 
 
 def build_orchestrator_system_prompt(
@@ -71,20 +226,18 @@ def build_orchestrator_system_prompt(
     latest_flow_proposals: dict[str, Any] | None,
     context_summary: str | None,
     recent_runs: list[dict[str, Any]] | None,
+    active_flow_proposal_message_id: str | None = None,
 ) -> str:
-    """Return the full system prompt for the Opus orchestrator.
-
-    Byte-compatible with the TS version's wording so behavior is stable
-    across the TS->Python cutover; any behavior changes we want to make
-    should be done as follow-up commits we can A/B.
-    """
-    has_existing_proposals = bool(
+    """Return the full system prompt for the Opus orchestrator."""
+    has_active_proposals = bool(
         latest_flow_proposals and latest_flow_proposals.get("type") == "flow_proposals"
     )
 
     report = research_report or {}
     findings = _format_findings(report.get("findings") or [])
     codebase_block = _format_codebase_block(report.get("codebaseExploration"))
+    drill_in_block = _format_drill_in_highlights(report.get("drillInHighlights"))
+    drill_in_section = f"\n\n{drill_in_block}" if drill_in_block else ""
     recommended = report.get("recommendedFlows") or []
     integrations_covered = report.get("integrationsCovered") or []
     report_summary = report.get("summary") or ""
@@ -99,6 +252,10 @@ def build_orchestrator_system_prompt(
     )
 
     flow_status = _format_flow_status_summary(latest_flow_proposals)
+    regeneration_rules = _format_regeneration_rules(
+        has_active_proposals=has_active_proposals,
+        active_flow_proposal_message_id=active_flow_proposal_message_id,
+    )
 
     return f"""You are Verona, an AI QA strategist helping teams plan and execute UI testing for their web app.
 
@@ -109,13 +266,15 @@ Project: "{project_name}" ({app_url})
 You have two tools. The product's UI depends on them; do not try to substitute prose for tool output.
 
 1. `generate_flow_proposals` — renders proposed test flows as structured, approvable cards in the chat UI. This is the ONLY way the user can approve a flow.
-2. `start_test_run` — executes the flows the user has approved.
+2. `start_test_run` — executes the flows the user has approved on the active proposals row.
 
 ## When to call `generate_flow_proposals`
 
-Call it whenever the user wants to see, propose, refresh, or add test flows — including the very first turn of a session, or phrasings like "suggest flows", "what should I test", "give me tests", "recommend flows", "propose more", "anything else to cover".
+Call it whenever the user wants to see, propose, refresh, or add test flows — including the very first turn of a session, or phrasings like "suggest flows", "what should I test", "give me tests", "recommend flows", "propose more", "anything else to cover", "completely regenerate these", "different ones".
 
-After the tool returns, reply with AT MOST two sentences that point the user at the cards and invite approval. Example: "I've proposed three flows above — approve the ones you want and tell me to start testing." Never repeat or re-describe the flows' names, steps, or rationales in prose; the cards already show them.
+After the tool returns, reply with AT MOST one or two sentences that point the user at the cards and invite approval. Example: "I've proposed three flows above — approve the ones you want and tell me to start testing." Never repeat or re-describe the flows' names, steps, or rationales in prose; the cards already show them.
+
+{regeneration_rules}
 
 ## When to call `start_test_run`
 
@@ -140,7 +299,7 @@ Never write numbered lists, bullets, or prose that describes candidate flows ("F
 {report_summary}
 
 ## Key findings
-{findings}
+{findings}{drill_in_section}
 
 {codebase_block}
 
@@ -149,5 +308,4 @@ Never write numbered lists, bullets, or prose that describes candidate flows ("F
 
 Integrations covered: {', '.join(integrations_covered) or 'none'}
 
-# Session state
-{'Flow proposals already exist for this session. Refer to them by name rather than regenerating, unless the user explicitly asks to refresh or add more.' if has_existing_proposals else 'No flow proposals exist yet for this session.'}{flow_status}{context_block}{runs_block}"""
+# Session state{flow_status}{context_block}{runs_block}"""

@@ -138,6 +138,19 @@ class _AgentReport(BaseModel):
     summary: str = Field(description="3-6 sentences. Lead with the biggest risk.")
     findings: list[_AgentFinding] = Field(default_factory=list)
     recommendedFlows: list[str] = Field(default_factory=list)
+    drillInHighlights: list[str] = Field(
+        default_factory=list,
+        description=(
+            "3-6 one-sentence highlights naming SPECIFIC drill-in results "
+            "worth surfacing to the chat orchestrator. Each must cite a "
+            "concrete number or anchor from the research notes below (e.g. "
+            "'PostHog: 48 `$exception` events on `/w/*/sheets/*` in the "
+            "last 7 days, up from 2 the prior week'). Use this for signals "
+            "too concrete to live in `summary` but that don't fit the "
+            "categorical `findings` shape. Skip if no drill-ins produced "
+            "useful output."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -409,6 +422,7 @@ def _fallback_report(app_url: str, reason: str) -> IntegrationResearchReport:
         ],
         integrationsCovered=[],
         integrationsSkipped=[],
+        drillInHighlights=[],
     )
 
 
@@ -770,8 +784,9 @@ async def _synthesize_report(
 # Output requirements
 
 - `summary`: 3-6 sentences. Lead with the single biggest risk, then the next 1-2 themes. No preamble, no "this report covers...".
-- `findings`: one entry per distinct, actionable signal. Each needs `source`, `category`, `severity`, a one- or two-sentence `details` that ends with a concrete anchor (commit SHA, PR #, URL, error count, session ID). Use `rawData` (JSON string) ONLY when the anchor doesn't fit naturally in prose.
+- `findings`: one entry per distinct, actionable signal. Each needs `source`, `category`, `severity`, a one- or two-sentence `details` that ends with a concrete anchor (commit SHA, PR #, URL, error count, session ID). Populate `rawData` (JSON string) whenever you have supporting numbers, IDs, URLs, or short lists that would help a downstream reviewer verify the finding — this field is rendered to the chat orchestrator, so prefer including it over omitting it. Keep each `rawData` under ~500 chars; just enough to ground the `details`.
 - `recommendedFlows`: short phrases naming user-facing flows a QA human could recognize ("Autosave under concurrent editing", "Magic-link expiration recovery"). Prefer 5-10 strong candidates over 20 weak ones. Each must be traceable to at least one finding.
+- `drillInHighlights`: 3-6 one-sentence callouts of SPECIFIC drill-in results from the research notes that are worth surfacing to the chat orchestrator verbatim. Each MUST cite a concrete number or anchor pulled from the `Drill-in research notes` section below (e.g. "PostHog: 48 $exception events on /w/*/sheets/* in the last 7 days, up from 2 the prior week" or "GitHub PR #412 touched 11 files under app/checkout/; largest diff was CheckoutFlow.tsx (+214/-38)"). This is the channel by which sandbox stdout evidence reaches downstream consumers — do not leave it empty unless drill-ins genuinely produced nothing useful.
 
 # Prioritization
 
@@ -816,6 +831,7 @@ Skipped (no data or errors):
             recommendedFlows=[],
             integrationsCovered=integrations_covered,
             integrationsSkipped=integrations_skipped,
+            drillInHighlights=[],
         )
 
     findings = [
@@ -835,6 +851,7 @@ Skipped (no data or errors):
         recommendedFlows=agent_report.recommendedFlows,
         integrationsCovered=integrations_covered,
         integrationsSkipped=integrations_skipped,
+        drillInHighlights=list(agent_report.drillInHighlights or []),
     )
 
 

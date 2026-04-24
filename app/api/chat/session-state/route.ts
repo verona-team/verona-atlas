@@ -30,6 +30,18 @@ import { chatServerLog } from '@/lib/chat/server-log'
  * writers (Next.js route + Python Modal worker — never concurrent on
  * the same session), so gt avoids re-delivering the cursor row on
  * every tick without risking a missed row.
+ *
+ * Flow-proposal re-delivery: `flow_proposals` rows also mutate in place
+ * (the Python worker flips an existing row's `metadata.status` to
+ * 'superseded' when a new proposals row is generated — see
+ * `runner/chat/nodes.py`). `chat_messages` has no `updated_at` column,
+ * so a pure `created_at` cursor can't detect those UPDATEs. We work
+ * around this by always returning the session's `flow_proposals` rows
+ * (typically 1-3 per session) regardless of cursor, merged into the
+ * same `newMessages` array. The client's id-keyed merge dedupes against
+ * its existing state, so the steady-state cost is near zero while the
+ * correctness guarantee is absolute: any status/flow_states mutation
+ * on a proposals row is observed within one poll tick.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -79,9 +91,22 @@ export async function GET(request: NextRequest) {
       messagesQuery = messagesQuery.gt('created_at', since)
     }
 
-    const [sessionResult, messagesResult] = await Promise.all([
+    // Always re-fetch flow_proposals rows — their metadata mutates
+    // in place (superseded transitions, PATCH /api/chat/flows updates)
+    // and a created_at cursor alone can't see those. Tiny payload (~1-3
+    // rows per session); client dedupes by id.
+    const proposalsQuery = supabase
+      .from('chat_messages')
+      .select('*')
+      .eq('session_id', sessionId)
+      .eq('metadata->>type', 'flow_proposals')
+      .order('created_at', { ascending: true })
+      .limit(20)
+
+    const [sessionResult, messagesResult, proposalsResult] = await Promise.all([
       sessionPromise,
       messagesQuery,
+      proposalsQuery,
     ])
 
     if (sessionResult.error) {
@@ -114,10 +139,32 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    if (proposalsResult.error) {
+      chatServerLog('error', 'session_state_proposals_fetch_failed', {
+        err: proposalsResult.error,
+        sessionId,
+        userId: user.id,
+      })
+      // Soft-fail: return whatever we have. The client id-dedupes, so
+      // the worst consequence of missing proposals rows on this tick
+      // is that a supersede transition is observed one tick later.
+    }
+
+    const messageRows = messagesResult.data ?? []
+    const proposalRows = proposalsResult.data ?? []
+
+    // Union by id so `flow_proposals` rows that already fell within the
+    // `since` window aren't duplicated in the response.
+    const seen = new Set(messageRows.map((m) => m.id))
+    const merged = [...messageRows]
+    for (const row of proposalRows) {
+      if (!seen.has(row.id)) merged.push(row)
+    }
+
     return NextResponse.json({
       status: sessionResult.data.status ?? 'idle',
       statusUpdatedAt: sessionResult.data.status_updated_at ?? null,
-      newMessages: messagesResult.data ?? [],
+      newMessages: merged,
     })
   } catch (err) {
     chatServerLog('error', 'session_state_unhandled', { err })
