@@ -247,11 +247,18 @@ async def agent_turn(state: ChatTurnState) -> dict[str, Any]:
     # assigns the text row the earlier created_at, so the cards land
     # below it naturally.
     #
-    # Idempotency: we upsert on (session_id, client_message_id) with
-    # ignore_duplicates=True, matching finalize's guard. finalize's
-    # upsert is kept intact as a safety net for the case where this
-    # write fails (network blip, Supabase hiccup) — on re-attempt the
-    # row either already exists (ignored) or gets written there instead.
+    # Soft-fail on exception: we log at error level and move on rather
+    # than aborting the whole turn. There is NO fallback upsert in
+    # finalize — a late-firing retry would give the text row a
+    # created_at AFTER the tool node's row, silently re-introducing the
+    # reverse-ordering bug this code exists to prevent. A missing text
+    # bubble on a rare write failure is a visible, debuggable failure
+    # mode; silently-reversed ordering is not. The error log below is
+    # the observability breadcrumb for those cases.
+    #
+    # Idempotency: upsert on (session_id, client_message_id) with
+    # ignore_duplicates=True, so a Modal retry that re-spawns the same
+    # turn can't produce a duplicate row here.
     sb = get_supabase()
     assistant_message_id = state.get("assistant_message_id")
     if assistant_text and assistant_message_id:
@@ -268,16 +275,13 @@ async def agent_turn(state: ChatTurnState) -> dict[str, Any]:
             ).execute()
             chat_log(
                 "info",
-                "chat_agent_text_persisted_early",
+                "chat_agent_text_persisted",
                 session_id=state.get("session_id"),
                 turn_id=state.get("turn_id"),
                 client_message_id=assistant_message_id,
                 text_len=len(assistant_text),
             )
         except Exception as e:
-            # Soft-fail: finalize's upsert will retry this exact row
-            # later in the graph. Worse ordering (cards above text)
-            # beats losing the text entirely.
             chat_log(
                 "error",
                 "chat_agent_text_persist_failed",
@@ -863,50 +867,27 @@ def _start_test_run_failure(session_id: str, message: str) -> dict[str, Any]:
 
 
 async def finalize(state: ChatTurnState) -> dict[str, Any]:
-    """Persist the assistant reply (as a safety net) and reset session status.
+    """Compact history (best-effort) and reset session status.
 
-    The happy-path persist of the opening assistant text happens inside
-    `agent_turn` — we do it there so the text row's `created_at` precedes
-    any tool-node row, matching the model's content-block order in the UI.
-    This node keeps an idempotent upsert as a fallback: if `agent_turn`'s
-    write failed (network blip) the row gets committed here instead. The
-    `ignore_duplicates=True` guard makes the happy-path call a no-op.
+    Assistant text persistence is NOT this node's responsibility — it
+    happens inside `agent_turn`, immediately after Claude returns, so the
+    text row's `created_at` naturally precedes any tool-generated row's.
 
-    Idempotency: we upsert on `(session_id, client_message_id)`, so a
-    Modal retry or duplicate spawn never duplicates the assistant row.
+    We deliberately do NOT write the text again here as a "fallback." A
+    late-firing fallback upsert would be triggered precisely when the
+    earlier write failed — and its effect would be to give the text row a
+    `created_at` later than the tool node's row, re-introducing the
+    reverse-ordering bug we fixed. A missing text bubble on a rare write
+    failure is a visible, debuggable failure mode; silently-reversed
+    ordering is the original bug dressed up. Preferring the former.
+
+    If `agent_turn`'s write failed, the user will see the tool-generated
+    row (cards / test_run_started bubble) without the opening narration,
+    and the observability breadcrumb is the `chat_agent_text_persist_failed`
+    error log emitted at the failure site.
     """
     sb = get_supabase()
     session_id = state["session_id"]
-    messages = state.get("messages") or []
-
-    # Find the most recent AIMessage and extract its text blocks.
-    assistant_text = ""
-    for m in reversed(messages):
-        if isinstance(m, AIMessage):
-            assistant_text = extract_ai_message_text(m)
-            break
-
-    assistant_message_id = state.get("assistant_message_id")
-
-    if assistant_text:
-        try:
-            sb.table("chat_messages").upsert(
-                {
-                    "session_id": session_id,
-                    "role": "assistant",
-                    "content": assistant_text,
-                    "client_message_id": assistant_message_id,
-                },
-                on_conflict="session_id,client_message_id",
-                ignore_duplicates=True,
-            ).execute()
-        except Exception as e:
-            chat_log(
-                "error",
-                "chat_finalize_assistant_persist_failed",
-                session_id=session_id,
-                err=repr(e),
-            )
 
     try:
         await maybe_summarize_older_messages(sb, session_id)
