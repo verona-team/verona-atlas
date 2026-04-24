@@ -65,6 +65,7 @@ async def run_research_agent(
             ],
             integrationsCovered=integration_report.integrationsCovered,
             integrationsSkipped=integration_report.integrationsSkipped + ["github"],
+            drillInHighlights=list(integration_report.drillInHighlights),
             codebaseExploration=empty_codebase_exploration(
                 summary=gh_state.reason,
                 truncation_warnings=["GitHub integration incomplete"],
@@ -132,6 +133,7 @@ async def _safe_integration_research(
             recommendedFlows=["Homepage smoke test", "Primary navigation flow"],
             integrationsCovered=[],
             integrationsSkipped=[],
+            drillInHighlights=[],
         )
 
 
