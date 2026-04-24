@@ -54,6 +54,7 @@ from runner.research.github_repo_explorer import (
     suggest_important_paths,
 )
 from runner.research.types import (
+    CodebaseEvidenceSnippet,
     CodebaseExplorationResult,
     Confidence,
     empty_codebase_exploration,
@@ -61,6 +62,28 @@ from runner.research.types import (
 
 
 # ----- Tool result pydantic models (for structured return in tool calls) -----
+
+
+class _FinishEvidenceSnippet(BaseModel):
+    """Finish-time shape for a code evidence snippet.
+
+    Kept internal to this module (the agent fills it as part of the finish
+    tool's arg schema) and projected onto the public
+    `CodebaseEvidenceSnippet` before returning. We accept it here as a
+    plain nested model so LangChain's tool arg schema inference gets the
+    shape right.
+    """
+
+    path: str = Field(description="Repository path the snippet came from.")
+    snippet: str = Field(
+        description=(
+            "Verbatim excerpt from the file (≤ 400 chars). Quote the "
+            "actual code — do not paraphrase."
+        )
+    )
+    relevance: str = Field(
+        description="One short sentence on why this snippet matters for QA planning."
+    )
 
 
 class FinishPayload(BaseModel):
@@ -76,6 +99,16 @@ class FinishPayload(BaseModel):
     confidence: Literal["high", "medium", "low"]
     truncationWarnings: list[str] = Field(
         description="Honest list of gaps (API errors, truncation, unread modules)."
+    )
+    keyEvidence: list[_FinishEvidenceSnippet] = Field(
+        default_factory=list,
+        description=(
+            "3-6 short quoted snippets from files you actually read that most "
+            "informed your conclusions. Each has path, a verbatim snippet "
+            "(≤400 chars), and a one-sentence `relevance` note. Prefer lines "
+            "that reveal behaviour (auth checks, route wiring, form "
+            "validation, mutation surfaces) over boilerplate."
+        ),
     )
 
 
@@ -108,6 +141,7 @@ When you have enough to describe the app's real user journeys, call `finish_code
 - `keyPathsExamined`: the files you actually read that most informed your answer.
 - `confidence`: high / medium / low. Use low if you hit API errors, repo was truncated, or you didn't get to read a meaningful cross-section.
 - `truncationWarnings`: honest list of gaps (e.g. "Could not read src/lib/payments - GitHub returned 404").
+- `keyEvidence`: 3-6 short, quoted code snippets from files you actually read that most informed your conclusions. This is the one channel the downstream orchestrator has to cite code — prefer lines that reveal behaviour (auth checks, route wiring, form validation, mutations, error-prone code paths) over boilerplate. Each entry has `path`, a verbatim `snippet` (≤400 chars; quote the code, don't paraphrase), and a one-sentence `relevance` note. Skip this only if the exploration failed so severely you have nothing worth quoting.
 
 If you hit errors or a huge repo, still finish with lower confidence rather than leaving empty."""
 
@@ -282,13 +316,30 @@ async def run_codebase_exploration_agent(
             keyPathsExamined: list[str],
             confidence: Literal["high", "medium", "low"],
             truncationWarnings: list[str],
+            keyEvidence: list[dict] | None = None,
         ) -> dict:
             """Call when you have enough understanding of the codebase to inform QA.
-            Provide structured fields per the system prompt."""
+            Provide structured fields per the system prompt.
+
+            `keyEvidence` is a list of `{path, snippet, relevance}` objects;
+            each snippet should be ≤400 chars of verbatim code with a one-
+            sentence note on why it matters for QA planning.
+            """
             nonlocal finished_payload
             tool_steps.append(
                 {"tool": "finish_codebase_exploration", "detail": "done"}
             )
+            parsed_evidence: list[_FinishEvidenceSnippet] = []
+            for item in keyEvidence or []:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    parsed_evidence.append(_FinishEvidenceSnippet(**item))
+                except Exception:
+                    # Tolerate partial/malformed snippets rather than failing
+                    # the whole finish call — the rest of the payload is
+                    # still useful.
+                    continue
             finished_payload = FinishPayload(
                 summary=summary,
                 architecture=architecture,
@@ -297,6 +348,7 @@ async def run_codebase_exploration_agent(
                 keyPathsExamined=keyPathsExamined,
                 confidence=confidence,
                 truncationWarnings=truncationWarnings,
+                keyEvidence=parsed_evidence,
             )
             return {"finished": True}
 
@@ -385,6 +437,21 @@ async def run_codebase_exploration_agent(
         merged_warnings.extend(tree_warnings)
         if tree_truncated:
             merged_warnings.append("GitHub tree API marked truncated=true.")
+        # Defensive snippet-length cap. The prompt asks for ≤400 chars but
+        # Sonnet occasionally ignores length hints; capping here keeps the
+        # eventual orchestrator prompt bounded no matter what.
+        _SNIPPET_MAX = 600
+        key_evidence = [
+            CodebaseEvidenceSnippet(
+                path=e.path,
+                snippet=(
+                    e.snippet if len(e.snippet) <= _SNIPPET_MAX
+                    else e.snippet[:_SNIPPET_MAX] + "…"
+                ),
+                relevance=e.relevance,
+            )
+            for e in finished_payload.keyEvidence
+        ]
         return CodebaseExplorationResult(
             summary=finished_payload.summary,
             architecture=finished_payload.architecture,
@@ -394,6 +461,7 @@ async def run_codebase_exploration_agent(
             confidence=finished_payload.confidence,
             truncationWarnings=merged_warnings,
             toolStepsUsed=len(tool_steps),
+            keyEvidence=key_evidence,
         )
 
     # Didn't call finish — return a low-confidence summary based on what we read.
