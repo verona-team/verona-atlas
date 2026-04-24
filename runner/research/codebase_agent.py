@@ -1,16 +1,24 @@
 """Codebase exploration sub-agent.
 
 A Gemini 3.1 Pro ReAct-style loop that walks the linked GitHub repo and
-produces a `CodebaseExplorationResult`. Port of
-`lib/research-agent/codebase-exploration-agent.ts`.
+produces a `CodebaseTranscript` — the raw investigation log that the
+synthesis stage (`runner.research.synthesizer`) later turns into the
+structured `CodebaseExplorationResult` on `ResearchReport`.
 
 ## Design
 
 The agent is a tight loop:
 
-  1. Agent LLM emits tool calls (list paths, read file, suggest important paths).
+  1. Agent LLM emits tool calls (list paths, read file, search).
   2. Tool runner executes them against `github_repo_explorer`.
-  3. Loop until `finish_codebase_exploration` is called or step budget is hit.
+  3. Any natural-language text blocks the LLM emitted alongside tool
+     calls are captured as `TranscriptEntry(kind="thought", ...)` so
+     the synthesizer later sees the investigator's reasoning.
+  4. Loop until the LLM stops emitting tool calls (natural stop) or the
+     step budget is hit.
+  5. When the LLM stops, the final AIMessage's text content becomes the
+     transcript's `orientation` — a 3-5 sentence handoff blurb for the
+     synthesizer.
 
 Rather than a LangGraph StateGraph for this sub-agent we use a simple
 manual loop — it's conceptually a single node ("iterate tool calls until
@@ -18,24 +26,38 @@ done") and wrapping that in a StateGraph adds ceremony without helping
 observability. LangSmith still traces each LLM call cleanly via
 `ChatGoogleGenerativeAI`'s native integration.
 
+## Why the agent no longer emits structured output directly
+
+Previously this agent owned a `finish_codebase_exploration` tool that
+forced it to produce the full `CodebaseExplorationResult` as structured
+tool args. That mixed two jobs — *explore the repo* and *write the
+final structured summary* — into one LLM call at the end of the ReAct
+loop. Splitting them lets each role have a tighter, purpose-built
+prompt:
+
+- This agent focuses on exploration: which files to read, in what
+  order, to understand the user-facing flows of the app.
+- The synthesizer focuses on summarization: given the full exploration
+  transcript, produce the structured `CodebaseExplorationResult`.
+
+Net benefit: the investigator never has to narrate structured fields
+mid-loop, the synthesizer gets the full un-summarized exploration
+(including inner thoughts) instead of a compressed finish payload, and
+the two prompts can evolve independently.
+
 ## Tool shapes
 
 Tools use LangChain `@tool`; the decorator auto-generates input schemas
-from the function signature. All tools are synchronous wrappers around
-async httpx calls — we `run` the async bit inside the tool via
-`asyncio.run_coroutine_threadsafe` on the outer loop is overkill; instead
-we make the whole loop `async` and pass an `httpx.AsyncClient` through
-closure. Tools are defined as closures so they can see the shared client
-and the path cache without module-level state.
+from the function signature. Tools are defined as closures over the
+shared httpx client and path cache so their bodies can stay short.
 """
 from __future__ import annotations
 
 import json
 import os
-from typing import Any, Literal
+from typing import Any
 
 import httpx
-from pydantic import BaseModel, Field
 
 from langchain.tools import tool
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -54,69 +76,45 @@ from runner.research.github_repo_explorer import (
     suggest_important_paths,
 )
 from runner.research.types import (
-    CodebaseEvidenceSnippet,
-    CodebaseExplorationResult,
-    Confidence,
-    empty_codebase_exploration,
+    CodebaseTranscript,
+    TranscriptEntry,
 )
 
 
-# ----- Tool result pydantic models (for structured return in tool calls) -----
+# ----- Helpers to capture AI text blocks as transcript thoughts -----
 
 
-class _FinishEvidenceSnippet(BaseModel):
-    """Finish-time shape for a code evidence snippet.
+def _extract_text_blocks(response: AIMessage) -> list[str]:
+    """Return the non-empty text fragments from an AIMessage's content.
 
-    Kept internal to this module (the agent fills it as part of the finish
-    tool's arg schema) and projected onto the public
-    `CodebaseEvidenceSnippet` before returning. We accept it here as a
-    plain nested model so LangChain's tool arg schema inference gets the
-    shape right.
+    The agent prompt encourages the model to narrate its plan between
+    tool calls. Capturing those fragments as `[thought]` entries gives
+    the synthesizer a clean view of *why* each file was read, which is
+    information it otherwise couldn't reconstruct from the tool log.
     """
-
-    path: str = Field(description="Repository path the snippet came from.")
-    snippet: str = Field(
-        description=(
-            "Verbatim excerpt from the file (≤ 400 chars). Quote the "
-            "actual code — do not paraphrase."
-        )
-    )
-    relevance: str = Field(
-        description="One short sentence on why this snippet matters for QA planning."
-    )
-
-
-class FinishPayload(BaseModel):
-    """Shape the agent must fill in when calling `finish_codebase_exploration`."""
-
-    summary: str = Field(description="3-5 sentences on what the app is and its dominant flow.")
-    architecture: str = Field(description="Stack + routing model + auth strategy + notable patterns.")
-    inferredUserFlows: list[str] = Field(
-        description="Concrete UI-level user flows (e.g. 'Sign in with magic link')."
-    )
-    testingImplications: str = Field(description="Risks a QA human should prioritize.")
-    keyPathsExamined: list[str] = Field(description="Files actually read that informed the answer.")
-    confidence: Literal["high", "medium", "low"]
-    truncationWarnings: list[str] = Field(
-        description="Honest list of gaps (API errors, truncation, unread modules)."
-    )
-    keyEvidence: list[_FinishEvidenceSnippet] = Field(
-        default_factory=list,
-        description=(
-            "3-6 short quoted snippets from files you actually read that most "
-            "informed your conclusions. Each has path, a verbatim snippet "
-            "(≤400 chars), and a one-sentence `relevance` note. Prefer lines "
-            "that reveal behaviour (auth checks, route wiring, form "
-            "validation, mutation surfaces) over boilerplate."
-        ),
-    )
+    content = response.content
+    texts: list[str] = []
+    if isinstance(content, str):
+        if content.strip():
+            texts.append(content.strip())
+    elif isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                t = block.get("text")
+                if isinstance(t, str) and t.strip():
+                    texts.append(t.strip())
+    return texts
 
 
-# ----- System prompt (ported verbatim from TS) -----
+# ----- System prompt -----
 
 
 def _build_system_prompt(repo_full_name: str) -> str:
     return f"""You are an expert software architect and QA strategist exploring the GitHub repository {repo_full_name}. Your output will directly feed QA test planning for the deployed web app, so focus on what a user would actually do in the UI.
+
+# Your goal
+
+Map the top 8-12 core user-facing flows of this app — the things a signed-in user does in a typical session — with enough evidence (routes, key components, form/mutation surfaces, auth gates) that a downstream synthesizer could describe them without opening the repo. Surface the architecture (stack, routing model, auth strategy) and any risks a QA human should prioritize.
 
 # Approach
 
@@ -130,20 +128,20 @@ def _build_system_prompt(repo_full_name: str) -> str:
 
 - Prefer listing + targeted reads over broad enumeration. One good read beats three skimmed ones.
 - Stop exploring a path when returns diminish. You have a hard step budget — spend it where it reveals new flows, not to confirm what you already inferred.
+- Narrate your plan in short text blocks between tool calls when it helps — those thoughts are preserved for the downstream synthesizer.
 
-# Finish
+# How to finish
 
-When you have enough to describe the app's real user journeys, call `finish_codebase_exploration`.
-- `summary`: 3-5 sentences. What kind of app is this, what's its primary value to a user, and what is the dominant flow.
-- `architecture`: stack + routing model + auth strategy + any notable patterns (monorepo, server actions, tRPC, etc.).
-- `inferredUserFlows`: concrete, UI-level flows a user actually does — each phrased as a short action ("Sign in with magic link", "Create a new sheet and add columns"). Derive from routes/pages/components, not from tech.
-- `testingImplications`: risks a QA human should prioritize given what you saw (auth surface area, payment flows, forms with complex validation, new or heavily churned modules, accessibility traps).
-- `keyPathsExamined`: the files you actually read that most informed your answer.
-- `confidence`: high / medium / low. Use low if you hit API errors, repo was truncated, or you didn't get to read a meaningful cross-section.
-- `truncationWarnings`: honest list of gaps (e.g. "Could not read src/lib/payments - GitHub returned 404").
-- `keyEvidence`: 3-6 short, quoted code snippets from files you actually read that most informed your conclusions. This is the one channel the downstream orchestrator has to cite code — prefer lines that reveal behaviour (auth checks, route wiring, form validation, mutations, error-prone code paths) over boilerplate. Each entry has `path`, a verbatim `snippet` (≤400 chars; quote the code, don't paraphrase), and a one-sentence `relevance` note. Skip this only if the exploration failed so severely you have nothing worth quoting.
+When you have enough to describe the app's real user journeys, STOP calling tools and emit a final message with no tool calls. In that final message, write a 3-5 sentence summary of what you learned:
 
-If you hit errors or a huge repo, still finish with lower confidence rather than leaving empty."""
+- What kind of app this is and its primary value to a user.
+- Stack + routing model + auth strategy + any notable patterns (monorepo, server actions, tRPC, etc.).
+- The dominant user flow.
+
+That summary becomes your handoff to the synthesizer. Do NOT try to produce structured fields (inferredUserFlows, keyEvidence, confidence, etc.) — those are the synthesizer's job. Focus your final message on a clear, accurate narrative paragraph.
+
+If you hit API errors or a huge/truncated repo, still stop cleanly with a brief honest summary of what you did see.
+"""
 
 
 def _env_int(name: str, fallback: int) -> int:
@@ -160,53 +158,60 @@ def _env_int(name: str, fallback: int) -> int:
 # ----- Main entry point -----
 
 
-async def run_codebase_exploration_agent(
+async def run_codebase_exploration_transcript(
     *,
     installation_id: int,
     repo_full_name: str,
-) -> CodebaseExplorationResult:
-    """Run the codebase exploration sub-agent and return a typed result.
+) -> CodebaseTranscript:
+    """Run the codebase exploration sub-agent and return a transcript.
+
+    The transcript is the un-summarized investigation log: a list of
+    `TranscriptEntry` objects (thoughts and tool calls) plus repo
+    metadata and a final orientation blurb. The synthesis stage
+    (`runner.research.synthesizer.generate_codebase_exploration`) turns
+    this into the structured `CodebaseExplorationResult`.
 
     Steps:
 
     1. Resolve an installation token.
-    2. Build a Gemini 3.1 Pro ChatGoogleGenerativeAI bound to our closure-backed tools.
+    2. Build a Gemini 3.1 Pro ChatGoogleGenerativeAI bound to our
+       closure-backed tools.
     3. Loop: invoke(messages) -> if tool_calls, execute them and append
-       ToolMessages; else done. Stop on `finish_codebase_exploration` or
-       after `RESEARCH_CODEBASE_MAX_STEPS` iterations.
-    4. If finish tool was called, return its payload augmented with
-       tool-steps count and tree warnings.
-    5. Otherwise return a low-confidence stub.
+       ToolMessages; else the loop ends and we capture the final
+       AIMessage's text as `orientation`.
+    4. Return the assembled `CodebaseTranscript`.
 
     The loop body is intentionally explicit rather than using LangGraph's
-    `create_agent` because:
-
-    - We need custom stop conditions (the finish tool).
-    - We want per-iteration logging that maps onto our `chat_log` event
-      taxonomy.
-    - The code is short enough that wrapping it in a graph adds more
-      ceremony than it removes.
+    `create_agent` because we need custom stop conditions (natural stop
+    when no tool calls are emitted), per-iteration logging that maps onto
+    our `chat_log` event taxonomy, and first-class capture of text
+    blocks as transcript thoughts.
     """
     max_steps = _env_int("RESEARCH_CODEBASE_MAX_STEPS", 32)
 
     parsed = parse_repo_full_name(repo_full_name)
     if parsed is None:
-        return empty_codebase_exploration(
-            summary="Invalid repository name (expected owner/repo).",
-            truncation_warnings=["Could not parse GITHUB_REPOS."],
+        return CodebaseTranscript(
+            repo_full_name=repo_full_name,
+            default_branch=None,
+            path_count=0,
+            tree_truncated=False,
+            tree_warnings=["Invalid repository name (expected owner/repo)."],
+            orientation="Invalid repository name (expected owner/repo).",
+            entries=[],
+            step_budget_exhausted=False,
         )
 
     ref: RepoRef = parsed
     token = await get_installation_token(installation_id)
 
-    # Shared state captured by tool closures. Kept as mutable lists/dicts so
-    # the outer function can read the final values after the loop.
+    # Shared state captured by tool closures. Kept mutable so the outer
+    # function can read final values after the loop.
     cached_paths: list[str] | None = None
     cached_branch: str | None = None
     tree_warnings: list[str] = []
     tree_truncated = False
-    tool_steps: list[dict[str, str]] = []
-    finished_payload: FinishPayload | None = None
+    entries: list[TranscriptEntry] = []
 
     async with httpx.AsyncClient(timeout=60.0) as http_client:
 
@@ -225,7 +230,6 @@ async def run_codebase_exploration_agent(
         @tool
         async def get_repo_ref() -> dict:
             """Get the default branch name and indexed path count for the repository."""
-            tool_steps.append({"tool": "get_repo_ref", "detail": "default branch"})
             await _ensure_tree()
             return {
                 "defaultBranch": cached_branch,
@@ -243,15 +247,6 @@ async def run_codebase_exploration_agent(
         ) -> dict:
             """List file paths in the repo. Optionally filter by directory prefix,
             substring, or file extension (e.g. ".tsx"). Results are capped."""
-            tool_steps.append(
-                {
-                    "tool": "list_repo_paths",
-                    "detail": " ".join(
-                        x for x in [prefix, substring, globSuffix] if x
-                    )
-                    or "all",
-                }
-            )
             await _ensure_tree()
             cap = min(maxResults or DEFAULT_MAX_LIST_PATHS, DEFAULT_MAX_LIST_PATHS)
             paths, truncated = filter_paths(
@@ -266,7 +261,6 @@ async def run_codebase_exploration_agent(
         @tool
         async def get_file_content(path: str) -> dict:
             """Read a text file from the repository at the given path (UTF-8)."""
-            tool_steps.append({"tool": "get_file_content", "detail": path})
             await _ensure_tree()
             branch = cached_branch or "HEAD"
             result = await get_text_file_content(http_client, token, ref, path, branch)
@@ -286,7 +280,6 @@ async def run_codebase_exploration_agent(
             maxMatches: int | None = None,
         ) -> dict:
             """Search indexed paths by substring (case-insensitive). Returns up to maxMatches paths."""
-            tool_steps.append({"tool": "search_repo_paths", "detail": query})
             await _ensure_tree()
             q = query.lower()
             cap = min(maxMatches or DEFAULT_MAX_PATH_MATCHES, DEFAULT_MAX_PATH_MATCHES)
@@ -301,56 +294,8 @@ async def run_codebase_exploration_agent(
         @tool
         async def suggest_important_paths_tool() -> dict:
             """Get a short list of likely-important paths (configs, app routes, README)."""
-            tool_steps.append(
-                {"tool": "suggest_important_paths", "detail": "heuristic"}
-            )
             await _ensure_tree()
             return {"suggestedPaths": suggest_important_paths(cached_paths or [])}
-
-        @tool
-        async def finish_codebase_exploration(
-            summary: str,
-            architecture: str,
-            inferredUserFlows: list[str],
-            testingImplications: str,
-            keyPathsExamined: list[str],
-            confidence: Literal["high", "medium", "low"],
-            truncationWarnings: list[str],
-            keyEvidence: list[dict] | None = None,
-        ) -> dict:
-            """Call when you have enough understanding of the codebase to inform QA.
-            Provide structured fields per the system prompt.
-
-            `keyEvidence` is a list of `{path, snippet, relevance}` objects;
-            each snippet should be ≤400 chars of verbatim code with a one-
-            sentence note on why it matters for QA planning.
-            """
-            nonlocal finished_payload
-            tool_steps.append(
-                {"tool": "finish_codebase_exploration", "detail": "done"}
-            )
-            parsed_evidence: list[_FinishEvidenceSnippet] = []
-            for item in keyEvidence or []:
-                if not isinstance(item, dict):
-                    continue
-                try:
-                    parsed_evidence.append(_FinishEvidenceSnippet(**item))
-                except Exception:
-                    # Tolerate partial/malformed snippets rather than failing
-                    # the whole finish call — the rest of the payload is
-                    # still useful.
-                    continue
-            finished_payload = FinishPayload(
-                summary=summary,
-                architecture=architecture,
-                inferredUserFlows=inferredUserFlows,
-                testingImplications=testingImplications,
-                keyPathsExamined=keyPathsExamined,
-                confidence=confidence,
-                truncationWarnings=truncationWarnings,
-                keyEvidence=parsed_evidence,
-            )
-            return {"finished": True}
 
         # Rename for LangChain (the `_tool` suffix is an internal disambiguation).
         suggest_important_paths_tool.name = "suggest_important_paths"
@@ -361,7 +306,6 @@ async def run_codebase_exploration_agent(
             get_file_content,
             search_repo_paths,
             suggest_important_paths_tool,
-            finish_codebase_exploration,
         ]
         tools_by_name = {t.name: t for t in tools}
 
@@ -374,29 +318,48 @@ async def run_codebase_exploration_agent(
                     f"Explore {repo_full_name} to map its real user-facing flows for QA "
                     "planning. Use the tools iteratively — start from routes/pages, read "
                     "enough representative files to infer the main journeys (auth, core "
-                    "workflow, forms, settings), and finish by calling "
-                    "`finish_codebase_exploration` with concrete inferredUserFlows and "
-                    "testingImplications."
+                    "workflow, forms, settings), and when done stop calling tools and "
+                    "emit a 3-5 sentence summary handoff."
                 )
             ),
         ]
 
         # ---- ReAct loop ----
+        orientation = ""
+        step_budget_exhausted = False
+        final_response: AIMessage | None = None
+
         for step in range(max_steps):
             response: AIMessage = await model.ainvoke(messages)
             messages.append(response)
 
-            if not getattr(response, "tool_calls", None):
+            text_blocks = _extract_text_blocks(response)
+            tool_calls = getattr(response, "tool_calls", None) or []
+
+            # Record each text block as its own thought entry. We attach
+            # all text blocks that appeared in this AIMessage; the
+            # position in `entries` reflects the step order.
+            for text in text_blocks:
+                entries.append(TranscriptEntry(kind="thought", text=text))
+
+            if not tool_calls:
+                # Natural stop: the LLM decided it was done. Use the
+                # combined text blocks as the orientation handoff.
+                final_response = response
+                orientation = "\n\n".join(text_blocks)
                 chat_log(
                     "info",
-                    "research_codebase_llm_stopped_without_tools",
+                    "research_codebase_loop_done",
                     step=step,
                     repo=repo_full_name,
+                    orientation_chars=len(orientation),
                 )
                 break
 
-            # Run each requested tool; append ToolMessages so the LLM sees results.
-            for tool_call in response.tool_calls:
+            # Execute each requested tool; record each call + result
+            # both as a transcript entry and as a ToolMessage the LLM
+            # sees on the next turn.
+            for tool_call in tool_calls:
                 name = tool_call["name"]
                 args = tool_call.get("args") or {}
                 fn = tools_by_name.get(name)
@@ -414,6 +377,14 @@ async def run_codebase_exploration_agent(
                         )
                         result = {"error": f"{type(e).__name__}: {e}"}
 
+                entries.append(
+                    TranscriptEntry(
+                        kind="tool_call",
+                        tool=name,
+                        args=dict(args) if isinstance(args, dict) else {"raw": args},
+                        result=result,
+                    )
+                )
                 messages.append(
                     ToolMessage(
                         content=json.dumps(result, default=str),
@@ -421,10 +392,8 @@ async def run_codebase_exploration_agent(
                         name=name,
                     )
                 )
-
-            if finished_payload is not None:
-                break
         else:
+            step_budget_exhausted = True
             chat_log(
                 "warn",
                 "research_codebase_step_budget_exhausted",
@@ -432,56 +401,42 @@ async def run_codebase_exploration_agent(
                 repo=repo_full_name,
             )
 
-    if finished_payload is not None:
-        merged_warnings = list(finished_payload.truncationWarnings)
-        merged_warnings.extend(tree_warnings)
-        if tree_truncated:
-            merged_warnings.append("GitHub tree API marked truncated=true.")
-        # Defensive snippet-length cap. The prompt asks for ≤400 chars but
-        # the model occasionally ignores length hints; capping here keeps the
-        # eventual orchestrator prompt bounded no matter what.
-        _SNIPPET_MAX = 600
-        key_evidence = [
-            CodebaseEvidenceSnippet(
-                path=e.path,
-                snippet=(
-                    e.snippet if len(e.snippet) <= _SNIPPET_MAX
-                    else e.snippet[:_SNIPPET_MAX] + "…"
-                ),
-                relevance=e.relevance,
+        # Even on step-budget exhaustion, the last AIMessage that was
+        # seen may carry useful orientation text. Prefer the natural
+        # break's text; fall back to nothing if we never got a clean
+        # stop.
+        if final_response is None and step_budget_exhausted:
+            orientation = (
+                f"Codebase exploration stopped after reaching the step budget "
+                f"({max_steps} steps) before producing a clean summary. Partial "
+                "evidence is available in the transcript below."
             )
-            for e in finished_payload.keyEvidence
-        ]
-        return CodebaseExplorationResult(
-            summary=finished_payload.summary,
-            architecture=finished_payload.architecture,
-            inferredUserFlows=finished_payload.inferredUserFlows,
-            testingImplications=finished_payload.testingImplications,
-            keyPathsExamined=finished_payload.keyPathsExamined,
-            confidence=finished_payload.confidence,
-            truncationWarnings=merged_warnings,
-            toolStepsUsed=len(tool_steps),
-            keyEvidence=key_evidence,
+
+        chat_log(
+            "info",
+            "research_codebase_transcript_built",
+            repo=repo_full_name,
+            entries_count=len(entries),
+            tool_calls=sum(1 for e in entries if e.kind == "tool_call"),
+            thoughts=sum(1 for e in entries if e.kind == "thought"),
+            file_reads=sum(
+                1
+                for e in entries
+                if e.kind == "tool_call" and e.tool == "get_file_content"
+            ),
+            step_budget_exhausted=step_budget_exhausted,
+            orientation_chars=len(orientation),
+            tree_truncated=tree_truncated,
+            tree_warning_count=len(tree_warnings),
         )
 
-    # Didn't call finish — return a low-confidence summary based on what we read.
-    return empty_codebase_exploration(
-        summary=(
-            f"Codebase exploration did not finish before step limit ({max_steps}). "
-            "Partial understanding only."
-        ),
-        architecture="Unknown — agent did not call finish_codebase_exploration.",
-        inferred_user_flows=[],
-        testing_implications=(
-            "Re-run research or increase RESEARCH_CODEBASE_MAX_STEPS."
-        ),
-        key_paths_examined=[
-            t["detail"] for t in tool_steps if t["tool"] == "get_file_content"
-        ],
-        confidence="low",
-        truncation_warnings=[
-            f"Stopped after {max_steps} steps without finish_codebase_exploration.",
-            *tree_warnings,
-        ],
-        tool_steps_used=len(tool_steps),
-    )
+        return CodebaseTranscript(
+            repo_full_name=repo_full_name,
+            default_branch=cached_branch,
+            path_count=len(cached_paths or []),
+            tree_truncated=tree_truncated,
+            tree_warnings=tree_warnings,
+            orientation=orientation,
+            entries=entries,
+            step_budget_exhausted=step_budget_exhausted,
+        )
