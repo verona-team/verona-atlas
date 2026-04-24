@@ -48,6 +48,30 @@ export async function PATCH(request: NextRequest) {
     }
 
     const metadata = (message.metadata ?? {}) as Record<string, Json>
+
+    // Reject writes against superseded proposal rows. The UI renders these
+    // as read-only and hides Approve/Reject buttons, so the client should
+    // never send this request — but a stale tab, a replay, or a bug could,
+    // and we don't want a replaced card set to silently accept approvals
+    // that then never execute (start_test_run only reads status='active').
+    if (metadata.status === 'superseded') {
+      chatServerLog('info', 'chat_flows_patch_superseded_rejected', {
+        messageId,
+        flowId,
+        userId: user.id,
+        supersededByMessageId: metadata.superseded_by_message_id ?? null,
+      })
+      return NextResponse.json(
+        {
+          error:
+            'These flow proposals have been replaced. Approve the new ones above instead.',
+          code: 'PROPOSALS_SUPERSEDED',
+          supersededByMessageId: metadata.superseded_by_message_id ?? null,
+        },
+        { status: 409 },
+      )
+    }
+
     const proposals = metadata.proposals as { flows?: Array<{ id: string }> } | undefined
     const flowIds =
       proposals?.flows?.map((f) => f.id) ??
