@@ -34,6 +34,7 @@ import {
   type IntegrationStatus,
 } from "@/components/integrations/integration-cards";
 import { useWorkspace } from "@/lib/workspace-context";
+import { normalizeProjectUrl } from "@/lib/project-url";
 
 type Step = "details" | "integrations";
 
@@ -123,9 +124,19 @@ export function NewProjectModal() {
 
   async function onCreateProject(e: SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
+    const normalizedUrl = normalizeProjectUrl(appUrl);
+    if (!normalizedUrl) {
+      toast.error(
+        "Enter a valid app URL (e.g. example.com or https://app.example.com).",
+      );
+      return;
+    }
     setSubmitting(true);
     try {
-      const body: Record<string, string> = { name, app_url: appUrl };
+      const body: Record<string, string> = {
+        name,
+        app_url: normalizedUrl,
+      };
 
       const res = await fetch("/api/projects", {
         method: "POST",
@@ -278,12 +289,14 @@ export function NewProjectModal() {
                 <Label htmlFor="app-url">App URL</Label>
                 <Input
                   id="app-url"
-                  type="url"
+                  type="text"
+                  inputMode="url"
                   required
                   value={appUrl}
                   onChange={(e) => setAppUrl(e.target.value)}
-                  placeholder="https://app.example.com"
+                  placeholder="example.com or https://app.example.com"
                   autoComplete="off"
+                  spellCheck={false}
                 />
               </div>
 

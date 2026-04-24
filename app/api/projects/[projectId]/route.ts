@@ -1,11 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getServerUser } from '@/lib/supabase/server-user'
+import { normalizeProjectUrl } from '@/lib/project-url'
 import { z } from 'zod'
 
 const UpdateProjectSchema = z.object({
   name: z.string().min(1).max(100).optional(),
-  app_url: z.string().url().optional(),
+  app_url: z
+    .string()
+    .min(1)
+    .transform((v, ctx) => {
+      const normalized = normalizeProjectUrl(v)
+      if (!normalized) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Invalid app URL',
+        })
+        return z.NEVER
+      }
+      return normalized
+    })
+    .optional(),
 })
 
 type RouteContext = { params: Promise<{ projectId: string }> }

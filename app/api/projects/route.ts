@@ -2,11 +2,28 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getServerUser } from '@/lib/supabase/server-user'
 import { createProjectInbox } from '@/lib/agentmail'
+import { normalizeProjectUrl } from '@/lib/project-url'
 import { z } from 'zod'
 
 const CreateProjectSchema = z.object({
   name: z.string().min(1).max(100),
-  app_url: z.string().url(),
+  // Accept bare domains (e.g. `veronaresearch.com`) in addition to fully
+  // formed URLs; `normalizeProjectUrl` upgrades them to `https://…` and
+  // rejects anything that isn't a real web URL.
+  app_url: z
+    .string()
+    .min(1)
+    .transform((v, ctx) => {
+      const normalized = normalizeProjectUrl(v)
+      if (!normalized) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Invalid app URL',
+        })
+        return z.NEVER
+      }
+      return normalized
+    }),
 })
 
 export async function GET() {
