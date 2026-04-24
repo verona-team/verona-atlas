@@ -44,7 +44,7 @@ buys us:
 - **One sandbox per research run, shared across all tool calls.**
   `Sandbox.create` takes a few seconds; amortizing that across the
   ~20 execute_code calls per run is worth it. Creates at the start
-  of `run_integration_research`, terminates + detaches in `finally`.
+  of `run_integration_research_transcript`, terminates + detaches in `finally`.
 
 - **`exec("python", "-c", code)` instead of writing files.** On Linux
   ARG_MAX is ~2MB — plenty for any LLM-written research script. Skips
