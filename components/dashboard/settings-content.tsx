@@ -12,6 +12,7 @@ import {
   subscribeSettingsCache,
 } from '@/lib/settings-prefetch'
 import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
+import { GitHubInstallationPicker } from '@/components/integrations/github-installation-picker'
 import {
   ADVANCED_INTEGRATION_TYPES,
   AdvancedIntegrationsSection,
@@ -294,8 +295,17 @@ function SettingsIntegrationCard({
   const router = useRouter()
   const connected = !!integration
   const [waiting, setWaiting] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
   const connectPopupRef = useRef<Window | null>(null)
   const previouslyConnectedRef = useRef(connected)
+
+  // Project ID is threaded through `connectUrl` query for github so we
+  // can reach the /status + /link-installation endpoints. Pulled out
+  // here so the picker dialog (rendered below) can use it too.
+  const projectIdFromUrl =
+    type === 'github'
+      ? connectUrl.match(/project_id=([^&]+)/)?.[1] ?? null
+      : null
 
   function handleConnect() {
     if (openInNewTab) {
@@ -322,26 +332,62 @@ function SettingsIntegrationCard({
     if (!waiting) return
     const refresh = onRefresh
     if (!refresh) return
+    let cancelled = false
+
     const interval = setInterval(async () => {
-      if (type === 'github') {
+      if (cancelled) return
+      if (type === 'github' && projectIdFromUrl) {
         try {
-          const projectId = connectUrl.match(/project_id=([^&]+)/)?.[1]
-          if (projectId) {
-            const res = await fetch(`/api/integrations/github/status?project_id=${projectId}`)
-            if (res.ok) {
-              const data = await res.json()
-              if (data.connected) {
-                await refresh()
-                return
-              }
+          const res = await fetch(
+            `/api/integrations/github/status?project_id=${projectIdFromUrl}`,
+          )
+          if (res.ok) {
+            const data = (await res.json()) as {
+              connected?: boolean
+              reason?: string
+            }
+            if (cancelled) return
+            if (data.connected) {
+              await refresh()
+              return
+            }
+            // Multi-install case: stop polling, show the picker. Same
+            // behavior as GitHubCard on the new-project modal, so users
+            // don't hit infinite "Connecting…" on the settings page
+            // when they have the Verona app on more than one GitHub
+            // account.
+            if (data.reason === 'AMBIGUOUS_MULTIPLE_INSTALLATIONS') {
+              setWaiting(false)
+              connectPopupRef.current?.close()
+              connectPopupRef.current = null
+              setPickerOpen(true)
+              return
             }
           }
         } catch {}
       }
       await refresh()
     }, 2000)
-    return () => clearInterval(interval)
-  }, [waiting, onRefresh, type, connectUrl])
+
+    // Hard timeout mirrors the GitHubCard safety net: don't leave
+    // the connecting spinner running forever if the backend never
+    // observes a link and no structured failure reason comes back.
+    const hardTimeout = setTimeout(() => {
+      if (cancelled) return
+      setWaiting(false)
+      if (type === 'github') {
+        toast.error(
+          "GitHub is taking a while. Close the popup and try again if it's stuck.",
+        )
+      }
+    }, 120_000)
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+      clearTimeout(hardTimeout)
+    }
+  }, [waiting, onRefresh, type, projectIdFromUrl])
 
   useEffect(() => {
     if (waiting && connected) {
@@ -415,6 +461,17 @@ function SettingsIntegrationCard({
         </div>
         {connected && children && <div className="mt-2 text-xs text-muted-foreground">{children}</div>}
       </CardContent>
+      {type === 'github' && projectIdFromUrl && (
+        <GitHubInstallationPicker
+          open={pickerOpen}
+          projectId={projectIdFromUrl}
+          onOpenChange={setPickerOpen}
+          onLinked={() => {
+            if (onRefresh) void onRefresh()
+            router.refresh()
+          }}
+        />
+      )}
     </Card>
   )
 }
