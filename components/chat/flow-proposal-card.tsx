@@ -35,6 +35,12 @@ interface FlowProposalCardProps {
   onApprove: (flowId: string) => void
   onReject: (flowId: string) => void
   disabled?: boolean
+  /**
+   * When true, the card renders without Approve/Reject buttons regardless
+   * of `state`. Used for superseded proposals so historical cards stay
+   * readable but can't mutate state on the replacement row.
+   */
+  readonly?: boolean
 }
 
 const priorityVariant: Record<string, string> = {
@@ -50,6 +56,7 @@ export function FlowProposalCard({
   onApprove,
   onReject,
   disabled,
+  readonly,
 }: FlowProposalCardProps) {
   const [expanded, setExpanded] = useState(false)
 
@@ -85,7 +92,7 @@ export function FlowProposalCard({
             <p className="text-xs text-muted-foreground mt-1 italic">{flow.rationale}</p>
           </div>
 
-          {state === 'pending' && (
+          {state === 'pending' && !readonly && (
             <div className="flex items-center gap-1.5 shrink-0">
               <Button
                 variant="outline"
