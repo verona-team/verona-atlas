@@ -25,21 +25,33 @@ to audit the shape of every row we write.
       +-> flow_proposals  |    (writes metadata=flow_proposals row, -> finalize)
       |
       +-> start_test_run       (spawns execute_test_run Modal call, -> finalize)
+
+## Flow-proposal lifecycle — one active row per session
+
+At most one `flow_proposals` chat_messages row per session has
+`metadata.status == 'active'` at any moment. On each `replace`-mode call
+we atomically insert a new active row and flip the prior one to
+`superseded`, stamping `superseded_by_message_id` on it. `start_test_run`
+only ever executes flows on the active row.
+
+Carry-over of approvals across replacements is opt-in per id: if the
+flow generator re-emits a prior id verbatim, the prior approval state is
+copied onto the new row; otherwise the new flow starts `pending`. See
+`runner.chat.flow_generator.serialize_flows_for_message`.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 import traceback
 from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, SystemMessage
-from langgraph.types import Command
 from supabase import Client
 
 from .flow_generator import (
     FlowProposals,
+    PriorFlowSummary,
     generate_flow_proposals as run_flow_generator,
     serialize_flows_for_message,
 )
@@ -58,11 +70,11 @@ from .context import maybe_summarize_older_messages
 async def ensure_research(state: ChatTurnState) -> dict[str, Any]:
     """Run the research agent if we don't have a fresh report on the session.
 
-    The old TS flow re-ran research on every chat turn (with a session-level
-    cache check). We preserve that behavior: `research_report` is None the
-    first time, and we fill it + persist it. Subsequent turns reuse the
-    cached value until a user/tool explicitly refreshes via
-    `generate_flow_proposals(refresh=True)`.
+    `research_report` is None the first time, and we fill it + persist it.
+    Subsequent turns reuse the cached value until a user/tool explicitly
+    refreshes via `generate_flow_proposals(refresh_research=True)` or
+    (implicitly) via a replace-mode call, which always refreshes research
+    from inside `tool_generate_flow_proposals`.
     """
     from runner.research.orchestrator import run_research_agent
     from runner.research.types import ResearchReport
@@ -131,6 +143,7 @@ async def agent_turn(state: ChatTurnState) -> dict[str, Any]:
         latest_flow_proposals=state.get("latest_flow_proposals"),
         context_summary=state.get("context_summary"),
         recent_runs=state.get("recent_runs") or [],
+        active_flow_proposal_message_id=state.get("active_flow_proposal_message_id"),
     )
 
     messages = [SystemMessage(content=system), *state.get("messages", [])]
@@ -145,6 +158,7 @@ async def agent_turn(state: ChatTurnState) -> dict[str, Any]:
         turn_id=state.get("turn_id"),
         message_count=len(messages),
         llm_calls_so_far=state.get("llm_calls") or 0,
+        has_active_proposals=bool(state.get("active_flow_proposal_message_id")),
     )
     t0 = time.time()
 
@@ -172,6 +186,7 @@ async def agent_turn(state: ChatTurnState) -> dict[str, Any]:
         elapsed_s=round(time.time() - t0, 3),
         tool_call_count=len(tool_calls),
         tool_names=[tc.get("name") for tc in tool_calls],
+        tool_args=[tc.get("args") for tc in tool_calls],
         has_text_content=bool(
             response.content
             if isinstance(response.content, str)
@@ -196,8 +211,7 @@ def route_after_agent(
 ) -> Literal["tool_generate_flow_proposals", "tool_start_test_run", "finalize"]:
     """Decide what to do after the orchestrator spoke.
 
-    Behavior mirrors the TS `stopWhen: [stepCountIs(3), hasToolCall(...)]`:
-    if the model called a tool, execute it and then finalize (no second
+    If the model called a tool, execute it and then finalize (no second
     LLM turn that would re-describe cards). If no tool_calls, finalize
     with whatever text the model emitted.
     """
@@ -213,7 +227,6 @@ def route_after_agent(
         return "tool_generate_flow_proposals"
     if name == "start_test_run":
         return "tool_start_test_run"
-    # Unknown tool — log and finalize gracefully rather than looping forever.
     chat_log(
         "warn",
         "chat_unknown_tool_call",
@@ -226,14 +239,88 @@ def route_after_agent(
 # ----- tool: generate_flow_proposals -----
 
 
+def _fetch_active_flow_proposals_row(
+    sb: Client, session_id: str
+) -> dict[str, Any] | None:
+    """Return the single active flow_proposals row for this session, or None.
+
+    Invariant: there is at most one `status='active'` row per session. If
+    we ever observe more than one (bug), we log loudly and return the
+    newest; downstream treats it as the one to supersede.
+    """
+    resp = (
+        sb.table("chat_messages")
+        .select("id, metadata, created_at")
+        .eq("session_id", session_id)
+        .eq("metadata->>type", "flow_proposals")
+        .eq("metadata->>status", "active")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    rows = resp.data or []
+    if len(rows) > 1:
+        chat_log(
+            "error",
+            "chat_multiple_active_flow_proposals",
+            session_id=session_id,
+            count=len(rows),
+            row_ids=[r.get("id") for r in rows],
+        )
+    return rows[0] if rows else None
+
+
+def _prior_summaries_from_row(
+    row: dict[str, Any],
+) -> tuple[list[PriorFlowSummary], dict[str, str], list[str]]:
+    """Pull prior-flow summaries + flow_states + avoid_ids out of an active row.
+
+    Tolerates legacy rows where fields are missing by returning empty
+    collections — the generator will treat the regeneration as a
+    bootstrap-like fresh generation in that case.
+    """
+    metadata = row.get("metadata") or {}
+    proposals = metadata.get("proposals") or {}
+    raw_flows = proposals.get("flows") if isinstance(proposals, dict) else None
+    flow_states_raw = metadata.get("flow_states") or {}
+
+    prior_summaries: list[PriorFlowSummary] = []
+    avoid_ids: list[str] = []
+    flow_states: dict[str, str] = {}
+
+    if isinstance(raw_flows, list):
+        for f in raw_flows:
+            if not isinstance(f, dict):
+                continue
+            fid = f.get("id")
+            if not isinstance(fid, str) or not fid:
+                continue
+            state_val = flow_states_raw.get(fid, "pending")
+            if state_val not in ("pending", "approved", "rejected"):
+                state_val = "pending"
+            prior_summaries.append(
+                PriorFlowSummary(
+                    id=fid,
+                    name=str(f.get("name") or fid),
+                    rationale=str(f.get("rationale") or ""),
+                    state=state_val,
+                )
+            )
+            avoid_ids.append(fid)
+            flow_states[fid] = state_val
+
+    return prior_summaries, flow_states, avoid_ids
+
+
 async def tool_generate_flow_proposals(state: ChatTurnState) -> dict[str, Any]:
-    """Generate flow proposals, insert the chat_messages row, return to finalize.
+    """Generate flow proposals, insert a new active row, and supersede the prior one.
 
     The LLM's AIMessage included a `generate_flow_proposals` tool_call; we
-    read its args (refresh flag), re-run research if needed, call the
-    flow generator, and write the row. The final AIMessage.content text
-    that Claude emitted alongside the tool_call is preserved as the
-    assistant bubble text in `finalize`.
+    read its args (`mode`, `reason`, `refresh_research`), optionally re-run
+    research, call the flow generator with prior-row context, insert the
+    new row, and flip the prior row's metadata to `status='superseded'`.
+
+    The final AIMessage.content text Opus emitted alongside the tool_call is
+    preserved as the assistant bubble text in `finalize`.
     """
     sb = get_supabase()
     messages = state.get("messages") or []
@@ -241,24 +328,71 @@ async def tool_generate_flow_proposals(state: ChatTurnState) -> dict[str, Any]:
     tool_calls = getattr(last, "tool_calls", None) or []
     tc = tool_calls[0] if tool_calls else {}
     args = tc.get("args") or {}
-    refresh = bool(args.get("refresh"))
+    mode = args.get("mode") or "bootstrap"
+    reason = str(args.get("reason") or "").strip()
+    refresh_research_explicit = bool(args.get("refresh_research"))
+
+    if mode not in ("bootstrap", "replace"):
+        chat_log(
+            "warn",
+            "chat_tool_flow_proposals_invalid_mode",
+            session_id=state.get("session_id"),
+            mode=mode,
+        )
+        # Coerce unknown modes to bootstrap if there is no active row,
+        # otherwise replace — safe default: never leave a stale active row.
+        mode = "bootstrap" if not state.get("active_flow_proposal_message_id") else "replace"
 
     project_id = state["project_id"]
     session_id = state["session_id"]
     app_url = state.get("app_url", "")
+
+    # -------- Load the prior active row (for replace only) --------
+    prior_row: dict[str, Any] | None = None
+    prior_flow_summaries: list[PriorFlowSummary] = []
+    prior_flow_states: dict[str, str] = {}
+    avoid_ids: list[str] = []
+    if mode == "replace":
+        prior_row = _fetch_active_flow_proposals_row(sb, session_id)
+        if prior_row is None:
+            # The orchestrator thought we were in replace-mode but no active
+            # row exists — a state desync. Gracefully downgrade to bootstrap
+            # rather than refusing the user: a redundant empty avoid-list
+            # bootstrap is strictly better than a no-op.
+            chat_log(
+                "warn",
+                "chat_tool_flow_proposals_replace_without_active",
+                session_id=session_id,
+            )
+            mode = "bootstrap"
+        else:
+            (
+                prior_flow_summaries,
+                prior_flow_states,
+                avoid_ids,
+            ) = _prior_summaries_from_row(prior_row)
 
     chat_log(
         "info",
         "chat_tool_flow_proposals_begin",
         project_id=project_id,
         session_id=session_id,
-        refresh=refresh,
+        mode=mode,
+        reason=reason,
+        refresh_research=refresh_research_explicit,
+        prior_flow_count=len(prior_flow_summaries),
+        prior_approved_ids=[
+            pf.id for pf in prior_flow_summaries if pf.state == "approved"
+        ],
     )
 
-    # Refresh path: re-run research, persist, update state so downstream
-    # uses the new report.
+    # -------- Refresh research if appropriate --------
+    # Replace-mode always refreshes (the user asked for different flows; reusing
+    # a stale report is the single biggest cause of near-duplicate output).
+    # Bootstrap only refreshes if the orchestrator explicitly requested it.
     research_report = state.get("research_report")
-    if refresh:
+    should_refresh = refresh_research_explicit or mode == "replace"
+    if should_refresh:
         from runner.research.orchestrator import run_research_agent
 
         try:
@@ -269,6 +403,13 @@ async def tool_generate_flow_proposals(state: ChatTurnState) -> dict[str, Any]:
             sb.table("chat_sessions").update(
                 {"research_report": research_report, "updated_at": iso_now()}
             ).eq("id", session_id).execute()
+            chat_log(
+                "info",
+                "chat_tool_flow_proposals_research_refreshed",
+                project_id=project_id,
+                session_id=session_id,
+                mode=mode,
+            )
         except Exception as e:
             chat_log(
                 "error",
@@ -276,15 +417,25 @@ async def tool_generate_flow_proposals(state: ChatTurnState) -> dict[str, Any]:
                 project_id=project_id,
                 err=repr(e),
             )
+            # Fall through to try generation with the cached report; better
+            # to ship slightly stale flows than to bail on the turn.
 
     if not research_report:
-        return {
-            "inserted_flow_proposal_message_id": None,
-        }
+        chat_log(
+            "error",
+            "chat_tool_flow_proposals_no_research_report",
+            session_id=session_id,
+        )
+        return {"inserted_flow_proposal_message_id": None}
 
+    # -------- Generate new flow proposals --------
     try:
         proposals: FlowProposals = await run_flow_generator(
-            app_url=app_url, research_report=research_report
+            app_url=app_url,
+            research_report=research_report,
+            prior_flows=prior_flow_summaries or None,
+            avoid_ids=avoid_ids or None,
+            intent=reason or None,
         )
     except Exception as e:
         chat_log(
@@ -296,8 +447,15 @@ async def tool_generate_flow_proposals(state: ChatTurnState) -> dict[str, Any]:
         )
         raise
 
-    content, metadata, flows = serialize_flows_for_message(proposals)
+    content, metadata, flows = serialize_flows_for_message(
+        proposals,
+        prior_flow_states=prior_flow_states or None,
+        prior_flows=prior_flow_summaries or None,
+        avoid_ids=avoid_ids or None,
+    )
 
+    # -------- Insert the new active row --------
+    inserted_id: str | None = None
     try:
         resp = (
             sb.table("chat_messages")
@@ -311,7 +469,6 @@ async def tool_generate_flow_proposals(state: ChatTurnState) -> dict[str, Any]:
             )
             .execute()
         )
-        inserted_id: str | None = None
         inserted_rows = resp.data or []
         if inserted_rows:
             inserted_id = inserted_rows[0].get("id")
@@ -324,17 +481,58 @@ async def tool_generate_flow_proposals(state: ChatTurnState) -> dict[str, Any]:
         )
         inserted_id = None
 
+    # -------- Supersede the prior row (replace only) --------
+    # Order matters: insert first so there is always at least one row to
+    # render even if the supersede update fails. If we flipped the old row
+    # first and the insert then failed, the user would see ZERO active card
+    # stacks until the next turn.
+    if mode == "replace" and prior_row is not None and inserted_id is not None:
+        try:
+            prior_metadata = dict(prior_row.get("metadata") or {})
+            prior_metadata["status"] = "superseded"
+            prior_metadata["superseded_by_message_id"] = inserted_id
+            sb.table("chat_messages").update({"metadata": prior_metadata}).eq(
+                "id", prior_row["id"]
+            ).execute()
+            chat_log(
+                "info",
+                "chat_tool_flow_proposals_superseded_prior",
+                session_id=session_id,
+                prior_message_id=prior_row["id"],
+                new_message_id=inserted_id,
+            )
+        except Exception as e:
+            # Two active rows is a soft bug: the client picks the newest
+            # and renders both card stacks as active until the next turn.
+            # `_fetch_active_flow_proposals_row` logs an error when it
+            # sees the anomaly, which surfaces it in observability.
+            chat_log(
+                "error",
+                "chat_tool_flow_proposals_supersede_failed",
+                session_id=session_id,
+                prior_message_id=prior_row["id"],
+                new_message_id=inserted_id,
+                err=repr(e),
+            )
+
     chat_log(
         "info",
         "chat_tool_flow_proposals_ok",
         project_id=project_id,
         session_id=session_id,
+        mode=mode,
         flow_count=len(flows),
+        flow_ids=[f.id for f in flows],
         flow_names=[f.name for f in flows],
+        carried_over_count=sum(
+            1 for f in flows if prior_flow_states.get(f.id) in ("approved", "rejected")
+        ),
+        new_active_message_id=inserted_id,
     )
 
     return {
         "inserted_flow_proposal_message_id": inserted_id,
+        "active_flow_proposal_message_id": inserted_id,
         "research_report": research_report,
     }
 
@@ -345,10 +543,10 @@ async def tool_generate_flow_proposals(state: ChatTurnState) -> dict[str, Any]:
 async def tool_start_test_run(state: ChatTurnState) -> dict[str, Any]:
     """Materialize approved flows into templates + a test_runs row + spawn Modal.
 
-    Same behavior as the TS `executeStartTestRun` — the only meaningful
-    change is that we're spawning `execute_test_run` from inside another
-    Modal function, which works fine because the Python Modal client reads
-    `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` from env.
+    Reads flows from the single active proposals row — rows flipped to
+    `status='superseded'` are ignored, so approvals on historical cards
+    (which the UI should already prevent via read-only mode) never
+    leak into execution.
     """
     sb = get_supabase()
     session_id = state["session_id"]
@@ -361,43 +559,25 @@ async def tool_start_test_run(state: ChatTurnState) -> dict[str, Any]:
         project_id=project_id,
     )
 
-    # Re-read the latest proposals from the DB rather than trusting state,
+    # Re-read the active proposals row from the DB rather than trusting state,
     # so flows the user approved/rejected since the turn started are visible.
-    latest_meta: dict[str, Any] | None = None
-    try:
-        proposals_resp = (
-            sb.table("chat_messages")
-            .select("metadata")
-            .eq("session_id", session_id)
-            .eq("metadata->>type", "flow_proposals")
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        rows = proposals_resp.data or []
-        if rows:
-            latest_meta = rows[0].get("metadata") or {}
-    except Exception as e:
-        chat_log(
-            "warn",
-            "chat_tool_start_test_run_meta_fetch_failed",
-            session_id=session_id,
-            err=repr(e),
-        )
-
-    if not latest_meta:
+    active_row = _fetch_active_flow_proposals_row(sb, session_id)
+    if active_row is None:
         return _start_test_run_failure(
             session_id,
-            "Could not find flow proposals for this session. Ask the user to "
+            "Could not find active flow proposals for this session. Ask the user to "
             "generate proposals again, then approve flows before starting.",
         )
+
+    latest_meta: dict[str, Any] = active_row.get("metadata") or {}
 
     flow_states = latest_meta.get("flow_states") or {}
     approved_ids = [fid for fid, s in flow_states.items() if s == "approved"]
     if not approved_ids:
         return _start_test_run_failure(
             session_id,
-            "No approved flows. The user needs to approve at least one flow before starting.",
+            "No approved flows on the active proposal set. The user needs to approve "
+            "at least one flow before starting.",
         )
 
     proposals = latest_meta.get("proposals") or {}
@@ -409,7 +589,9 @@ async def tool_start_test_run(state: ChatTurnState) -> dict[str, Any]:
             "generate proposals again, then approve flows before starting.",
         )
 
-    approved_flows = [f for f in flows if isinstance(f, dict) and f.get("id") in approved_ids]
+    approved_flows = [
+        f for f in flows if isinstance(f, dict) and f.get("id") in approved_ids
+    ]
     if not approved_flows:
         return _start_test_run_failure(
             session_id,
@@ -459,7 +641,6 @@ async def tool_start_test_run(state: ChatTurnState) -> dict[str, Any]:
             msg += " " + " ".join(template_insert_errors)
         return _start_test_run_failure(session_id, msg)
 
-    # Create the test_runs row first (Modal needs its id as an arg).
     try:
         run_resp = (
             sb.table("test_runs")
@@ -484,15 +665,13 @@ async def tool_start_test_run(state: ChatTurnState) -> dict[str, Any]:
             session_id, f"Failed to create test run: {type(e).__name__}: {e}"
         )
 
-    # Spawn execute_test_run from inside this Modal function. The env has
-    # MODAL_TOKEN_ID/MODAL_TOKEN_SECRET so the nested client auto-authenticates.
     modal_call_id: str | None = None
     try:
         import modal
 
         fn = modal.Function.from_name("atlas-runner", "execute_test_run")
         call = fn.spawn(test_run_id, project_id)
-        modal_call_id = call.object_id  # modal-python attribute name
+        modal_call_id = call.object_id
     except Exception as e:
         chat_log(
             "error",
@@ -517,7 +696,6 @@ async def tool_start_test_run(state: ChatTurnState) -> dict[str, Any]:
             session_id, f"Failed to trigger test execution: {type(e).__name__}: {e}"
         )
 
-    # Best-effort: persist modal_call_id onto the test_runs row.
     try:
         if modal_call_id:
             sb.table("test_runs").update({"modal_call_id": modal_call_id}).eq(
@@ -530,8 +708,6 @@ async def tool_start_test_run(state: ChatTurnState) -> dict[str, Any]:
             err=repr(e),
         )
 
-    # User-visible "Testing started" chat bubble. Same metadata shape the UI
-    # already renders — do not change without a matching client change.
     try:
         sb.table("chat_messages").insert(
             {
@@ -611,7 +787,6 @@ async def finalize(state: ChatTurnState) -> dict[str, Any]:
     session_id = state["session_id"]
     messages = state.get("messages") or []
 
-    # Find the most recent AIMessage; that's our reply.
     assistant_text = ""
     for m in reversed(messages):
         if isinstance(m, AIMessage):
@@ -631,10 +806,6 @@ async def finalize(state: ChatTurnState) -> dict[str, Any]:
 
     assistant_message_id = state.get("assistant_message_id")
 
-    # Persist the assistant bubble ONLY if we have actual text.
-    # (A pure-tool turn — e.g. generate_flow_proposals emits a tool_call and
-    # no trailing text — leaves assistant_text empty; the tool already
-    # inserted its own visible row, so we don't add a redundant bubble.)
     if assistant_text:
         try:
             sb.table("chat_messages").upsert(
@@ -655,7 +826,6 @@ async def finalize(state: ChatTurnState) -> dict[str, Any]:
                 err=repr(e),
             )
 
-    # Rolling-summary compaction (best-effort).
     try:
         await maybe_summarize_older_messages(sb, session_id)
     except Exception as e:
@@ -666,10 +836,6 @@ async def finalize(state: ChatTurnState) -> dict[str, Any]:
             err=repr(e),
         )
 
-    # Mark session idle + clear the active Modal call. `turn.run_chat_turn`
-    # also does this in its `finally` block as a safety net; doing it here
-    # means the UI unblocks at the precise moment the turn is actually done
-    # rather than a few hundred ms later when the Modal function exits.
     try:
         set_session_status(sb, session_id, "idle", clear_active_call=True)
     except Exception as e:
