@@ -1,18 +1,21 @@
 """
-Prompt definitions and tool schemas for the outer QA ReAct agent (Gemini 3.1 Pro)
-that drives the agentic test execution loop.
+Prompt definitions and tool schemas for the outer QA ReAct agent (Claude
+Opus 4.7) that drives the agentic test execution loop.
 
 The Stagehand browser-agent model is Claude Opus 4.6 because Stagehand's CUA /
 agent mode is currently tuned for Claude-family models *and* the Stagehand v3
 SDK only lists Opus up to 4.6 as a supported CUA model. Attempting to use
-Opus 4.7 fails at the Anthropic API layer because Stagehand still emits the
-legacy ``computer_20250124`` tool schema, which 4.7 no longer accepts
-(4.7 requires ``computer_20251124`` + the ``computer-use-2025-11-24`` beta
-header). See Browserbase's CUA-model list:
+Opus 4.7 at the Stagehand layer fails at the Anthropic API because Stagehand
+still emits the legacy ``computer_20250124`` tool schema, which 4.7 no longer
+accepts (4.7 requires ``computer_20251124`` + the ``computer-use-2025-11-24``
+beta header). See Browserbase's CUA-model list:
 https://docs.stagehand.dev/v3/configuration/models
 
-The outer ReAct loop has been migrated to Gemini 3.1 Pro via LangChain; the
-raw Anthropic SDK is no longer used here.
+The outer ReAct loop is a different story: it talks to Anthropic directly
+through ``langchain-anthropic`` using our own custom tool schema
+(``TOOLS`` below, authored in Anthropic's native ``{name, description,
+input_schema}`` shape), so it does NOT collide with the CUA ``computer_``
+schema problem and safely runs on Opus 4.7.
 """
 import json
 from typing import Any
@@ -25,10 +28,10 @@ from typing import Any
 STAGEHAND_AGENT_MODEL = "anthropic/claude-opus-4-6"
 STAGEHAND_SESSION_MODEL = STAGEHAND_AGENT_MODEL
 
-# Outer ReAct loop model — used by test_executor as a langchain model id string
-# for logging; the actual model instance is obtained via
-# `runner.chat.models.get_gemini_pro()`.
-OUTER_AGENT_MODEL = "gemini-3.1-pro-preview"
+# Outer ReAct loop model — Claude Opus 4.7 via `langchain-anthropic`. This
+# string is used by test_executor for logging only; the actual model
+# instance is obtained via `runner.chat.models.get_claude_opus_outer()`.
+OUTER_AGENT_MODEL = "claude-opus-4-7"
 
 TOOLS: list[dict[str, Any]] = [
     {

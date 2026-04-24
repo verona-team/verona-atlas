@@ -1,10 +1,14 @@
 """
-Agentic test executor — ReAct loop powered by Gemini 3.1 Pro (outer reasoning,
-via LangChain) and Stagehand session.execute() (inner browser actions via
-Stagehand v3 API, backed by Claude Opus 4.6).
+Agentic test executor — ReAct loop powered by Claude Opus 4.7 (outer
+reasoning, via `langchain-anthropic`) and Stagehand session.execute() (inner
+browser actions via Stagehand v3 API, backed by Claude Opus 4.6).
 
 Architecture:
-  Outer loop (Gemini 3.1 Pro): observe screenshot → reason → pick tool → repeat
+  Outer loop (Claude Opus 4.7): observe screenshot → reason → pick tool →
+    repeat. Uses our own `{name, description, input_schema}` tool schema,
+    NOT the Anthropic native `computer_` tool — so this layer is immune to
+    the Stagehand CUA tool-schema issue that forces the inner agent to
+    stay on 4.6.
   Inner loop (Stagehand v3 + Claude Opus 4.6): session.execute(instruction)
     performs multi-step browser interactions within a single action.
 """
@@ -27,7 +31,7 @@ from langchain_core.messages import (
 )
 
 from runner.browser import stagehand_agent_model_config
-from runner.chat.models import get_gemini_pro
+from runner.chat.models import get_claude_opus_outer
 from runner.logging import test_log
 from runner.prompts import (
     OUTER_AGENT_MODEL,
@@ -38,32 +42,13 @@ from runner.prompts import (
 
 
 # ---------------------------------------------------------------------------
-# Tool schema adaptation
+# Tool schema
 # ---------------------------------------------------------------------------
 # `runner.prompts.TOOLS` is authored in Anthropic's native shape
-# (`{name, description, input_schema}`). LangChain's `bind_tools` accepts
-# that format directly, but the Google genai integration wants an OpenAI-style
-# `{type: "function", function: {name, description, parameters}}`. We convert
-# once here so the tool list is provider-agnostic.
-
-
-def _adapt_tools_for_langchain() -> list[dict[str, Any]]:
-    adapted: list[dict[str, Any]] = []
-    for t in TOOLS:
-        adapted.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": t["name"],
-                    "description": t["description"],
-                    "parameters": t["input_schema"],
-                },
-            }
-        )
-    return adapted
-
-
-_LANGCHAIN_TOOLS = _adapt_tools_for_langchain()
+# (`{name, description, input_schema}`), which `langchain-anthropic`'s
+# `bind_tools` accepts directly. The outer agent is Claude Opus 4.7, so no
+# OpenAI/Gemini-style function-calling shape conversion is needed.
+_LANGCHAIN_TOOLS = list(TOOLS)
 
 
 # ---------------------------------------------------------------------------
@@ -427,12 +412,15 @@ async def execute_check_email(
 def _screenshot_message(url: str, screenshot_b64: str, note: str) -> HumanMessage:
     """Build a HumanMessage with a text note + PNG screenshot block.
 
-    Gemini 3 accepts multimodal HumanMessages with `image` content blocks
-    using the unified LangChain shape `{type: "image", base64, mime_type}`.
-    Screenshots returned from tool calls are delivered this way (as a
-    follow-up HumanMessage after the corresponding ToolMessage) because
-    some providers don't accept image parts inside a tool/function
-    response message.
+    `langchain-anthropic` (and `langchain-google-genai`) both accept the
+    unified LangChain image content-block shape
+    `{type: "image", base64, mime_type}` at the top level of a
+    HumanMessage. Screenshots returned from tool calls are delivered this
+    way (as a follow-up HumanMessage after the corresponding ToolMessage)
+    rather than embedded inside the ToolMessage itself, because some
+    providers' image-in-tool-result converters are still buggy (see
+    langchain-google#1591) and a separate HumanMessage is universally
+    supported.
     """
     content: list[dict[str, Any]] = [
         {"type": "text", "text": f"Current URL: {url}\n\n{note}"},
@@ -513,7 +501,7 @@ def _extract_assistant_text(ai_msg: AIMessage) -> str:
             elif isinstance(block, str):
                 parts.append(block)
         return "".join(parts)
-    # Fallback: try `.text` accessor (Gemini 3) if available.
+    # Fallback: try LangChain's `.text` accessor if available.
     text = getattr(ai_msg, "text", None)
     return text if isinstance(text, str) else ""
 
@@ -583,13 +571,13 @@ async def execute_template(
         generated_password=generated_password,
     )
 
-    # Build the outer ReAct model once; tools are bound with LangChain's
-    # provider-agnostic `bind_tools`. Defaults (66k output tokens, 5-minute
-    # timeout) give the reasoning loop full headroom — a single turn can
-    # spend a substantial chunk on thinking blocks before emitting the
-    # tool_use block, and clipping that caused silent truncation on the
-    # old Anthropic path.
-    outer_model = get_gemini_pro().bind_tools(_LANGCHAIN_TOOLS)
+    # Build the outer ReAct model once and bind our custom QA tools.
+    # Claude Opus 4.7 accepts Anthropic's native tool shape directly, so
+    # `_LANGCHAIN_TOOLS` is the same `TOOLS` list from `runner.prompts`.
+    # Defaults (32k output tokens per turn, 5-minute timeout) give the
+    # adaptive-thinking reasoning budget plenty of room before a single
+    # turn's tool_use block.
+    outer_model = get_claude_opus_outer().bind_tools(_LANGCHAIN_TOOLS)
 
     test_start_time = datetime.now(timezone.utc)
 
@@ -652,7 +640,7 @@ async def execute_template(
             message_count=len(messages),
         )
 
-        # Call outer agent (Gemini 3.1 Pro via LangChain).
+        # Call outer agent (Claude Opus 4.7 via LangChain/Anthropic).
         llm_t0 = time.time()
         try:
             ai_msg: AIMessage = await outer_model.ainvoke(messages)
@@ -688,8 +676,9 @@ async def execute_template(
             })
             break
 
-        # CRITICAL: append the AIMessage as-is so thought signatures (Gemini 3)
-        # and the tool_use blocks stay attached for the next turn.
+        # CRITICAL: append the AIMessage as-is so reasoning / thinking
+        # blocks (Opus adaptive thinking) and the tool_use blocks stay
+        # attached for the next turn.
         messages.append(ai_msg)
 
         tool_calls = getattr(ai_msg, "tool_calls", None) or []
