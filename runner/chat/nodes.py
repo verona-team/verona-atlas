@@ -56,7 +56,7 @@ from .flow_generator import (
     serialize_flows_for_message,
 )
 from .logging import chat_log
-from .models import get_gemini_pro
+from .models import get_gemini_flash, get_gemini_pro
 from .prompts import build_orchestrator_system_prompt
 from .state import ChatTurnState
 from .supabase_client import get_supabase, iso_now, set_session_status
@@ -809,15 +809,16 @@ async def tool_start_test_run(state: ChatTurnState) -> dict[str, Any]:
             err=repr(e),
         )
 
+    bubble_content = await _generate_test_run_started_copy(
+        session_id=session_id, approved_flows=approved_flows
+    )
+
     try:
         sb.table("chat_messages").insert(
             {
                 "session_id": session_id,
                 "role": "assistant",
-                "content": (
-                    f"Testing started! I'm executing {len(approved_flows)} approved "
-                    "flow(s) in cloud browsers. I'll update you on progress as results come in."
-                ),
+                "content": bubble_content,
                 "metadata": {
                     "type": "test_run_started",
                     "run_id": test_run_id,
@@ -847,6 +848,80 @@ async def tool_start_test_run(state: ChatTurnState) -> dict[str, Any]:
         "spawned_test_run_id": test_run_id,
         "spawned_modal_call_id": modal_call_id,
     }
+
+
+async def _generate_test_run_started_copy(
+    *, session_id: str, approved_flows: list[dict[str, Any]]
+) -> str:
+    """Ask Gemini Flash to write a short confirmation bubble keyed to the approved flows.
+
+    The bubble is meant to feel like a natural continuation of the
+    orchestrator's voice: it should acknowledge starting the run, reference
+    the specific flows the user just approved (not in a dumped list — in
+    prose), and promise progress updates. Flash is the right tool: the
+    task is short, well-scoped, and doesn't need Pro-grade reasoning.
+
+    Falls back to a static message on any failure (model error, timeout,
+    empty response) so we never block the run from being reported.
+    """
+    fallback = (
+        f"Testing started! I'm executing {len(approved_flows)} approved flow(s) "
+        "in cloud browsers. I'll update you on progress as results come in."
+    )
+
+    flow_digest_lines: list[str] = []
+    for f in approved_flows:
+        name = str(f.get("name") or "Unnamed flow").strip()
+        desc = str(f.get("description") or "").strip()
+        line = f"- {name}"
+        if desc:
+            line += f" — {desc}"
+        flow_digest_lines.append(line)
+    flow_digest = "\n".join(flow_digest_lines) or "- (no flow details available)"
+
+    prompt = (
+        "You are the QA assistant confirming to the user that a cloud-browser "
+        "test run has just been kicked off for the flows they approved. Write "
+        "ONE short assistant message (1–2 sentences, under 40 words, no "
+        "headings, no bullet lists, no emoji) that:\n"
+        "  1. acknowledges the run has started,\n"
+        "  2. references the specific flows by name in natural prose (weave "
+        "     them in; do NOT list them as bullets),\n"
+        "  3. promises to share updates as results come in.\n"
+        "Match a calm, competent product voice. Do not wrap the message in "
+        "quotes. Output only the message text.\n\n"
+        f"Approved flows ({len(approved_flows)}):\n{flow_digest}"
+    )
+
+    try:
+        model = get_gemini_flash(max_tokens=50000, timeout=60.0)
+        resp: AIMessage = await model.ainvoke(prompt)
+        text = extract_ai_message_text(resp)
+        if not text:
+            chat_log(
+                "warn",
+                "chat_tool_start_test_run_copy_empty",
+                session_id=session_id,
+                flow_count=len(approved_flows),
+            )
+            return fallback
+        chat_log(
+            "info",
+            "chat_tool_start_test_run_copy_ok",
+            session_id=session_id,
+            flow_count=len(approved_flows),
+            text_len=len(text),
+        )
+        return text
+    except Exception as e:
+        chat_log(
+            "warn",
+            "chat_tool_start_test_run_copy_failed",
+            session_id=session_id,
+            flow_count=len(approved_flows),
+            err=repr(e),
+        )
+        return fallback
 
 
 def _start_test_run_failure(session_id: str, message: str) -> dict[str, Any]:

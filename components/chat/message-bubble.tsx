@@ -41,7 +41,6 @@ export function MessageBubble({
 }: MessageBubbleProps) {
   const isUser = role === 'user'
   const isFlowProposal = metadata?.type === 'flow_proposals'
-  const isRunStarted = metadata?.type === 'test_run_started'
   const isLiveSession = metadata?.type === 'live_session'
   const isSuperseded =
     isFlowProposal && (metadata?.status as string | undefined) === 'superseded'
@@ -62,7 +61,7 @@ export function MessageBubble({
 
   return (
     <div className="w-full space-y-4">
-      {!isFlowProposal && !isRunStarted && !isLiveSession && (
+      {!isFlowProposal && !isLiveSession && (
         <div className="text-[15px] leading-[1.7] text-foreground">
           <MarkdownContent content={content} />
           {isStreaming && (
@@ -84,13 +83,6 @@ export function MessageBubble({
           onApproveFlow={onApproveFlow}
           onRejectFlow={onRejectFlow}
         />
-      )}
-
-      {isRunStarted && (
-        <div className="flex items-center gap-3 rounded-lg border border-border bg-foreground/[0.03] px-4 py-3">
-          <div className="size-2 rounded-full bg-green-500 animate-pulse" />
-          <p className="text-sm text-foreground">{content}</p>
-        </div>
       )}
     </div>
   )
