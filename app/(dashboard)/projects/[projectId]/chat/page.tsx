@@ -47,6 +47,26 @@ export default async function ChatPage({ params, searchParams }: PageProps) {
     .eq('session_id', session.id)
     .order('created_at', { ascending: true })
 
+  // Seed "test run in flight" for the first paint after a hard refresh.
+  // No age filter here — a stuck-worker row older than the
+  // `ACTIVE_TEST_RUN_MAX_AGE_MS` safety cap in
+  // app/api/chat/session-state/route.ts would only be mis-seeded as
+  // "busy" on first paint; the first poll tick (<= 2.5 s later) will
+  // authoritatively correct it. Keeping this path purely
+  // DB-status-driven avoids reading the wall clock from a React server
+  // component, which the purity lint rule forbids.
+  const { data: activeRun } = await supabase
+    .from('test_runs')
+    .select('id')
+    .eq('project_id', projectId)
+    .eq('trigger', 'chat')
+    .in('status', ['pending', 'planning', 'running'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const initialHasActiveTestRun = Boolean(activeRun)
+
   // Settings is a client-side overlay, so we never redirect away from the chat
   // when GitHub isn't ready or when `?settings=1` is present. Instead we just
   // tell the client to open the overlay. This keeps the chat page mounted and
@@ -73,6 +93,7 @@ export default async function ChatPage({ params, searchParams }: PageProps) {
           sessionId: session.id,
           initialSessionStatus: session.status as 'idle' | 'thinking' | 'error',
           initialStatusUpdatedAt: session.status_updated_at,
+          initialHasActiveTestRun,
           projectName: project.name,
           appUrl: project.app_url,
           githubReady: gh.ok,
