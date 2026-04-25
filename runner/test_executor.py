@@ -212,6 +212,186 @@ async def execute_navigate_to_url(page, url: str) -> dict:
     }
 
 
+async def execute_click_selector(
+    page,
+    selector: str,
+    *,
+    force: bool = False,
+    nth: int = 0,
+    timeout_ms: int = 5000,
+) -> dict:
+    """Click an element by selector via Playwright, bypassing Stagehand's CUA agent.
+
+    Accepts either a CSS selector or an ``xpath=...``-prefixed xpath
+    (which is exactly what ``observe_dom`` / Stagehand returns). Falls back
+    gracefully when ``scroll_into_view_if_needed`` is unsupported on a given
+    locator (e.g. for some custom-element targets).
+    """
+    success = True
+    error: str | None = None
+
+    t0 = time.time()
+    try:
+        locator = page.locator(selector)
+        if nth and nth > 0:
+            locator = locator.nth(nth)
+        try:
+            await locator.scroll_into_view_if_needed(timeout=timeout_ms)
+        except Exception:
+            pass
+        await locator.click(timeout=timeout_ms, force=force)
+        elapsed = time.time() - t0
+        test_log(
+            "info",
+            "executor_click_selector_ok",
+            elapsed_s=round(elapsed, 3),
+            selector=selector[:200],
+            force=force,
+            nth=nth,
+        )
+    except Exception as e:
+        elapsed = time.time() - t0
+        success = False
+        error = str(e)
+        test_log(
+            "warn",
+            "executor_click_selector_failed",
+            elapsed_s=round(elapsed, 3),
+            err_type=type(e).__name__,
+            err=str(e),
+            selector=selector[:200],
+            force=force,
+            nth=nth,
+        )
+
+    await asyncio.sleep(1)
+    page_state = await capture_page_state(page)
+
+    return {
+        "success": success,
+        "error": error,
+        "page_state": page_state,
+    }
+
+
+async def execute_fill_selector(
+    page,
+    selector: str,
+    value: str,
+    *,
+    nth: int = 0,
+    timeout_ms: int = 5000,
+) -> dict:
+    """Fill an input/textarea/contenteditable by selector via Playwright.
+
+    Uses Playwright's ``locator.fill``, which clears existing content, focuses
+    the element, sets the value, and dispatches ``input`` + ``change`` events
+    so React-style controlled components observe the update.
+
+    The *value* itself is intentionally not logged (passwords commonly flow
+    through this tool); only its length is recorded.
+    """
+    success = True
+    error: str | None = None
+
+    t0 = time.time()
+    try:
+        locator = page.locator(selector)
+        if nth and nth > 0:
+            locator = locator.nth(nth)
+        try:
+            await locator.scroll_into_view_if_needed(timeout=timeout_ms)
+        except Exception:
+            pass
+        await locator.fill(value, timeout=timeout_ms)
+        elapsed = time.time() - t0
+        test_log(
+            "info",
+            "executor_fill_selector_ok",
+            elapsed_s=round(elapsed, 3),
+            selector=selector[:200],
+            value_length=len(value),
+            nth=nth,
+        )
+    except Exception as e:
+        elapsed = time.time() - t0
+        success = False
+        error = str(e)
+        test_log(
+            "warn",
+            "executor_fill_selector_failed",
+            elapsed_s=round(elapsed, 3),
+            err_type=type(e).__name__,
+            err=str(e),
+            selector=selector[:200],
+            value_length=len(value),
+            nth=nth,
+        )
+
+    await asyncio.sleep(0.5)
+    page_state = await capture_page_state(page)
+
+    return {
+        "success": success,
+        "error": error,
+        "page_state": page_state,
+    }
+
+
+async def execute_press_key(
+    page,
+    key: str,
+    *,
+    selector: str | None = None,
+    timeout_ms: int = 5000,
+) -> dict:
+    """Press a key (or modifier+key combo) via Playwright.
+
+    If *selector* is provided, the matching element is focused first via
+    ``locator.press(key)``; otherwise the key is dispatched to whatever
+    element currently has focus via ``page.keyboard.press(key)``.
+    """
+    success = True
+    error: str | None = None
+
+    t0 = time.time()
+    try:
+        if selector:
+            await page.locator(selector).press(key, timeout=timeout_ms)
+        else:
+            await page.keyboard.press(key)
+        elapsed = time.time() - t0
+        test_log(
+            "info",
+            "executor_press_key_ok",
+            elapsed_s=round(elapsed, 3),
+            key=key,
+            selector=(selector[:200] if selector else None),
+        )
+    except Exception as e:
+        elapsed = time.time() - t0
+        success = False
+        error = str(e)
+        test_log(
+            "warn",
+            "executor_press_key_failed",
+            elapsed_s=round(elapsed, 3),
+            err_type=type(e).__name__,
+            err=str(e),
+            key=key,
+            selector=(selector[:200] if selector else None),
+        )
+
+    await asyncio.sleep(1)
+    page_state = await capture_page_state(page)
+
+    return {
+        "success": success,
+        "error": error,
+        "page_state": page_state,
+    }
+
+
 async def execute_observe_dom(session, query: str) -> dict:
     """Run a DOM-level observation via Stagehand v3 observe endpoint."""
     t0 = time.time()
@@ -852,6 +1032,166 @@ async def execute_template(
                         name=tool_name,
                     )
                 )
+
+            elif tool_name == "click_selector":
+                selector = tool_input.get("selector", "")
+                force = bool(tool_input.get("force", False))
+                nth = int(tool_input.get("nth") or 0)
+                test_log(
+                    "info",
+                    "executor_tool_call",
+                    template_name=tpl_name,
+                    iteration=iteration,
+                    tool=tool_name,
+                    selector=selector[:200],
+                    force=force,
+                    nth=nth,
+                )
+
+                result = await execute_click_selector(
+                    page, selector, force=force, nth=nth,
+                )
+                action_record["success"] = result["success"]
+                action_record["error"] = result["error"]
+                action_record["url_after"] = result["page_state"]["url"]
+                action_record["selector"] = selector
+                action_record["force"] = force
+                action_record["nth"] = nth
+
+                if result["success"]:
+                    result_text = f"Click on selector succeeded: {selector}"
+                else:
+                    result_text = f"Click failed: {result['error']}"
+
+                messages.append(
+                    ToolMessage(
+                        content=result_text,
+                        tool_call_id=tool_id,
+                        name=tool_name,
+                    )
+                )
+                followups.append(
+                    _screenshot_message(
+                        url=result["page_state"]["url"],
+                        screenshot_b64=result["page_state"]["screenshot_base64"],
+                        note=f"Result of {tool_name}: {result_text}",
+                    )
+                )
+
+                if result["page_state"]["screenshot_base64"]:
+                    screenshots.append({
+                        "label": f"iter_{iteration}_{tool_name}",
+                        "base64": result["page_state"]["screenshot_base64"],
+                        "url": result["page_state"]["url"],
+                        "timestamp": result["page_state"]["timestamp"],
+                    })
+
+            elif tool_name == "fill_selector":
+                selector = tool_input.get("selector", "")
+                value = tool_input.get("value", "")
+                nth = int(tool_input.get("nth") or 0)
+                test_log(
+                    "info",
+                    "executor_tool_call",
+                    template_name=tpl_name,
+                    iteration=iteration,
+                    tool=tool_name,
+                    selector=selector[:200],
+                    value_length=len(value),
+                    nth=nth,
+                )
+
+                result = await execute_fill_selector(
+                    page, selector, value, nth=nth,
+                )
+                action_record["success"] = result["success"]
+                action_record["error"] = result["error"]
+                action_record["url_after"] = result["page_state"]["url"]
+                action_record["selector"] = selector
+                action_record["value_length"] = len(value)
+                action_record["nth"] = nth
+
+                if result["success"]:
+                    result_text = (
+                        f"Filled selector with value (length={len(value)}): {selector}"
+                    )
+                else:
+                    result_text = f"Fill failed: {result['error']}"
+
+                messages.append(
+                    ToolMessage(
+                        content=result_text,
+                        tool_call_id=tool_id,
+                        name=tool_name,
+                    )
+                )
+                followups.append(
+                    _screenshot_message(
+                        url=result["page_state"]["url"],
+                        screenshot_b64=result["page_state"]["screenshot_base64"],
+                        note=f"Result of {tool_name}: {result_text}",
+                    )
+                )
+
+                if result["page_state"]["screenshot_base64"]:
+                    screenshots.append({
+                        "label": f"iter_{iteration}_{tool_name}",
+                        "base64": result["page_state"]["screenshot_base64"],
+                        "url": result["page_state"]["url"],
+                        "timestamp": result["page_state"]["timestamp"],
+                    })
+
+            elif tool_name == "press_key":
+                key = tool_input.get("key", "")
+                selector = tool_input.get("selector") or None
+                test_log(
+                    "info",
+                    "executor_tool_call",
+                    template_name=tpl_name,
+                    iteration=iteration,
+                    tool=tool_name,
+                    key=key,
+                    selector=(selector[:200] if selector else None),
+                )
+
+                result = await execute_press_key(page, key, selector=selector)
+                action_record["success"] = result["success"]
+                action_record["error"] = result["error"]
+                action_record["url_after"] = result["page_state"]["url"]
+                action_record["key"] = key
+                if selector:
+                    action_record["selector"] = selector
+
+                if result["success"]:
+                    target = (
+                        f" on selector {selector}" if selector else " on focused element"
+                    )
+                    result_text = f"Pressed key '{key}'{target}."
+                else:
+                    result_text = f"Press key failed: {result['error']}"
+
+                messages.append(
+                    ToolMessage(
+                        content=result_text,
+                        tool_call_id=tool_id,
+                        name=tool_name,
+                    )
+                )
+                followups.append(
+                    _screenshot_message(
+                        url=result["page_state"]["url"],
+                        screenshot_b64=result["page_state"]["screenshot_base64"],
+                        note=f"Result of {tool_name}: {result_text}",
+                    )
+                )
+
+                if result["page_state"]["screenshot_base64"]:
+                    screenshots.append({
+                        "label": f"iter_{iteration}_{tool_name}",
+                        "base64": result["page_state"]["screenshot_base64"],
+                        "url": result["page_state"]["url"],
+                        "timestamp": result["page_state"]["timestamp"],
+                    })
 
             elif tool_name == "save_credentials":
                 cred_email = tool_input.get("email", "")

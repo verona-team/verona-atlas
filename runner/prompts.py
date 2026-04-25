@@ -111,6 +111,117 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "click_selector",
+        "description": (
+            "Click an element identified by a CSS or xpath selector via Playwright "
+            "directly. Bypasses the AI browser agent — clicks land deterministically "
+            "on the matched element, with no perception loop. Use this when "
+            "`browser_action` has failed twice in a row to click the same target. "
+            "Typical pattern: call `observe_dom` first to get a selector, then call "
+            "this tool with that selector. The xpath selectors returned by "
+            "`observe_dom` (prefixed with `xpath=`) work as-is."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "selector": {
+                    "type": "string",
+                    "description": (
+                        "A CSS selector or xpath. xpath must be prefixed with "
+                        "`xpath=`. Examples: 'button[aria-label=\"Submit\"]', "
+                        "'xpath=/html/body/div[2]/main/div/button[1]'."
+                    ),
+                },
+                "force": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, skip Playwright's actionability checks (visible, "
+                        "stable, enabled, receiving events) and click anyway. "
+                        "Use as a last resort for elements that are reachable in "
+                        "the DOM but covered by an overlay or otherwise fail "
+                        "actionability. Defaults to false."
+                    ),
+                },
+                "nth": {
+                    "type": "integer",
+                    "description": (
+                        "When the selector matches multiple elements, the 0-based "
+                        "index of the one to click. Defaults to 0 (first match)."
+                    ),
+                },
+            },
+            "required": ["selector"],
+        },
+    },
+    {
+        "name": "fill_selector",
+        "description": (
+            "Fill an `<input>`, `<textarea>`, or `[contenteditable]` element "
+            "identified by a selector with the given value, replacing any existing "
+            "content. Bypasses the AI browser agent — values land deterministically. "
+            "Use this when `browser_action` has failed to type into a field "
+            "reliably. Typical pattern: call `observe_dom` first to get the "
+            "selector, then call this tool. Works for password fields, search "
+            "boxes, rich-text inputs, etc."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "selector": {
+                    "type": "string",
+                    "description": (
+                        "A CSS selector or xpath identifying the input element. "
+                        "xpath must be prefixed with `xpath=`."
+                    ),
+                },
+                "value": {
+                    "type": "string",
+                    "description": "The exact value to set on the field.",
+                },
+                "nth": {
+                    "type": "integer",
+                    "description": (
+                        "When the selector matches multiple elements, the 0-based "
+                        "index of the one to fill. Defaults to 0 (first match)."
+                    ),
+                },
+            },
+            "required": ["selector", "value"],
+        },
+    },
+    {
+        "name": "press_key",
+        "description": (
+            "Press a single key (or modifier+key combo) on the keyboard via "
+            "Playwright. Use for Enter to submit forms, Escape to dismiss modals, "
+            "Tab to advance focus, arrow keys for navigation, etc. If a `selector` "
+            "is provided, the element is focused first and then the key is pressed "
+            "on it; otherwise the key is dispatched to whatever currently has focus."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": (
+                        "Key name in Playwright syntax. Examples: 'Enter', "
+                        "'Escape', 'Tab', 'ArrowDown', 'Backspace', "
+                        "'Control+A', 'Meta+K'."
+                    ),
+                },
+                "selector": {
+                    "type": "string",
+                    "description": (
+                        "Optional CSS or xpath selector. If provided, this element "
+                        "is focused before pressing the key. Omit to send the key "
+                        "to whatever element currently has focus."
+                    ),
+                },
+            },
+            "required": ["key"],
+        },
+    },
+    {
         "name": "save_credentials",
         "description": (
             "Save the credentials you used to create an account on the target "
@@ -477,7 +588,8 @@ Repeat this observe → reason → act cycle until the entire test flow is compl
 
 - **browser_action** — Execute a browser interaction (click, type, scroll, etc.) via the Stagehand AI browser agent. Use this for interacting with page elements. After each action you will receive a screenshot showing the resulting page state.
 - **navigate_to_url** — Navigate the browser directly to a specific URL. Use this whenever you need to go to a known URL — especially verification/confirmation links from emails, OAuth callbacks, or specific page URLs. This is more reliable than asking browser_action to navigate because it performs a direct programmatic navigation. After navigation you will receive a screenshot of the resulting page state.
-- **observe_dom** — Perform a precise DOM-level check to verify element presence, text content, or other DOM state. Use this when you need programmatic confirmation beyond what you can see in the screenshot.
+- **observe_dom** — Perform a precise DOM-level check to verify element presence, text content, or other DOM state. Use this when you need programmatic confirmation beyond what you can see in the screenshot. Also use this to obtain a stable selector when you need to escalate to one of the deterministic Playwright tools below.
+- **click_selector / fill_selector / press_key** — Deterministic Playwright fallbacks that bypass the AI browser agent and act directly on the DOM. Use these when `browser_action` has failed twice in a row on the same target. The `xpath=` selectors returned by `observe_dom` work as-is for `click_selector` / `fill_selector`. `press_key` is for keystroke-only interactions (Enter to submit, Escape to dismiss, Tab to focus next field, arrow keys, etc.). Do not log passwords in your reasoning text — the value of `fill_selector` is recorded by length only.
 - **save_credentials** — Save the email and password you used to create an account on the target platform. Call this immediately after successful signup so you can reuse the credentials on future runs. Only call this after you have confirmed the account works.
 - **check_email** — Check your email inbox for recent messages (verification codes, confirmation links, etc.). Use this when the platform sends a verification email during signup or login.
 - **complete_test** — Signal that the test is finished. Call this once all steps are done and verified, or when you encounter an unrecoverable blocking issue.
@@ -489,6 +601,7 @@ Repeat this observe → reason → act cycle until the entire test flow is compl
 - **Be observant.** After each action, carefully examine the screenshot. Look for error messages, unexpected UI states, loading indicators, pop-ups, modals, or anything that suggests the action did not work as expected.
 - **Be adaptive.** If the UI does not match what you expect (different layout, extra confirmation dialogs, changed button labels, new onboarding modals), adapt and find the correct way forward instead of failing.
 - **Recover from errors.** If an action fails or produces an unexpected result, reason about what went wrong and try a different approach. You may need to dismiss a modal, scroll to find an element, wait for a page to load, or retry with a different selector.
+- **Escalate from natural language to selectors when the AI agent fails.** If a `browser_action` instruction fails twice in a row on the same UI element (e.g. clicking a button or typing into a field), do not keep retrying with rephrased natural language. Call `observe_dom` to get a selector, then use `click_selector`, `fill_selector`, or `press_key`. These act directly via the DOM and succeed in cases where visual perception or coordinate clicking is unreliable — for example, small custom checkbox-like buttons, fields with autocomplete overlays, or any element with subtle toggled-state visual feedback.
 - **Verify assertions visually.** When the test plan includes assertion steps (checking that something is visible or correct), use the screenshot as your **primary** verification method. Only use observe_dom when you need precise programmatic confirmation of DOM-level details.
 - **Report real bugs.** If you observe behavior that is an actual application defect (not just a UI change or transient issue you can work around), record it in your final complete_test call. Clearly distinguish between "the UI changed and I adapted" versus "the application has a defect."
 - **Be efficient.** Each browser_action call consumes resources. Plan your actions to minimize unnecessary or redundant steps while still being thorough.
