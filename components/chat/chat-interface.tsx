@@ -966,7 +966,27 @@ export function ChatInterface({
            * the indicator. Hard-refresh: the page SSR'd with whatever status
            * was current, so the spinner appears if a turn is still in flight.
            */}
-          {isProcessing && <ThinkingIndicator />}
+          {isProcessing && (
+            <div className="space-y-3">
+              {/**
+               * One-time heads-up while the bootstrap turn is in flight: no
+               * assistant has ever replied on this session, so this is the
+               * initial analyze-and-propose pass which can take a while. We
+               * key off "no assistant message has arrived yet" rather than
+               * the bootstrap nonce so hard-refreshes mid-bootstrap still
+               * show it. Disappears as soon as the first assistant bubble
+               * lands.
+               */}
+              {!displayMessages.some((m) => m.role === 'assistant') && (
+                <p className="text-xs text-muted-foreground/80 max-w-md">
+                  We&apos;re analyzing your app and finding UI flows worth
+                  testing. This may take a little while — feel free to
+                  navigate away, we&apos;ll keep working in the background.
+                </p>
+              )}
+              <ThinkingIndicator />
+            </div>
+          )}
         </div>
       </div>
 
@@ -1013,7 +1033,7 @@ export function ChatInterface({
             <span className="size-1.5 rounded-full bg-green-500" />
             <span>{approvedCount} flow{approvedCount !== 1 ? 's' : ''} approved</span>
             <span className="text-muted-foreground/40">·</span>
-            <span>Tell me to &quot;start testing&quot; when ready</span>
+            <span>Tell me to start testing when ready, or propose changes</span>
           </div>
         </div>
       )}

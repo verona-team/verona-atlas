@@ -393,7 +393,7 @@ export function PostHogCard({
         <div className="space-y-3">
           <div className="space-y-1.5">
             <Label htmlFor="ph-api-key">Personal API key</Label>
-            <Input id="ph-api-key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="phx_..." />
+            <Input id="ph-api-key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="phx_..." type="password" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="ph-project-id">PostHog Project ID</Label>
