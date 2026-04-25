@@ -6,7 +6,6 @@ import {
   XCircle,
   AlertCircle,
   Loader2,
-  ExternalLink,
   ChevronDown,
   ChevronRight,
 } from 'lucide-react'
@@ -58,7 +57,6 @@ export function LiveSessionCard({ metadata }: LiveSessionCardProps) {
   const isFailed = status === 'failed' || status === 'error'
   const templateName = meta.template_name ?? 'Test'
   const liveViewUrl = meta.live_view_url ?? meta.live_view_fullscreen_url ?? ''
-  const dashboardUrl = meta.browserbase_dashboard_url ?? null
   const recordingUrl = meta.recording_url ?? null
   const errorMessage = meta.error_message?.trim() || null
 
@@ -153,17 +151,6 @@ export function LiveSessionCard({ metadata }: LiveSessionCardProps) {
           <p className="text-xs text-muted-foreground">
             Recording is not available for this session.
           </p>
-          {dashboardUrl && (
-            <a
-              href={dashboardUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-            >
-              <ExternalLink className="size-3" />
-              Open in Browserbase
-            </a>
-          )}
         </div>
       )}
 
@@ -198,17 +185,6 @@ export function LiveSessionCard({ metadata }: LiveSessionCardProps) {
                   ? 'Test did not complete successfully.'
                   : ''}
             </span>
-          )}
-          {dashboardUrl && (
-            <a
-              href={dashboardUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="ml-auto inline-flex items-center gap-1.5 h-7 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground shrink-0"
-            >
-              <ExternalLink className="size-3.5" />
-              Browserbase
-            </a>
           )}
         </div>
       )}
