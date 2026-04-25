@@ -1,38 +1,39 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { AlertCircle, Loader2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { AlertCircle, Loader2, Pause, Play } from 'lucide-react'
 import 'rrweb-player/dist/style.css'
+import { cn } from '@/lib/utils'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 /**
- * Renders a Browserbase rrweb session recording inline using the
- * `rrweb-player` Svelte component.
+ * Renders a session recording inline using `rrweb-player` under the hood,
+ * but with rrweb's built-in controller hidden in favor of a custom React
+ * UI: a centered overlay play/pause button, a top-right speed dropdown,
+ * and a thin progress + elapsed-time row pinned below the frame. The
+ * underlying Svelte component still owns playback (DOM mutation
+ * scheduling, skip-inactive gap detection); we just drive it
+ * imperatively via `play()` / `pause()` / `setSpeed()` / `goto()`.
  *
- * Architecture: `rrweb-player` is a Svelte component that imperatively
- * mutates the DOM of its `target` element. React, in turn, owns its
- * own children's DOM. If we let both reconcile against the SAME node,
- * React eventually tries to remove a node Svelte has already replaced
- * (or vice versa) and explodes with `Failed to execute 'removeChild'`.
- *
- * The fix is to keep React's tree and Svelte's tree in separate DOM
- * subtrees:
- *   - One React-rendered overlay div for loading / error states.
+ * Architecture note: `rrweb-player` is a Svelte component that mutates
+ * the DOM of its `target` element. React, in turn, owns its own
+ * children's DOM. To prevent `removeChild` clashes during reconciliation
+ * we keep the two trees in separate DOM subtrees:
+ *   - One React-rendered overlay div for our controls + loading state.
  *   - One sibling `<div ref={mountRef} />` that React renders ONCE,
  *     never updates, and never adds children to. The Svelte player
  *     owns this node's contents exclusively.
  *
- * Why a thin imperative wrapper instead of `next/dynamic`:
- *   `rrweb-player` is a Svelte component, not a React component, so
- *   `next/dynamic` doesn't help — we need to instantiate it
- *   imperatively against a DOM target anyway. The dynamic
- *   `import('rrweb-player')` inside `useEffect` keeps the
- *   document-touching module out of the SSR bundle.
- *
- * Recording payload shape: `runner/recordings.py` stores the Browserbase
+ * Recording payload shape: `runner/recordings.py` stores the
  * `/v1/sessions/{id}/recording` response verbatim, which is an array of
- * `SessionRecording` objects: `{ data, sessionId, timestamp, type }`.
- * `rrweb-player` expects `eventWithTime` (`{ data, timestamp, type }`),
- * so we strip `sessionId` before handing them off.
+ * `{ data, sessionId, timestamp, type }`. `rrweb-player` expects
+ * `eventWithTime` (`{ data, timestamp, type }`) so we strip `sessionId`
+ * before handing them off.
  */
 
 interface RawRecordingEvent {
@@ -56,13 +57,34 @@ interface RecordingPlayerProps {
 interface RrwebPlayerInstance {
   triggerResize?: () => void
   pause?: () => void
+  play?: () => void
+  toggle?: () => void
+  setSpeed?: (speed: number) => void
+  goto?: (timeOffset: number, play?: boolean) => void
   $destroy?: () => void
+  addEventListener?: (event: string, handler: (params: unknown) => unknown) => void
+  getMetaData?: () => { startTime: number; endTime: number; totalTime: number }
+}
+
+const SPEED_OPTIONS = [0.5, 1, 2, 4]
+
+function formatTime(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) ms = 0
+  const totalSeconds = Math.floor(ms / 1000)
+  const m = Math.floor(totalSeconds / 60)
+  const s = totalSeconds % 60
+  return `${m}:${s.toString().padStart(2, '0')}`
 }
 
 export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProps) {
   const mountRef = useRef<HTMLDivElement>(null)
+  const playerRef = useRef<RrwebPlayerInstance | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [totalTime, setTotalTime] = useState(0)
+  const [speed, setSpeed] = useState(1)
 
   useEffect(() => {
     let cancelled = false
@@ -75,6 +97,10 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
 
       setStatus('loading')
       setErrorMessage(null)
+      setIsPlaying(false)
+      setCurrentTime(0)
+      setTotalTime(0)
+      setSpeed(1)
 
       let events: RrwebEvent[]
       try {
@@ -114,11 +140,30 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
             width: measuredWidth,
             height: measuredHeight,
             autoPlay: false,
-            showController: true,
+            // We render our own controls; rrweb's default controller
+            // bar is not shown.
+            showController: false,
             skipInactive: true,
-            speedOption: [1, 2, 4, 8],
+            speed: 1,
           },
         }) as unknown as RrwebPlayerInstance
+        playerRef.current = player
+
+        const meta = player.getMetaData?.()
+        if (meta) setTotalTime(meta.totalTime)
+
+        // ui-update-current-time fires at ~16ms cadence during playback.
+        player.addEventListener?.('ui-update-current-time', (payload: unknown) => {
+          const p = payload as { payload?: number }
+          if (typeof p?.payload === 'number') setCurrentTime(p.payload)
+        })
+
+        // ui-update-player-state fires whenever play/pause/end transitions.
+        player.addEventListener?.('ui-update-player-state', (payload: unknown) => {
+          const p = payload as { payload?: 'playing' | 'paused' | 'live' }
+          if (p?.payload === 'playing') setIsPlaying(true)
+          else if (p?.payload === 'paused') setIsPlaying(false)
+        })
 
         if (typeof ResizeObserver !== 'undefined') {
           resizeObserver = new ResizeObserver(() => {
@@ -149,27 +194,116 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
       } catch {
         // ignore
       }
-      // Tear down the Svelte component cleanly. `$destroy` removes the
-      // nodes the Svelte component injected; we never touch React's
-      // tree, so React's reconciler stays happy.
       try {
         player?.$destroy?.()
       } catch {
         // ignore
       }
+      playerRef.current = null
     }
   }, [recordingUrl])
 
+  function handleTogglePlay() {
+    const player = playerRef.current
+    if (!player) return
+    try {
+      player.toggle?.()
+    } catch {
+      // rrweb-player can throw "replayer destroyed" if it raced with
+      // an unmount; safe to ignore.
+    }
+  }
+
+  function handleSetSpeed(next: number) {
+    const player = playerRef.current
+    if (!player) return
+    try {
+      player.setSpeed?.(next)
+      setSpeed(next)
+    } catch {
+      // ignore
+    }
+  }
+
+  function handleSeek(event: React.ChangeEvent<HTMLInputElement>) {
+    const player = playerRef.current
+    if (!player) return
+    const next = Number(event.target.value)
+    if (!Number.isFinite(next)) return
+    try {
+      player.goto?.(next, isPlaying)
+      setCurrentTime(next)
+    } catch {
+      // ignore
+    }
+  }
+
+  // Format speed labels exactly like the screenshot: ".5x", "1x", "2x", "4x".
+  const speedLabel = useMemo(() => formatSpeed(speed), [speed])
+
   return (
-    <div className={`relative w-full bg-black ${className ?? ''}`}>
+    <div className={cn('relative w-full bg-black', className)}>
       {/*
         Svelte player mounts here. Critically, this div has NO React
         children — React renders it once and never reconciles its
-        contents. The sibling overlays below are kept on a separate
+        contents. The control overlays below sit on a separate
         absolutely-positioned subtree so React can update them freely
         without touching this node.
       */}
       <div ref={mountRef} className="rrweb-player-mount min-h-[220px]" />
+
+      {status === 'ready' && (
+        <>
+          {/* Top-right speed selector */}
+          <div className="absolute right-2 top-2 z-10">
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className="inline-flex h-7 min-w-[36px] items-center justify-center rounded-md bg-white/95 px-2 text-[11px] font-medium text-foreground shadow-sm ring-1 ring-black/5 hover:bg-white transition-colors"
+                aria-label="Playback speed"
+              >
+                {speedLabel}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={4} className="min-w-[64px]">
+                {SPEED_OPTIONS.map((option) => (
+                  <DropdownMenuItem
+                    key={option}
+                    onClick={() => handleSetSpeed(option)}
+                    className={cn(
+                      'justify-center text-[12px] font-medium',
+                      option === speed && 'font-semibold',
+                    )}
+                  >
+                    {formatSpeed(option)}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
+          {/* Centered play/pause overlay button */}
+          <button
+            type="button"
+            onClick={handleTogglePlay}
+            aria-label={isPlaying ? 'Pause' : 'Play'}
+            className="group absolute inset-0 z-10 flex items-center justify-center focus:outline-none"
+          >
+            <span
+              className={cn(
+                'flex size-14 items-center justify-center rounded-full bg-foreground/85 text-background shadow-lg ring-1 ring-black/10 transition-opacity duration-150',
+                isPlaying
+                  ? 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'
+                  : 'opacity-100',
+              )}
+            >
+              {isPlaying ? (
+                <Pause className="size-5" fill="currentColor" />
+              ) : (
+                <Play className="size-5 translate-x-[1px]" fill="currentColor" />
+              )}
+            </span>
+          </button>
+        </>
+      )}
 
       {status !== 'ready' && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black">
@@ -187,6 +321,30 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
           )}
         </div>
       )}
+
+      {/* Progress + elapsed-time row, pinned below the frame */}
+      {status === 'ready' && (
+        <div className="flex items-center gap-3 bg-background px-4 py-2.5">
+          <span className="tabular-nums text-[11px] text-muted-foreground min-w-[36px]">
+            {formatTime(currentTime)}
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={Math.max(1, totalTime)}
+            value={Math.min(currentTime, totalTime)}
+            step={50}
+            onChange={handleSeek}
+            aria-label="Seek"
+            className="recording-player-seek flex-1"
+          />
+        </div>
+      )}
     </div>
   )
+}
+
+function formatSpeed(value: number): string {
+  if (value === 0.5) return '.5x'
+  return `${value}x`
 }
