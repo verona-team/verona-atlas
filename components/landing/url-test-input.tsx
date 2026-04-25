@@ -2,7 +2,6 @@
 
 import { useMemo, useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowRight } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { normalizeProjectUrl } from '@/lib/project-url'
@@ -44,7 +43,6 @@ export function UrlTestInput() {
         className="h-11 px-5"
       >
         Test
-        <ArrowRight />
       </Button>
     </form>
   )
