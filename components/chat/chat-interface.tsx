@@ -993,7 +993,7 @@ export function ChatInterface({
       )}
 
       {approvedCount > 0 && (
-        <div className="mx-auto w-full max-w-[760px] px-6 pb-2 shrink-0">
+        <div className="relative z-10 mx-auto w-full max-w-[760px] px-6 pb-2 shrink-0">
           <div className="flex items-center gap-2 rounded-lg border border-border bg-foreground/[0.03] px-3 py-2 text-xs text-muted-foreground">
             <span className="size-1.5 rounded-full bg-green-500" />
             <span>{approvedCount} flow{approvedCount !== 1 ? 's' : ''} approved</span>
