@@ -43,13 +43,6 @@ interface FlowProposalCardProps {
   readonly?: boolean
 }
 
-const priorityVariant: Record<string, string> = {
-  critical: 'border-red-500/30 text-red-600',
-  high: 'border-border text-foreground/70',
-  medium: 'border-border text-foreground/70',
-  low: 'border-border text-muted-foreground',
-}
-
 export function FlowProposalCard({
   flow,
   state,
@@ -62,8 +55,7 @@ export function FlowProposalCard({
 
   return (
     <Card
-      size="sm"
-      className={`ring-0 border border-border bg-card transition-all ${
+      className={`gap-0 py-0 ring-0 border border-border bg-card transition-all ${
         state === 'approved'
           ? 'ring-1 ring-inset ring-green-500/30'
           : state === 'rejected'
@@ -71,14 +63,11 @@ export function FlowProposalCard({
             : ''
       }`}
     >
-      <CardContent>
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 min-w-0">
+      <CardContent className="px-5 py-5">
+        <div className="flex items-start justify-between gap-5">
+          <div className="flex-1 min-w-0 space-y-2">
             <div className="flex items-center gap-2 flex-wrap">
-              <h4 className="text-[15px] font-medium truncate">{flow.name}</h4>
-              <Badge variant="outline" className={`text-[10px] uppercase tracking-wide ${priorityVariant[flow.priority]}`}>
-                {flow.priority}
-              </Badge>
+              <h4 className="text-[15px] font-medium leading-snug">{flow.name}</h4>
               {state !== 'pending' && (
                 <Badge
                   variant="outline"
@@ -88,8 +77,8 @@ export function FlowProposalCard({
                 </Badge>
               )}
             </div>
-            <p className="text-sm text-foreground/80 mt-1">{flow.description}</p>
-            <p className="text-xs text-muted-foreground mt-1 italic">{flow.rationale}</p>
+            <p className="text-sm text-foreground/80 leading-relaxed">{flow.description}</p>
+            <p className="text-xs text-muted-foreground italic leading-relaxed">{flow.rationale}</p>
           </div>
 
           {state === 'pending' && !readonly && (
@@ -119,7 +108,7 @@ export function FlowProposalCard({
         </div>
 
         <Collapsible open={expanded} onOpenChange={setExpanded}>
-          <CollapsibleTrigger className="flex items-center gap-1 mt-3 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+          <CollapsibleTrigger className="flex items-center gap-1 mt-4 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
             {expanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
             {flow.steps.length} steps
           </CollapsibleTrigger>
