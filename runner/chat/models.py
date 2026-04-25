@@ -12,23 +12,39 @@ All LLM calls from the Modal runner MUST go through these helpers so that:
 
 - **Gemini 3.1 Pro** (`gemini-3.1-pro-preview`) is used for the main
   reasoning workloads that stay on Google: chat orchestrator,
-  integration-research orchestrator, integration-research code writer,
-  codebase exploration agent, and flow-proposal generator.
+  integration-research orchestrator, codebase exploration agent,
+  research synthesis (codebase exploration + flow synthesis), and
+  flow-proposal generator.
 
 - **Gemini 3 Flash** (`gemini-3-flash-preview`) is the workhorse for the
   lighter-weight, well-scoped summarization tasks: rolling-context
   compaction and the post-run Slack executive summary.
 
-- **Claude Opus 4.7** (`claude-opus-4-7`, via Anthropic) drives the outer
-  QA test-executor ReAct loop inside `execute_test_run` — the agent that
-  observes screenshots, reasons about page state, and decides which of
-  our `browser_action` / `navigate_to_url` / `observe_dom` / `check_email`
-  / `save_credentials` / `complete_test` tools to call next. Opus 4.7 is
-  the current Anthropic flagship for agentic tool use and screenshot
-  reasoning and does NOT collide with the Stagehand CUA
-  `computer_20250124` issue because this layer uses our own custom tool
-  schema, not Anthropic's native computer-use tool. Exposed via
-  `get_claude_opus_outer()`.
+- **Claude Opus 4.7** (`claude-opus-4-7`, via Anthropic) drives two
+  separate workloads:
+
+  1. The outer QA test-executor ReAct loop inside `execute_test_run` —
+     the agent that observes screenshots, reasons about page state,
+     and decides which of our `browser_action` / `navigate_to_url` /
+     `observe_dom` / `check_email` / `save_credentials` /
+     `complete_test` tools to call next. Opus 4.7 is the current
+     Anthropic flagship for agentic tool use and screenshot reasoning
+     and does NOT collide with the Stagehand CUA `computer_20250124`
+     issue because this layer uses our own custom tool schema, not
+     Anthropic's native computer-use tool. Exposed via
+     `get_claude_opus_outer()`.
+
+  2. The integration-research code writer inside
+     `runner.research.code_writer`, which translates a
+     natural-language research goal into a focused Python httpx
+     script for the Modal sandbox. We pin code generation to Opus 4.7
+     because it produces noticeably more correct provider-API code
+     (defensive `.get()` access, proper auth headers, bounded result
+     slicing) than Gemini did in practice — fewer wasted sandbox
+     execs from KeyError tracebacks or oversized stdout. The
+     orchestrator that decides WHAT to investigate stays on Gemini
+     3.1 Pro; only the script-writing role uses Opus. Exposed via
+     `get_claude_opus_code_writer()`.
 
 - **Claude Opus 4.6** (`claude-opus-4-6`, via Anthropic) is used ONLY for
   the Stagehand browser agent (session + inner execute agent). Stagehand's
@@ -180,6 +196,47 @@ def get_claude_opus(
         model=CLAUDE_OPUS_MODEL,
         max_tokens=max_tokens,
         temperature=temperature,
+        timeout=timeout,
+        max_retries=max_retries,
+    )
+
+
+def get_claude_opus_code_writer(
+    *,
+    max_tokens: int = 16_000,
+    timeout: float = 180.0,
+    max_retries: int = 2,
+) -> "ChatAnthropic":
+    """Claude Opus 4.7 — the integration-research code writer.
+
+    Generates Python httpx scripts for the Modal sandbox in
+    `runner.research.code_writer.write_research_code`. Each call is
+    stateless and bounded: input is one research `purpose` string +
+    provider docs + env-var catalog (+ optional previous-exec summary
+    for self-correction); output is a `{code, explanation}` structured
+    object filled via Anthropic's structured-output tool-call shim.
+
+    Defaults rationale:
+
+    - `max_tokens=16_000`: per-call output cap. A focused single-script
+      generation is typically ~0.5-3K tokens of code plus a one-sentence
+      explanation. 16K is roomy enough for adaptive thinking + a long
+      script (large pagination loop, complex HogQL) without leaving
+      enough headroom for the model to ramble. Override upward only if
+      you observe truncation in `research_code_writer_*` logs.
+    - `timeout=180.0` (3 minutes): the code writer doesn't reason as
+      long as the outer test-executor loop, so 3 min covers slow
+      Anthropic responses without blocking the integration-research
+      ReAct loop's overall budget.
+    - **No `temperature` kwarg:** Opus 4.7 does not accept `temperature`
+      (`langchain-anthropic` model profile `"temperature": False`).
+      Setting it raises at request time.
+    """
+    from langchain_anthropic import ChatAnthropic
+
+    return ChatAnthropic(
+        model=CLAUDE_OPUS_OUTER_MODEL,
+        max_tokens=max_tokens,
         timeout=timeout,
         max_retries=max_retries,
     )
