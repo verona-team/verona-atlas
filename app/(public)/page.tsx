@@ -36,9 +36,6 @@ export default function LandingPage() {
 
           <div className="mt-10 w-full">
             <UrlTestInput />
-            <p className="mt-3 text-center text-[13px] text-[#1a1a1a]/50">
-              Paste a public URL to your web app to start a QA run.
-            </p>
           </div>
         </div>
       </main>

@@ -124,7 +124,11 @@ export function InteractiveLogo({
     ctx.clearRect(0, 0, w, h)
 
     const s = stateRef.current
-    const fov = 320
+    // Scale FOV with the rendered size so the constellation preserves the
+    // same "tight" density at every size. At the original size of 180px
+    // the projection used fov=320; smaller sizes shrink fov proportionally
+    // instead of letting the dots stay at a fixed pixel spread.
+    const fov = 320 * (size / 180)
     const viewDist = 4.5
 
     const projected: (ProjectedPoint & { origIdx: number })[] = points.map((p, i) => {
