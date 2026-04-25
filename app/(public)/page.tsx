@@ -5,7 +5,7 @@ import { UrlTestInput } from "@/components/landing/url-test-input";
 export default function LandingPage() {
   return (
     <div className="relative min-h-screen bg-white">
-      <header className="relative z-10 flex items-center justify-end px-6 py-5 sm:px-10">
+      <header className="absolute inset-x-0 top-0 z-20 flex items-center justify-end px-6 py-5 sm:px-10">
         <nav className="flex items-center gap-5">
           <Link
             href="/signup"
@@ -22,12 +22,9 @@ export default function LandingPage() {
         </nav>
       </header>
 
-      <main
-        className="relative z-10 flex flex-1 flex-col items-center justify-center px-6"
-        style={{ minHeight: "calc(100vh - 68px)" }}
-      >
-        <div className="flex w-full max-w-xl flex-col items-center -mt-16">
-          <div className="flex flex-col items-center gap-9">
+      <main className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6">
+        <div className="flex w-full max-w-xl flex-col items-center">
+          <div className="flex flex-col items-center gap-14">
             <InteractiveLogo size={120} />
             <h1 className="max-w-xl text-center text-3xl font-normal leading-[1.15] tracking-tight text-[#1a1a1a] sm:text-4xl">
               Verona bug bashes your product like a human
