@@ -35,6 +35,11 @@ import {
 } from "@/components/integrations/integration-cards";
 import { useWorkspace } from "@/lib/workspace-context";
 import { normalizeProjectUrl } from "@/lib/project-url";
+import {
+  clearPendingProjectUrl,
+  deriveProjectNameFromUrl,
+  readPendingProjectUrl,
+} from "@/lib/pending-project";
 
 type Step = "details" | "integrations";
 
@@ -49,6 +54,28 @@ export function NewProjectModal() {
 
   const [name, setName] = useState("");
   const [appUrl, setAppUrl] = useState("");
+
+  // Pull the URL the user pasted on the public landing page (saved in
+  // localStorage before they were redirected to /signup) and use it to
+  // seed both the App URL and a default project name. We only do this
+  // when the modal opens for the first time after sign-up — once the
+  // user has typed anything we leave their state alone.
+  useEffect(() => {
+    if (!showNewProjectModal) return;
+    if (step !== "details") return;
+    if (name || appUrl) return;
+    const pending = readPendingProjectUrl();
+    if (!pending) return;
+    const normalized = normalizeProjectUrl(pending);
+    if (!normalized) {
+      clearPendingProjectUrl();
+      return;
+    }
+    setAppUrl(normalized);
+    const derived = deriveProjectNameFromUrl(normalized);
+    if (derived) setName(derived);
+    clearPendingProjectUrl();
+  }, [showNewProjectModal, step, name, appUrl]);
 
   // Phase 2: integrations
   const [projectId, setProjectId] = useState<string | null>(null);

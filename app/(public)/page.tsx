@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { InteractiveLogo } from "@/components/landing/interactive-logo";
+import { UrlTestInput } from "@/components/landing/url-test-input";
 
 export default function LandingPage() {
   return (
@@ -25,11 +26,20 @@ export default function LandingPage() {
         className="relative z-10 flex flex-1 flex-col items-center justify-center px-6"
         style={{ minHeight: "calc(100vh - 68px)" }}
       >
-        <div className="flex flex-col items-center gap-[68px] -mt-16">
-          <InteractiveLogo size={180} />
-          <h1 className="max-w-2xl text-center text-5xl font-normal leading-[1.1] tracking-tight text-[#1a1a1a] sm:text-6xl">
-            Verona bug bashes your product like a human
-          </h1>
+        <div className="flex w-full max-w-xl flex-col items-center -mt-16">
+          <div className="flex flex-col items-center gap-9">
+            <InteractiveLogo size={120} />
+            <h1 className="max-w-xl text-center text-3xl font-normal leading-[1.15] tracking-tight text-[#1a1a1a] sm:text-4xl">
+              Verona bug bashes your product like a human
+            </h1>
+          </div>
+
+          <div className="mt-10 w-full">
+            <UrlTestInput />
+            <p className="mt-3 text-center text-[13px] text-[#1a1a1a]/50">
+              Paste a public URL to your web app to start a QA run.
+            </p>
+          </div>
         </div>
       </main>
     </div>
