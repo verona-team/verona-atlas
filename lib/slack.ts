@@ -30,9 +30,21 @@ export function buildOAuthURL(state: string): string {
     throw new Error('SLACK_CLIENT_ID is not set')
   }
 
+  // Minimum scopes required for the integration's actual usage:
+  //   - `channels:read`  → list public channels for the channel picker
+  //     (`conversations.list`).
+  //   - `chat:write`     → post test-run / nightly-pipeline reports
+  //     (`chat.postMessage`).
+  //   - `chat:write.public` → allow posting to a chosen channel without
+  //     requiring the user to manually invite the bot first.
+  //
+  // Previously also requested `channels:history`, `users:read`, and
+  // `team:read`, none of which the runner actually consumes. They were
+  // removed from the Slack app config; including them here would now
+  // trigger `invalid_scope` on OAuth.
   const params = new URLSearchParams({
     client_id: clientId,
-    scope: 'channels:history,channels:read,chat:write,chat:write.public,users:read,team:read',
+    scope: 'channels:read,chat:write,chat:write.public',
     user_scope: '',
     redirect_uri: getSlackRedirectUri(),
     state,

@@ -338,14 +338,14 @@ export function NewProjectModal() {
                 integration={getStatus("posthog")}
                 onRefresh={handleRefresh}
               />
-              <SlackCard
-                projectId={projectId!}
-                integration={getStatus("slack")}
-                onRefresh={handleRefresh}
-              />
               <AdvancedIntegrationsSection
                 connectedCount={countConnectedAdvanced(integrations)}
               >
+                <SlackCard
+                  projectId={projectId!}
+                  integration={getStatus("slack")}
+                  onRefresh={handleRefresh}
+                />
                 <SentryCard
                   projectId={projectId!}
                   integration={getStatus("sentry")}

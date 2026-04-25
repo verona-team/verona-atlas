@@ -208,19 +208,19 @@ export function SettingsContent({ projectId }: { projectId: string }) {
             <MetaDetail label="Host" value={getIntegration('posthog')?.meta?.api_host} />
           </SettingsIntegrationCard>
 
-          <SettingsIntegrationCard
-            type="slack"
-            title="Slack"
-            integration={getIntegration('slack')}
-            onDisconnect={disconnect}
-            connectUrl={`/api/integrations/slack/authorize?project_id=${projectId}&return_to=${encodeURIComponent('/auth/oauth-complete?integration=slack')}`}
-            openInNewTab
-            onRefresh={loadData}
-          >
-            <SlackDetails integration={getIntegration('slack')} projectId={projectId} onRefresh={loadData} />
-          </SettingsIntegrationCard>
-
           <AdvancedIntegrationsSection connectedCount={advancedConnectedCount}>
+            <SettingsIntegrationCard
+              type="slack"
+              title="Slack"
+              integration={getIntegration('slack')}
+              onDisconnect={disconnect}
+              connectUrl={`/api/integrations/slack/authorize?project_id=${projectId}&return_to=${encodeURIComponent('/auth/oauth-complete?integration=slack')}`}
+              openInNewTab
+              onRefresh={loadData}
+            >
+              <SlackDetails integration={getIntegration('slack')} projectId={projectId} onRefresh={loadData} />
+            </SettingsIntegrationCard>
+
             <SettingsIntegrationCard
               type="sentry"
               title="Sentry"
