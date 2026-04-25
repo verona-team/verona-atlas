@@ -39,19 +39,28 @@ runner_image = (
         "supabase",
         # `anthropic` is still required by the Stagehand session/agent path —
         # Stagehand forwards API calls through its own client configured with
-        # ANTHROPIC_API_KEY. The outer QA ReAct loop itself uses Gemini via
-        # LangChain.
+        # ANTHROPIC_API_KEY. The outer QA ReAct loop ALSO talks to Anthropic
+        # (Claude Opus 4.7) via `langchain-anthropic`; see below.
         "anthropic",
         "agentmail>=0.4",
         "httpx",
         "pydantic",
         "browserbase",
         "playwright",
-        # Outer ReAct loop model (Gemini 3.1 Pro) + reporter summary model
-        # (Gemini 3 Flash) go through langchain-google-genai.
+        # The outer ReAct loop model is Claude Opus 4.7 via
+        # `langchain-anthropic` (instantiated through
+        # `runner.chat.models.get_claude_opus_outer`). The reporter summary
+        # model still goes through `langchain-google-genai` (Gemini 3 Flash),
+        # and the research code-writer path uses `get_claude_opus_code_writer`
+        # which is also `langchain-anthropic`-backed. All three integrations
+        # need to be present in this image — historically only the Gemini
+        # bindings were installed, which caused every template to fail with
+        # `ModuleNotFoundError: No module named 'langchain_anthropic'` the
+        # moment the outer model was constructed.
         "langchain>=1.0.0,<2.0.0",
         "langchain-core>=1.0.0,<2.0.0",
         "langchain-google-genai>=3.1.0,<4.0.0",
+        "langchain-anthropic>=1.1.0,<2.0.0",
         "google-genai>=1.0.0,<2.0.0",
     )
     .run_commands("playwright install --with-deps chromium")

@@ -770,8 +770,20 @@ async def tool_start_test_run(state: ChatTurnState) -> dict[str, Any]:
     try:
         import modal
 
+        # `tool_start_test_run` runs inside Modal's async event loop
+        # (`process_chat_turn` is `async def`), so we must use Modal's async
+        # interface here to avoid the runtime `AsyncUsageWarning` and the
+        # blocking-call performance hit it warns about. Per Modal's docs
+        # (https://modal.com/docs/guide/async), every blocking helper
+        # exposes a `.aio` coroutine variant — for `Function.spawn` that's
+        # `await fn.spawn.aio(...)`.
+        #
+        # `Function.from_name` itself stays blocking on purpose: it's a
+        # lazy reference that doesn't hit the Modal control plane until
+        # the first actual use, so it doesn't trip the warning. The first
+        # async I/O (and implicit hydration) happens inside `spawn.aio`.
         fn = modal.Function.from_name("atlas-runner", "execute_test_run")
-        call = fn.spawn(test_run_id, project_id)
+        call = await fn.spawn.aio(test_run_id, project_id)
         modal_call_id = call.object_id
     except Exception as e:
         chat_log(

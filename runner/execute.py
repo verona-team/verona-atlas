@@ -81,6 +81,14 @@ def _insert_live_session_chat_message(
         "browserbase_dashboard_url": f"https://www.browserbase.com/sessions/{browserbase_session_id}",
     }
     try:
+        # supabase-py's `.insert()` returns a `SyncQueryRequestBuilder` that
+        # doesn't expose `.select(...).single()` for chaining the way
+        # `.from_().select()` does — chaining like that raises
+        # `'SyncQueryRequestBuilder' object has no attribute 'select'`.
+        # The supported way to read the inserted row back is to just call
+        # `.execute()`; by default the client requests
+        # `Prefer: return=representation` and populates `resp.data` with the
+        # inserted rows, so we read the id off `resp.data[0]`.
         resp = (
             supabase.table("chat_messages")
             .insert({
@@ -89,12 +97,11 @@ def _insert_live_session_chat_message(
                 "content": f"Running test: {template_name}",
                 "metadata": metadata,
             })
-            .select("id")
-            .single()
             .execute()
         )
-        row = resp.data or {}
-        msg_id = row.get("id")
+        rows = resp.data or []
+        row = rows[0] if rows else {}
+        msg_id = row.get("id") if isinstance(row, dict) else None
         test_log(
             "info",
             "pipeline_live_session_chat_message_inserted",
