@@ -6,9 +6,17 @@ import {
   XCircle,
   AlertCircle,
   Loader2,
-  ExternalLink,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react'
 import type { Json } from '@/lib/supabase/types'
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from '@/components/ui/collapsible'
+import { RecordingPlayer } from './recording-player'
+import { ExpandableContainer } from './expandable-frame'
 
 export interface LiveSessionMetadata {
   status?: 'running' | 'passed' | 'failed' | 'error'
@@ -46,11 +54,15 @@ export function LiveSessionCard({ metadata }: LiveSessionCardProps) {
 
   const status = meta.status ?? 'running'
   const isRunning = status === 'running'
+  const isCompleted = !isRunning
+  const isFailed = status === 'failed' || status === 'error'
   const templateName = meta.template_name ?? 'Test'
   const liveViewUrl = meta.live_view_url ?? meta.live_view_fullscreen_url ?? ''
-  const dashboardUrl = meta.browserbase_dashboard_url ?? null
+  const recordingUrl = meta.recording_url ?? null
+  const errorMessage = meta.error_message?.trim() || null
 
   const [disconnected, setDisconnected] = useState(false)
+  const [errorExpanded, setErrorExpanded] = useState(false)
 
   useEffect(() => {
     if (!isRunning) return
@@ -78,9 +90,9 @@ export function LiveSessionCard({ metadata }: LiveSessionCardProps) {
     status === 'passed'
       ? 'text-green-600'
       : status === 'failed'
-        ? 'text-red-600'
+        ? 'text-red-500/80'
         : status === 'error'
-          ? 'text-amber-600'
+          ? 'text-amber-500/80'
           : 'text-foreground/60'
 
   const statusLabel = isRunning
@@ -107,48 +119,81 @@ export function LiveSessionCard({ metadata }: LiveSessionCardProps) {
       </div>
 
       {canEmbedLive ? (
-        <div className="relative bg-black">
-          {/* 16:9 aspect ratio wrapper */}
-          <div className="relative w-full pt-[56.25%]">
-            <iframe
-              title={`Live browser session — ${templateName}`}
-              src={liveViewUrl}
-              sandbox="allow-same-origin allow-scripts"
-              allow="clipboard-read; clipboard-write"
-              className="absolute inset-0 h-full w-full border-0"
-              style={{ pointerEvents: 'none' }}
-            />
-          </div>
-          <div className="absolute left-2 top-2 flex items-center gap-1.5 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white">
-            <span className="size-1.5 rounded-full bg-red-500 animate-pulse" />
-            Live
-          </div>
-        </div>
+        <ExpandableContainer
+          className="bg-black"
+          collapsedClassName="aspect-[16/9]"
+        >
+          {({ ExpandToggle }) => (
+            <>
+              <iframe
+                title={`Live browser session — ${templateName}`}
+                src={liveViewUrl}
+                sandbox="allow-same-origin allow-scripts"
+                allow="clipboard-read; clipboard-write"
+                className="absolute inset-0 h-full w-full border-0"
+                style={{ pointerEvents: 'none' }}
+              />
+              <div className="absolute left-2 top-2 flex items-center gap-1.5 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white">
+                <span className="size-1.5 rounded-full bg-red-500 animate-pulse" />
+                Live
+              </div>
+              <ExpandToggle
+                expandLabel="Expand live view"
+                collapseLabel="Close expanded live view"
+              />
+            </>
+          )}
+        </ExpandableContainer>
       ) : isRunning && disconnected ? (
         <div className="flex items-center justify-center bg-muted/40 py-10 text-xs text-muted-foreground">
           Live view disconnected. Waiting for recording…
         </div>
       ) : null}
 
-      {!isRunning && (
-        <div className="px-4 py-3 space-y-2">
-          {meta.error_message && (
-            <p className="text-xs text-red-600/90 whitespace-pre-wrap">
-              {meta.error_message}
-            </p>
-          )}
-          {dashboardUrl && (
-            <div className="flex flex-wrap gap-2">
-              <a
-                href={dashboardUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 h-7 rounded-md px-2.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+      {isCompleted && recordingUrl && (
+        <RecordingPlayer recordingUrl={recordingUrl} />
+      )}
+
+      {isCompleted && !recordingUrl && (
+        <div className="flex flex-col items-center justify-center gap-1.5 bg-muted/30 px-4 py-10 text-center">
+          <AlertCircle className="size-4 text-muted-foreground/60" />
+          <p className="text-xs text-muted-foreground">
+            Recording is not available for this session.
+          </p>
+        </div>
+      )}
+
+      {isCompleted && (
+        <div className="flex items-center gap-2 px-4 py-2.5 border-t border-border">
+          {isFailed && errorMessage ? (
+            <Collapsible open={errorExpanded} onOpenChange={setErrorExpanded} className="flex-1 min-w-0">
+              <CollapsibleTrigger
+                className="flex w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                aria-expanded={errorExpanded}
               >
-                <ExternalLink className="size-3.5" />
-                Open in Browserbase
-              </a>
-            </div>
+                {errorExpanded ? (
+                  <ChevronDown className="size-3.5 shrink-0" />
+                ) : (
+                  <ChevronRight className="size-3.5 shrink-0" />
+                )}
+                <span className="truncate">
+                  {errorExpanded ? 'Hide failure details' : 'Show failure details'}
+                </span>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <p className="mt-2.5 whitespace-pre-wrap rounded-md bg-muted/40 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
+                  {errorMessage}
+                </p>
+              </CollapsibleContent>
+            </Collapsible>
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              {status === 'passed'
+                ? 'Test completed successfully.'
+                : isFailed
+                  ? 'Test did not complete successfully.'
+                  : ''}
+            </span>
           )}
         </div>
       )}

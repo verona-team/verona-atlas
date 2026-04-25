@@ -128,3 +128,48 @@
     @apply font-sans;
   }
 }
+
+/*
+ * Minimal seek bar styling for the recording player. We render a native
+ * <input type="range"> so keyboard / a11y / touch all come for free, but
+ * style the track + thumb so it matches the rest of the chat UI.
+ */
+.recording-player-seek {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+  height: 14px;
+}
+.recording-player-seek:focus {
+  outline: none;
+}
+.recording-player-seek::-webkit-slider-runnable-track {
+  height: 3px;
+  background: var(--border);
+  border-radius: 9999px;
+}
+.recording-player-seek::-moz-range-track {
+  height: 3px;
+  background: var(--border);
+  border-radius: 9999px;
+}
+.recording-player-seek::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: var(--foreground);
+  border: 2px solid var(--background);
+  margin-top: -4.5px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+.recording-player-seek::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: var(--foreground);
+  border: 2px solid var(--background);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
