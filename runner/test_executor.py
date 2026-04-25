@@ -37,6 +37,7 @@ from runner.prompts import (
     OUTER_AGENT_MODEL,
     STAGEHAND_AGENT_MODEL,
     TOOLS,
+    build_inner_cua_system_prompt,
     build_system_prompt,
 )
 
@@ -86,10 +87,22 @@ async def capture_page_state(page) -> dict:
     }
 
 
-async def execute_browser_action(session, page, instruction: str) -> dict:
+async def execute_browser_action(
+    session,
+    page,
+    instruction: str,
+    *,
+    inner_system_prompt: str,
+) -> dict:
     """Run a single instruction through the Stagehand v3 execute (agent) endpoint.
 
     Returns a dict with the execution outcome and post-action page state.
+
+    *inner_system_prompt* is the system prompt for the inner CUA agent. It
+    must explicitly authorize signup/login flows and identify the application
+    under test — without that context the inner Claude model treats account
+    creation as a borderline action and stalls (see
+    ``build_inner_cua_system_prompt``).
     """
     success = True
     error: str | None = None
@@ -105,7 +118,7 @@ async def execute_browser_action(session, page, instruction: str) -> dict:
             agent_config={
                 "model": stagehand_agent_model_config(),
                 "mode": "cua",
-                "system_prompt": "You are a QA tester executing test steps on a web application. Be precise and wait for elements to load before interacting.",
+                "system_prompt": inner_system_prompt,
             },
             timeout=120.0,
         )
@@ -571,6 +584,12 @@ async def execute_template(
         generated_password=generated_password,
     )
 
+    inner_system_prompt = build_inner_cua_system_prompt(
+        project,
+        agentmail_address=agentmail_address,
+        has_existing_credentials=existing_credentials is not None,
+    )
+
     # Build the outer ReAct model once and bind our custom QA tools.
     # Claude Opus 4.7 accepts Anthropic's native tool shape directly, so
     # `_LANGCHAIN_TOOLS` is the same `TOOLS` list from `runner.prompts`.
@@ -727,7 +746,12 @@ async def execute_template(
                     instruction=instruction[:200],
                 )
 
-                result = await execute_browser_action(session, page, instruction)
+                result = await execute_browser_action(
+                    session,
+                    page,
+                    instruction,
+                    inner_system_prompt=inner_system_prompt,
+                )
                 action_record["success"] = result["success"]
                 action_record["error"] = result["error"]
                 action_record["url_after"] = result["page_state"]["url"]
