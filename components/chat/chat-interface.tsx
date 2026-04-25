@@ -968,7 +968,6 @@ export function ChatInterface({
            */}
           {isProcessing && (
             <div className="space-y-3">
-              <ThinkingIndicator />
               {/**
                * One-time heads-up while the bootstrap turn is in flight: no
                * assistant has ever replied on this session, so this is the
@@ -985,6 +984,7 @@ export function ChatInterface({
                   navigate away, we&apos;ll keep working in the background.
                 </p>
               )}
+              <ThinkingIndicator />
             </div>
           )}
         </div>
