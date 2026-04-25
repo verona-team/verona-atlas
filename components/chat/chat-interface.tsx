@@ -992,7 +992,22 @@ export function ChatInterface({
         </div>
       )}
 
-      {approvedCount > 0 && (
+      {/*
+       * The "N flows approved · Tell me to 'start testing' when ready" pill is a
+       * call-to-action prompting the user to kick off a run. While a test run is
+       * already in flight (pending/planning/running on this project) the prompt
+       * is stale and visually noisy, so we suppress it for the duration of the
+       * run. `backendTestRunActive` flips back to false the moment the run hits
+       * a terminal state (via the session-state poll's atomic snapshot), and the
+       * pill returns automatically — communicating to the user that the same N
+       * approved flows are still queued and ready to be re-run on demand.
+       *
+       * We deliberately key off `backendTestRunActive` rather than the broader
+       * `isTurnInFlight`: hiding the pill while Verona is merely "thinking" or
+       * while a user POST is in flight would be jarring and unrelated to the
+       * pill's actual semantics.
+       */}
+      {approvedCount > 0 && !backendTestRunActive && (
         <div className="relative z-10 mx-auto w-full max-w-[760px] px-6 pb-2 shrink-0">
           <div className="flex items-center gap-2 rounded-lg border border-border bg-foreground/[0.03] px-3 py-2 text-xs text-muted-foreground">
             <span className="size-1.5 rounded-full bg-green-500" />
