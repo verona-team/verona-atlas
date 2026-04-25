@@ -8,14 +8,25 @@ import 'rrweb-player/dist/style.css'
  * Renders a Browserbase rrweb session recording inline using the
  * `rrweb-player` Svelte component.
  *
+ * Architecture: `rrweb-player` is a Svelte component that imperatively
+ * mutates the DOM of its `target` element. React, in turn, owns its
+ * own children's DOM. If we let both reconcile against the SAME node,
+ * React eventually tries to remove a node Svelte has already replaced
+ * (or vice versa) and explodes with `Failed to execute 'removeChild'`.
+ *
+ * The fix is to keep React's tree and Svelte's tree in separate DOM
+ * subtrees:
+ *   - One React-rendered overlay div for loading / error states.
+ *   - One sibling `<div ref={mountRef} />` that React renders ONCE,
+ *     never updates, and never adds children to. The Svelte player
+ *     owns this node's contents exclusively.
+ *
  * Why a thin imperative wrapper instead of `next/dynamic`:
- *   - `rrweb-player` is a Svelte component, not a React component, so
- *     `next/dynamic` doesn't help — we need to instantiate it imperatively
- *     against a DOM target anyway.
- *   - `rrweb-player` touches `document` and constructs a Svelte component
- *     at module-init time, so the import has to be deferred until after
- *     mount on the client. We do that with a top-level dynamic `import()`
- *     inside `useEffect`.
+ *   `rrweb-player` is a Svelte component, not a React component, so
+ *   `next/dynamic` doesn't help — we need to instantiate it
+ *   imperatively against a DOM target anyway. The dynamic
+ *   `import('rrweb-player')` inside `useEffect` keeps the
+ *   document-touching module out of the SSR bundle.
  *
  * Recording payload shape: `runner/recordings.py` stores the Browserbase
  * `/v1/sessions/{id}/recording` response verbatim, which is an array of
@@ -39,26 +50,25 @@ interface RrwebEvent {
 
 interface RecordingPlayerProps {
   recordingUrl: string
-  /**
-   * Optional class name applied to the player container. The player
-   * sizes itself to the container's width via `triggerResize()`.
-   */
   className?: string
 }
 
+interface RrwebPlayerInstance {
+  triggerResize?: () => void
+  pause?: () => void
+  $destroy?: () => void
+}
+
 export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProps) {
-  const containerRef = useRef<HTMLDivElement>(null)
+  const mountRef = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    let player: { triggerResize?: () => void; pause?: () => void } | null = null
+    let player: RrwebPlayerInstance | null = null
     let resizeObserver: ResizeObserver | null = null
-    // Capture the current ref so the cleanup function uses the same DOM
-    // node we instantiated against (the lint rule below would otherwise
-    // warn that the ref may have moved by cleanup time).
-    const target = containerRef.current
+    const target = mountRef.current
 
     async function init() {
       if (!target) return
@@ -78,8 +88,6 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
         }
         events = raw.map(({ data, timestamp, type }) => ({ data, timestamp, type }))
         if (events.length < 2) {
-          // rrweb-player requires at least 2 events to compute meta
-          // and render the timeline.
           throw new Error('Recording has too few events to replay')
         }
       } catch (err) {
@@ -93,15 +101,8 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
       if (cancelled) return
 
       try {
-        // Dynamic import keeps the Svelte/DOM-touching player out of the
-        // SSR bundle and the module-eval path until after mount. The
-        // stylesheet is imported statically at the top of this module so
-        // Next.js bundles it once for any page that pulls in the player.
         const { default: rrwebPlayer } = await import('rrweb-player')
         if (cancelled) return
-
-        // Clear any prior render (e.g. from a recordingUrl change).
-        target.innerHTML = ''
 
         const measuredWidth = Math.max(320, target.clientWidth || 720)
         const measuredHeight = Math.round(measuredWidth * (9 / 16))
@@ -117,9 +118,8 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
             skipInactive: true,
             speedOption: [1, 2, 4, 8],
           },
-        })
+        }) as unknown as RrwebPlayerInstance
 
-        // Keep the embedded player sized to the card it lives in.
         if (typeof ResizeObserver !== 'undefined') {
           resizeObserver = new ResizeObserver(() => {
             try {
@@ -149,36 +149,44 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
       } catch {
         // ignore
       }
+      // Tear down the Svelte component cleanly. `$destroy` removes the
+      // nodes the Svelte component injected; we never touch React's
+      // tree, so React's reconciler stays happy.
       try {
-        player?.pause?.()
+        player?.$destroy?.()
       } catch {
         // ignore
-      }
-      if (target) {
-        target.innerHTML = ''
       }
     }
   }, [recordingUrl])
 
   return (
-    <div className={className}>
-      <div
-        ref={containerRef}
-        className="rrweb-player-host relative flex min-h-[220px] w-full items-center justify-center overflow-hidden bg-black"
-      >
-        {status === 'loading' && (
-          <div className="flex items-center gap-2 text-xs text-white/70">
-            <Loader2 className="size-3.5 animate-spin" />
-            Loading recording…
-          </div>
-        )}
-        {status === 'error' && (
-          <div className="flex items-center gap-2 px-4 py-6 text-center text-xs text-white/70">
-            <AlertCircle className="size-3.5 text-amber-400" />
-            {errorMessage ?? 'Recording unavailable'}
-          </div>
-        )}
-      </div>
+    <div className={`relative w-full bg-black ${className ?? ''}`}>
+      {/*
+        Svelte player mounts here. Critically, this div has NO React
+        children — React renders it once and never reconciles its
+        contents. The sibling overlays below are kept on a separate
+        absolutely-positioned subtree so React can update them freely
+        without touching this node.
+      */}
+      <div ref={mountRef} className="rrweb-player-mount min-h-[220px]" />
+
+      {status !== 'ready' && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black">
+          {status === 'loading' && (
+            <div className="flex items-center gap-2 text-xs text-white/70">
+              <Loader2 className="size-3.5 animate-spin" />
+              Loading recording…
+            </div>
+          )}
+          {status === 'error' && (
+            <div className="flex items-center gap-2 px-4 py-6 text-center text-xs text-white/70">
+              <AlertCircle className="size-3.5 text-amber-400" />
+              {errorMessage ?? 'Recording unavailable'}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
