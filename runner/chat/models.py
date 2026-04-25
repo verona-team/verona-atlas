@@ -203,8 +203,8 @@ def get_claude_opus(
 
 def get_claude_opus_code_writer(
     *,
-    max_tokens: int = 16_000,
-    timeout: float = 180.0,
+    max_tokens: int = 128_000,
+    timeout: float = 300.0,
     max_retries: int = 2,
 ) -> "ChatAnthropic":
     """Claude Opus 4.7 — the integration-research code writer.
@@ -218,16 +218,23 @@ def get_claude_opus_code_writer(
 
     Defaults rationale:
 
-    - `max_tokens=16_000`: per-call output cap. A focused single-script
-      generation is typically ~0.5-3K tokens of code plus a one-sentence
-      explanation. 16K is roomy enough for adaptive thinking + a long
-      script (large pagination loop, complex HogQL) without leaving
-      enough headroom for the model to ramble. Override upward only if
-      you observe truncation in `research_code_writer_*` logs.
-    - `timeout=180.0` (3 minutes): the code writer doesn't reason as
-      long as the outer test-executor loop, so 3 min covers slow
-      Anthropic responses without blocking the integration-research
-      ReAct loop's overall budget.
+    - `max_tokens=128_000`: matches Opus 4.7's full output ceiling.
+      Reasoning models burn output tokens on adaptive-thinking blocks
+      BEFORE they emit the final structured `{code, explanation}` —
+      a cap below the model's ceiling silently truncates the schema
+      response when a turn reasons hard (large pagination loop,
+      complex HogQL, multi-pass self-correction off a previous_exec
+      failure). Better to let the model self-terminate than to clip
+      it. Same envelope rationale as `get_gemini_pro` / Stagehand
+      Opus elsewhere in the runner.
+    - `timeout=300.0` (5 minutes): matches the reasoning-model budget
+      the rest of the runner uses (`get_gemini_pro`,
+      `get_claude_opus_outer`). A code-writer turn that reasons hard
+      against the previous exec's stderr — figuring out the right
+      pagination param, the right field name to `.get()`, etc. — can
+      legitimately take a minute or two on Anthropic's API; 5 min
+      lets the slow-tail land instead of timing out into the
+      error-stub fallback.
     - **No `temperature` kwarg:** Opus 4.7 does not accept `temperature`
       (`langchain-anthropic` model profile `"temperature": False`).
       Setting it raises at request time.
