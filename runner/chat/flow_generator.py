@@ -64,7 +64,15 @@ class TemplateStep(BaseModel):
 class ProposedFlow(BaseModel):
     id: str = Field(description="Unique identifier for this flow proposal")
     name: str = Field(description="Short descriptive name for the test flow")
-    description: str = Field(description="What this test flow validates")
+    description: str = Field(
+        description=(
+            "2-3 sentences describing what this test flow does. State the "
+            "specific user journey being exercised, the concrete UI surfaces "
+            "or interactions involved, and what success looks like — written "
+            "so a non-technical reader gets a clear mental picture of what "
+            "the test will actually do, not just what it validates."
+        )
+    )
     rationale: str = Field(
         description="Why this flow is recommended — reference specific findings"
     )
@@ -225,7 +233,7 @@ Key paths: {', '.join(paths[:30]) or '—'}{evidence_section}"""
 
 - `id`: short, unique, kebab-case. Descriptive (e.g. `sheet-autosave-conflict`), not generic (`flow-1`).
 - `name`: 4–8 words, human-readable.
-- `description`: one sentence stating what the flow validates, in user terms.
+- `description`: 2-3 sentences describing what the flow does. Name the specific user journey being walked, the key UI surfaces or interactions the test touches (page, button, form, modal, etc.), and what observable success looks like. Write it in user terms so a non-technical reader gets a clear mental picture of the test, not a one-line summary.
 - `rationale`: one or two sentences citing the concrete evidence (e.g. "PR #206 replaced the pipeline (33 files changed)" or "290 rage clicks on /w/*/sheets in the last 14 days").
 - `priority`: critical | high | medium | low.
 - `steps`: ordered, executable, self-contained instructions for a browser agent that starts from a blank browser. Include credentials/test-account hints only if the research explicitly provides them.
