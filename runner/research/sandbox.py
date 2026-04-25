@@ -1,9 +1,9 @@
 """Modal Sandbox for arbitrary LLM-written integration research code.
 
-The integration research agent lets the code-writer model (Gemini 3.1 Pro)
-drill deep into each connected integration by writing ad-hoc Python that
-calls the provider's API. Running that Python inside a Modal Sandbox
-buys us:
+The integration research agent lets the code-writer model (Claude
+Opus 4.7) drill deep into each connected integration by writing
+ad-hoc Python that calls the provider's API. Running that Python
+inside a Modal Sandbox buys us:
 
 - **Isolation.** LLM-generated code can do whatever it wants within the
   sandbox's gVisor container without touching our Modal function's process
