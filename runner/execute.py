@@ -25,7 +25,7 @@ from runner.observability import collect_observability_data, diff_observability_
 from runner.recordings import save_session_recording
 from runner.browser import create_stagehand_session, cleanup_session
 
-SECONDS_PER_TEMPLATE = 3600  # 1 hour budget per template
+SECONDS_PER_TEMPLATE = 7200  # 2 hour budget per template
 
 
 def _load_chat_session_id(supabase, project_id: str) -> str | None:
@@ -415,7 +415,7 @@ async def run_test_pipeline(test_run_id: str, project_id: str):
             }).eq("id", test_run_id).execute()
             return
 
-        # Compute dynamic deadline: 1 hour per template
+        # Compute dynamic deadline: 2 hours per template
         total_timeout = len(templates) * SECONDS_PER_TEMPLATE
         deadline = pipeline_t0 + total_timeout
         log.info(

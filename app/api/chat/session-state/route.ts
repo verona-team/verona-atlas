@@ -64,7 +64,7 @@ import { chatServerLog } from '@/lib/chat/server-log'
 /**
  * Upper bound on "active test run" liveness. Mirrors `THINKING_MAX_AGE_MS`
  * in `app/api/chat/route.ts`. A Modal test-run function can legitimately
- * run for up to `SECONDS_PER_TEMPLATE * len(templates)` (1 hour per
+ * run for up to `SECONDS_PER_TEMPLATE * len(templates)` (2 hours per
  * template in `runner/execute.py`); 4 hours is comfortably above realistic
  * runs but stops a hung/crashed worker from holding the UI hostage forever.
  */

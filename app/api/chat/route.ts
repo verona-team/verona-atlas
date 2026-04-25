@@ -74,7 +74,7 @@ const THINKING_MAX_AGE_MS = 60 * 60 * 1000
  * 'pending'/'planning'/'running') as still genuinely in flight for the
  * purpose of rejecting new chat messages.
  *
- * `execute_test_run` budgets 1 hour per template and its top-level
+ * `execute_test_run` budgets 2 hours per template and its top-level
  * `except` handler unconditionally flips the row to 'failed' on crash —
  * so in steady state this guard never fires. 4 hours is the belt-and-
  * suspenders cap for the case where the Modal worker dies so hard it
