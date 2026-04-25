@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import { ArrowRight } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { normalizeProjectUrl } from '@/lib/project-url'
@@ -32,7 +33,7 @@ export function UrlTestInput() {
         spellCheck={false}
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="vercel.com"
+        placeholder="yourproduct.com"
         aria-label="Enter the URL of the web app you want to test"
         className="h-11 flex-1 px-3.5 text-[15px]"
       />
@@ -41,8 +42,9 @@ export function UrlTestInput() {
         disabled={!isValid || submitting}
         size="lg"
         className="h-11 px-5"
+        aria-label="Test"
       >
-        Test
+        <ArrowRight className="size-5" />
       </Button>
     </form>
   )
