@@ -16,6 +16,7 @@ import {
   CollapsibleContent,
 } from '@/components/ui/collapsible'
 import { RecordingPlayer } from './recording-player'
+import { ExpandableContainer } from './expandable-frame'
 
 export interface LiveSessionMetadata {
   status?: 'running' | 'passed' | 'failed' | 'error'
@@ -118,23 +119,31 @@ export function LiveSessionCard({ metadata }: LiveSessionCardProps) {
       </div>
 
       {canEmbedLive ? (
-        <div className="relative bg-black">
-          {/* 16:9 aspect ratio wrapper */}
-          <div className="relative w-full pt-[56.25%]">
-            <iframe
-              title={`Live browser session — ${templateName}`}
-              src={liveViewUrl}
-              sandbox="allow-same-origin allow-scripts"
-              allow="clipboard-read; clipboard-write"
-              className="absolute inset-0 h-full w-full border-0"
-              style={{ pointerEvents: 'none' }}
-            />
-          </div>
-          <div className="absolute left-2 top-2 flex items-center gap-1.5 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white">
-            <span className="size-1.5 rounded-full bg-red-500 animate-pulse" />
-            Live
-          </div>
-        </div>
+        <ExpandableContainer
+          className="bg-black"
+          collapsedClassName="aspect-[16/9]"
+        >
+          {({ ExpandToggle }) => (
+            <>
+              <iframe
+                title={`Live browser session — ${templateName}`}
+                src={liveViewUrl}
+                sandbox="allow-same-origin allow-scripts"
+                allow="clipboard-read; clipboard-write"
+                className="absolute inset-0 h-full w-full border-0"
+                style={{ pointerEvents: 'none' }}
+              />
+              <div className="absolute left-2 top-2 flex items-center gap-1.5 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white">
+                <span className="size-1.5 rounded-full bg-red-500 animate-pulse" />
+                Live
+              </div>
+              <ExpandToggle
+                expandLabel="Expand live view"
+                collapseLabel="Close expanded live view"
+              />
+            </>
+          )}
+        </ExpandableContainer>
       ) : isRunning && disconnected ? (
         <div className="flex items-center justify-center bg-muted/40 py-10 text-xs text-muted-foreground">
           Live view disconnected. Waiting for recording…

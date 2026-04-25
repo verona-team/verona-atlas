@@ -10,6 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { ExpandableContainer } from './expandable-frame'
 
 /**
  * Renders a session recording inline using `rrweb-player` under the hood,
@@ -62,6 +63,13 @@ interface RrwebPlayerInstance {
   setSpeed?: (speed: number) => void
   goto?: (timeOffset: number, play?: boolean) => void
   $destroy?: () => void
+  /**
+   * Svelte component prop-update hatch. We use this to push new
+   * width/height into the player so it can rescale its replayer
+   * iframe on container resize (e.g. when the user expands the card
+   * to a larger modal).
+   */
+  $set?: (props: Record<string, unknown>) => void
   addEventListener?: (event: string, handler: (params: unknown) => unknown) => void
   getMetaData?: () => { startTime: number; endTime: number; totalTime: number }
 }
@@ -130,8 +138,13 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
         const { default: rrwebPlayer } = await import('rrweb-player')
         if (cancelled) return
 
+        // Initial size; the ResizeObserver below keeps the player in
+        // sync with the container as the user expands / collapses.
         const measuredWidth = Math.max(320, target.clientWidth || 720)
-        const measuredHeight = Math.round(measuredWidth * (9 / 16))
+        const measuredHeight = Math.max(
+          180,
+          target.clientHeight || Math.round(measuredWidth * (9 / 16)),
+        )
 
         player = new rrwebPlayer({
           target,
@@ -166,8 +179,18 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
         })
 
         if (typeof ResizeObserver !== 'undefined') {
-          resizeObserver = new ResizeObserver(() => {
+          resizeObserver = new ResizeObserver((entries) => {
+            const rect = entries[0]?.contentRect
+            if (!rect) return
             try {
+              // Push the new container size into the Svelte player so
+              // it rescales the replayer iframe. `triggerResize` alone
+              // only nudges the player to recompute scale against its
+              // *current* (unchanged) width/height props — useless
+              // when the wrapper actually grew (e.g. on expand).
+              const nextWidth = Math.max(320, Math.floor(rect.width))
+              const nextHeight = Math.max(180, Math.floor(rect.height))
+              player?.$set?.({ width: nextWidth, height: nextHeight })
               player?.triggerResize?.()
             } catch {
               // ignore
@@ -242,105 +265,151 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
   const speedLabel = useMemo(() => formatSpeed(speed), [speed])
 
   return (
-    <div className={cn('relative w-full bg-black', className)}>
-      {/*
-        Svelte player mounts here. Critically, this div has NO React
-        children — React renders it once and never reconciles its
-        contents. The control overlays below sit on a separate
-        absolutely-positioned subtree so React can update them freely
-        without touching this node.
-      */}
-      <div ref={mountRef} className="rrweb-player-mount min-h-[220px]" />
+    <ExpandableContainer
+      className={cn('bg-black', className)}
+      collapsedClassName="flex flex-col"
+    >
+      {({ expanded, ExpandToggle }) => (
+        <div
+          className={cn(
+            'flex flex-col bg-black',
+            expanded ? 'h-full' : 'w-full',
+          )}
+        >
+          {/*
+            Frame area: rrweb mount + overlay controls. When collapsed
+            it's a 16:9 box; when expanded it grows to fill the modal
+            height with `flex-1 min-h-0`. The ResizeObserver installed
+            during init() pushes new width/height into the Svelte
+            player whenever this box resizes, keeping the rrweb iframe
+            scaled to fit.
+          */}
+          <div
+            className={cn(
+              'relative overflow-hidden bg-black',
+              expanded ? 'flex-1 min-h-0' : 'aspect-[16/9]',
+            )}
+          >
+            {/*
+              Svelte player mounts here. This div has NO React
+              children — React renders it once and never reconciles
+              its contents. The control overlays sit on a separate
+              absolutely-positioned subtree so React can update them
+              freely without touching this node.
+            */}
+            <div ref={mountRef} className="rrweb-player-mount absolute inset-0" />
 
-      {status === 'ready' && (
-        <>
-          {/* Top-right speed selector */}
-          <div className="absolute right-2 top-2 z-10">
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                className="inline-flex h-7 min-w-[36px] items-center justify-center rounded-md bg-white/95 px-2 text-[11px] font-medium text-foreground shadow-sm ring-1 ring-black/5 hover:bg-white transition-colors"
-                aria-label="Playback speed"
-              >
-                {speedLabel}
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" sideOffset={4} className="min-w-[64px]">
-                {SPEED_OPTIONS.map((option) => (
-                  <DropdownMenuItem
-                    key={option}
-                    onClick={() => handleSetSpeed(option)}
+            {/* Expand toggle, pinned bottom-right of the visual frame
+                so it doesn't sit awkwardly over the seek bar. */}
+            {status === 'ready' && (
+              <ExpandToggle
+                expandLabel="Expand recording"
+                collapseLabel="Close expanded recording"
+              />
+            )}
+
+            {status === 'ready' && (
+              <>
+                {/*
+                  Speed pill. Shifted leftward when expanded so it
+                  doesn't collide with the modal close button (which
+                  also sits top-right).
+                */}
+                <div
+                  className={cn(
+                    'absolute z-10',
+                    expanded ? 'right-14 top-3' : 'right-2 top-2',
+                  )}
+                >
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      className="inline-flex h-7 min-w-[36px] items-center justify-center rounded-md bg-white/95 px-2 text-[11px] font-medium text-foreground shadow-sm ring-1 ring-black/5 hover:bg-white transition-colors"
+                      aria-label="Playback speed"
+                    >
+                      {speedLabel}
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" sideOffset={4} className="min-w-[64px]">
+                      {SPEED_OPTIONS.map((option) => (
+                        <DropdownMenuItem
+                          key={option}
+                          onClick={() => handleSetSpeed(option)}
+                          className={cn(
+                            'justify-center text-[12px] font-medium',
+                            option === speed && 'font-semibold',
+                          )}
+                        >
+                          {formatSpeed(option)}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleTogglePlay}
+                  aria-label={isPlaying ? 'Pause' : 'Play'}
+                  className="group/play absolute inset-0 z-10 flex items-center justify-center focus:outline-none"
+                >
+                  <span
                     className={cn(
-                      'justify-center text-[12px] font-medium',
-                      option === speed && 'font-semibold',
+                      'flex size-14 items-center justify-center rounded-full bg-foreground/85 text-background shadow-lg ring-1 ring-black/10 transition-opacity duration-150',
+                      isPlaying
+                        ? 'opacity-0 group-hover/play:opacity-100 group-focus-visible/play:opacity-100'
+                        : 'opacity-100',
                     )}
                   >
-                    {formatSpeed(option)}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                    {isPlaying ? (
+                      <Pause className="size-5" fill="currentColor" />
+                    ) : (
+                      <Play className="size-5 translate-x-[1px]" fill="currentColor" />
+                    )}
+                  </span>
+                </button>
+              </>
+            )}
+
+            {status !== 'ready' && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black">
+                {status === 'loading' && (
+                  <div className="flex items-center gap-2 text-xs text-white/70">
+                    <Loader2 className="size-3.5 animate-spin" />
+                    Loading recording…
+                  </div>
+                )}
+                {status === 'error' && (
+                  <div className="flex items-center gap-2 px-4 py-6 text-center text-xs text-white/70">
+                    <AlertCircle className="size-3.5 text-amber-400" />
+                    {errorMessage ?? 'Recording unavailable'}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Centered play/pause overlay button */}
-          <button
-            type="button"
-            onClick={handleTogglePlay}
-            aria-label={isPlaying ? 'Pause' : 'Play'}
-            className="group absolute inset-0 z-10 flex items-center justify-center focus:outline-none"
-          >
-            <span
-              className={cn(
-                'flex size-14 items-center justify-center rounded-full bg-foreground/85 text-background shadow-lg ring-1 ring-black/10 transition-opacity duration-150',
-                isPlaying
-                  ? 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'
-                  : 'opacity-100',
-              )}
-            >
-              {isPlaying ? (
-                <Pause className="size-5" fill="currentColor" />
-              ) : (
-                <Play className="size-5 translate-x-[1px]" fill="currentColor" />
-              )}
-            </span>
-          </button>
-        </>
-      )}
-
-      {status !== 'ready' && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black">
-          {status === 'loading' && (
-            <div className="flex items-center gap-2 text-xs text-white/70">
-              <Loader2 className="size-3.5 animate-spin" />
-              Loading recording…
-            </div>
-          )}
-          {status === 'error' && (
-            <div className="flex items-center gap-2 px-4 py-6 text-center text-xs text-white/70">
-              <AlertCircle className="size-3.5 text-amber-400" />
-              {errorMessage ?? 'Recording unavailable'}
+          {/* Seek + elapsed-time row, pinned below the frame and
+              inside the expandable container so it scales with the
+              modal when the user expands. */}
+          {status === 'ready' && (
+            <div className="flex items-center gap-3 bg-background px-4 py-2.5 shrink-0">
+              <span className="tabular-nums text-[11px] text-muted-foreground min-w-[36px]">
+                {formatTime(currentTime)}
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={Math.max(1, totalTime)}
+                value={Math.min(currentTime, totalTime)}
+                step={50}
+                onChange={handleSeek}
+                aria-label="Seek"
+                className="recording-player-seek flex-1"
+              />
             </div>
           )}
         </div>
       )}
-
-      {/* Progress + elapsed-time row, pinned below the frame */}
-      {status === 'ready' && (
-        <div className="flex items-center gap-3 bg-background px-4 py-2.5">
-          <span className="tabular-nums text-[11px] text-muted-foreground min-w-[36px]">
-            {formatTime(currentTime)}
-          </span>
-          <input
-            type="range"
-            min={0}
-            max={Math.max(1, totalTime)}
-            value={Math.min(currentTime, totalTime)}
-            step={50}
-            onChange={handleSeek}
-            aria-label="Seek"
-            className="recording-player-seek flex-1"
-          />
-        </div>
-      )}
-    </div>
+    </ExpandableContainer>
   )
 }
 
