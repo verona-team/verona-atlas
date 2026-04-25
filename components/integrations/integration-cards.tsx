@@ -739,14 +739,15 @@ export function isGitHubComplete(integrations: IntegrationStatus[]): boolean {
 
 /**
  * The integration types hidden behind the "More integrations" accordion.
- * These are niche enough (error monitoring + LLM observability) that
- * surfacing them to every user adds more noise than signal.
+ * These are niche enough (Slack reporting, error monitoring, LLM
+ * observability) that surfacing them to every user adds more noise than
+ * signal — GitHub + PostHog cover the core path on their own.
  *
  * Exported so callers can share one source of truth for both the UI
  * (accordion contents) and the "is anything connected?" computation
  * (accordion default-open state + badge count).
  */
-export const ADVANCED_INTEGRATION_TYPES = ['sentry', 'langsmith', 'braintrust'] as const
+export const ADVANCED_INTEGRATION_TYPES = ['slack', 'sentry', 'langsmith', 'braintrust'] as const
 
 export type AdvancedIntegrationType = (typeof ADVANCED_INTEGRATION_TYPES)[number]
 
@@ -771,7 +772,8 @@ export function countConnectedAdvanced(
 
 /**
  * A labeled accordion that groups the rarely-needed integrations
- * (Sentry, LangSmith, Braintrust) behind a "More integrations" trigger.
+ * (Slack, Sentry, LangSmith, Braintrust) behind a "More integrations"
+ * trigger.
  *
  * Behaviour:
  *   - Collapsed by default when nothing inside is connected.

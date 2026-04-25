@@ -181,7 +181,7 @@ export function ProjectSetupCTA({
     ? `${projectName} is almost ready`
     : `Finish setting up ${projectName}`;
   const subcopy = githubReady
-    ? "You\u2019ve connected GitHub. Connect Slack, PostHog, or Sentry now for richer analysis, or jump straight into chat and add them later."
+    ? "You\u2019ve connected GitHub. Connect PostHog now for richer analysis, or jump straight into chat and add more integrations later."
     : "Connect GitHub so the agent can read your repo. Other integrations are optional and can be added anytime.";
 
   return (
@@ -209,14 +209,14 @@ export function ProjectSetupCTA({
             integration={getStatus("posthog")}
             onRefresh={loadIntegrations}
           />
-          <SlackCard
-            projectId={projectId}
-            integration={getStatus("slack")}
-            onRefresh={loadIntegrations}
-          />
           <AdvancedIntegrationsSection
             connectedCount={countConnectedAdvanced(integrations)}
           >
+            <SlackCard
+              projectId={projectId}
+              integration={getStatus("slack")}
+              onRefresh={loadIntegrations}
+            />
             <SentryCard
               projectId={projectId}
               integration={getStatus("sentry")}
