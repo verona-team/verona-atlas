@@ -10,7 +10,7 @@ phases:
     2. **Research loop (ReAct over Modal Sandbox).** A Gemini 3.1 Pro
        orchestrator iteratively calls one tool, `execute_code(purpose)`,
        with a natural-language goal. The tool delegates CODE GENERATION
-       to a separate Gemini 3.1 Pro code writer (see `code_writer.py`),
+       to a separate Claude Opus 4.7 code writer (see `code_writer.py`),
        executes the resulting Python inside a gVisor-isolated Modal
        Sandbox with creds preloaded as env vars, and returns
        `{exit_code, stdout, stderr, explanation}`. The orchestrator
@@ -19,6 +19,12 @@ phases:
        rage-clicked URL from call #2 matching a GitHub PR from call
        #4). Loops up to `RESEARCH_INTEGRATION_MAX_STEPS` (default 20)
        times.
+
+       The orchestrator + code-writer split deliberately uses two
+       different model families: Gemini 3.1 Pro for cross-provider
+       reasoning over a long-running message log, and Opus 4.7 for
+       focused single-script generation where Anthropic's strength at
+       defensive code shows up.
 
 The agent no longer runs its own synthesis pass. Instead it returns the
 full investigation transcript (preflight + all tool calls + every

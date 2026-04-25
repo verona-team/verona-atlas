@@ -1,14 +1,26 @@
-"""Gemini-backed code writer for the integration research sandbox.
+"""Opus-backed code writer for the integration research sandbox.
 
 When the research orchestrator calls `execute_code(purpose="...")`, the
 tool doesn't ask the orchestrator to write Python itself. Instead it
-delegates to this module, which asks **Gemini 3.1 Pro** to produce a
+delegates to this module, which asks **Claude Opus 4.7** to produce a
 focused Python snippet for that specific purpose, given:
 
 - The provider API docs (same ones in the orchestrator's prompt).
 - The env-var catalog (what creds/hosts are preloaded in the sandbox).
 - A one-call-back summary of the previous exec (for self-correction when
   the previous script had a bug like `KeyError`).
+
+## Why Opus 4.7 here
+
+The integration-research orchestrator (which decides WHAT to
+investigate) stays on Gemini 3.1 Pro — that role correlates signals
+across providers and benefits from Gemini's long-context reasoning.
+Code generation is a different task: producing concise, defensive
+httpx scripts that handle paginated provider APIs without crashing on
+missing fields. Opus 4.7 is empirically stronger at producing correct
+provider-API code on the first try, which directly translates to
+fewer wasted sandbox execs (KeyError tracebacks, oversized stdout)
+and a more useful drill-in transcript for the synthesizer downstream.
 
 ## Why split this out of the orchestrator
 
@@ -20,9 +32,11 @@ question. Mixing that with code generation has two costs:
    full code string) + (ToolMessage with stdout)` to the orchestrator's
    messages. Over 20 steps that's meaningful token weight that has
    nothing to do with routing decisions.
-2. **Focus.** Even within a single model family, splitting "decide what
-   to ask" from "write the code" keeps each prompt tight and lets us
-   evolve the two prompts independently.
+2. **Focus.** Splitting "decide what to ask" from "write the code"
+   keeps each prompt tight and lets us evolve the two prompts (and
+   their backing models) independently — exactly what we're doing by
+   pinning the code writer to Opus while the orchestrator stays on
+   Gemini.
 
 ## Statelessness
 
@@ -39,11 +53,17 @@ keeps the code writer fast and predictable.
 
 ## Output shape
 
-`with_structured_output(CodeWriterOutput)` forces Gemini to emit
+`with_structured_output(CodeWriterOutput)` forces Opus to emit
 `{code: str, explanation: str}` — no markdown fences, no preamble.
 `explanation` is surfaced back to the orchestrator in the tool result
 so it can see what the code writer actually produced and correct course
 ("you wrote a POST but I wanted a GET") on the next call.
+
+`langchain-anthropic`'s `with_structured_output` uses Anthropic's
+tool-calling shim under the hood (vs. the JSON-schema-mode used for
+Gemini elsewhere in the runner). That mode doesn't accept the
+`method="json_schema"` kwarg the Gemini path takes, so the call below
+omits it.
 """
 from __future__ import annotations
 
@@ -52,7 +72,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from runner.chat.logging import chat_log
-from runner.chat.models import get_gemini_pro
+from runner.chat.models import get_claude_opus_code_writer
 
 
 class CodeWriterOutput(BaseModel):
@@ -208,7 +228,7 @@ async def write_research_code(
     env_description: str,
     previous_exec: PreviousExec | None = None,
 ) -> CodeWriterOutput:
-    """Ask Gemini to produce Python that fulfills the given research goal.
+    """Ask Claude Opus 4.7 to produce Python that fulfills the given research goal.
 
     Always returns a `CodeWriterOutput`. If the model errors or returns
     unusable output (empty code, obvious truncation), we still return a
@@ -227,8 +247,10 @@ async def write_research_code(
         ),
     )
 
-    model = get_gemini_pro()
-    structured = model.with_structured_output(CodeWriterOutput, method="json_schema")
+    # Opus's structured-output uses Anthropic's tool-calling shim under
+    # the hood; it doesn't take Gemini's `method="json_schema"` kwarg.
+    model = get_claude_opus_code_writer()
+    structured = model.with_structured_output(CodeWriterOutput)
 
     user_message = _build_user_message(
         purpose=purpose,
