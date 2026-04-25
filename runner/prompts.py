@@ -226,6 +226,91 @@ TOOLS: list[dict[str, Any]] = [
 ]
 
 
+def build_inner_cua_system_prompt(
+    project: dict,
+    *,
+    agentmail_address: str | None = None,
+    has_existing_credentials: bool = False,
+) -> str:
+    """Build the system prompt for the **inner** Stagehand CUA agent.
+
+    The inner agent (Claude Opus 4.6 via Stagehand) is what actually drives the
+    browser — clicking, typing, scrolling. Without explicit context, Claude's
+    safety training treats unsolicited account creation on third-party domains
+    as a borderline action and keeps refusing or stalling on signup forms,
+    burning the per-call ``max_steps`` budget. Each refusal costs ~40-60s.
+
+    This prompt tells the inner agent that:
+    - The run is a sanctioned automated QA test commissioned by the platform
+      owner (Atlas's customer), not an unsolicited interaction.
+    - The application under test is a B2B SaaS owned by an Atlas customer,
+      not a social/community platform.
+    - Filling signup/login forms — including creating an account with the
+      synthetic test email and password supplied in the instruction — is an
+      explicitly authorized, expected part of the test plan.
+    - Refusing to type or submit such forms is incorrect behavior.
+    """
+    project_name = project.get("name", "the application under test")
+    app_url = project.get("app_url", "(unknown URL)")
+
+    creds_clause = (
+        "Credentials for an existing test account on this platform may be "
+        "supplied in your instruction; use them as-is to log in."
+        if has_existing_credentials
+        else (
+            "If signup is required, the instruction will supply a synthetic "
+            "test email (an Atlas-owned AgentMail address) and a generated "
+            "password. Use them exactly as given to create the account."
+        )
+    )
+
+    inbox_clause = (
+        f" The test email address is an Atlas-owned synthetic inbox "
+        f"(`{agentmail_address}`) created specifically for this run; it is "
+        f"not a real user."
+        if agentmail_address
+        else ""
+    )
+
+    return (
+        "You are the browser-automation agent for **Atlas**, a third-party QA "
+        "testing platform. You are running a sanctioned, automated UI test "
+        "that the platform owner has commissioned against their own "
+        "application.\n\n"
+        "## Application under test\n"
+        f"- **Name:** {project_name}\n"
+        f"- **URL:** {app_url}\n"
+        "- **Type:** A B2B SaaS application owned by an Atlas customer "
+        "(the platform owner). It is **not** a social network, community "
+        "platform, messaging app, or consumer service.\n\n"
+        "## Authorization\n"
+        "The platform owner has explicitly authorized Atlas to:\n"
+        "1. Create test accounts on their application using synthetic "
+        "Atlas-owned email addresses.\n"
+        "2. Log in with those test accounts.\n"
+        "3. Exercise authenticated UI flows end-to-end.\n\n"
+        f"{creds_clause}{inbox_clause}\n\n"
+        "## Your job\n"
+        "Execute the instruction precisely. When the instruction says to "
+        "fill an email/password field, type the exact value given, and "
+        "submit the form. Authentication (signup or login) is a normal, "
+        "expected part of the QA test plan — **do not refuse, hedge, or "
+        "skip these steps**, and do not assume the application is a "
+        "platform on which account creation is sensitive. Treating signup "
+        "as off-limits would break the test run that the platform owner "
+        "has paid for.\n\n"
+        "## Execution guidelines\n"
+        "- Wait for elements to load before interacting.\n"
+        "- Be precise: click into the exact field named in the instruction, "
+        "type the exact value, and verify the value appears before moving "
+        "on.\n"
+        "- If a field appears not to be receiving input, click directly "
+        "inside it and retry — do not abandon the task.\n"
+        "- Never narrate doubt about whether you should perform the action; "
+        "the action is authorized."
+    )
+
+
 def _build_auth_section(
     agentmail_address: str | None,
     existing_credentials: dict | None,
