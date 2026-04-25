@@ -28,11 +28,20 @@ export function normalizeProjectUrl(input: string): string | null {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     return null
   }
-  // Require a real domain — `localhost`, bare hostnames, and IPs-without-dots
-  // are not useful for an app URL that the agent will actually browse.
-  if (!parsed.hostname || !parsed.hostname.includes('.')) {
-    return null
-  }
+  // Require a real domain. A trailing `.` (e.g. `langchain.`) and bare
+  // hostnames like `localhost` or `myhost` shouldn't qualify — we want a
+  // hostname with at least two non-empty labels and a recognizable
+  // alphabetic TLD of at least two characters.
+  const hostname = parsed.hostname
+  if (!hostname) return null
+  const labels = hostname.split('.').filter(Boolean)
+  if (labels.length < 2) return null
+  const tld = labels[labels.length - 1]
+  if (!/^[a-z]{2,}$/i.test(tld)) return null
+  // Reject a trailing dot (`example.com.` or `langchain.`) — `URL`
+  // happily preserves it but it never indicates a usable web origin
+  // for our purposes.
+  if (hostname.endsWith('.')) return null
 
   return candidate
 }
