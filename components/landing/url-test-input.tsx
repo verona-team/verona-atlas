@@ -41,7 +41,7 @@ export function UrlTestInput() {
         type="submit"
         disabled={!isValid || submitting}
         size="lg"
-        className="group/test-btn h-11 px-5 cursor-pointer transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-lg hover:shadow-primary/30 hover:bg-primary disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none"
+        className="group/test-btn h-11 px-5 cursor-pointer transition-colors duration-200 ease-out hover:bg-primary/90 disabled:cursor-not-allowed"
         aria-label="Test"
       >
         <ArrowRight className="size-5 transition-transform duration-200 ease-out group-hover/test-btn:translate-x-0.5" />
