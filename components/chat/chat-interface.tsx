@@ -990,55 +990,67 @@ export function ChatInterface({
         </div>
       </div>
 
-      {/* gradient fade into input bar */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 bottom-[96px] h-8 bg-gradient-to-t from-background to-transparent"
-      />
-
-      {/* jump-to-latest pill */}
-      {showJumpToBottom && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-[108px] flex justify-center">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={jumpToBottom}
-            className="pointer-events-auto rounded-full bg-background shadow-sm text-xs gap-1.5 h-8 px-3"
-          >
-            <ArrowDown className="size-3.5" />
-            Jump to latest
-          </Button>
-        </div>
-      )}
-
       {/*
-       * The "N flows approved · Tell me to 'start testing' when ready" pill is a
-       * call-to-action prompting the user to kick off a run. While a test run is
-       * already in flight (pending/planning/running on this project) the prompt
-       * is stale and visually noisy, so we suppress it for the duration of the
-       * run. `backendTestRunActive` flips back to false the moment the run hits
-       * a terminal state (via the session-state poll's atomic snapshot), and the
-       * pill returns automatically — communicating to the user that the same N
-       * approved flows are still queued and ready to be re-run on demand.
+       * Bottom group: the "N flows approved" pill (when shown) and the chat
+       * input, plus the gradient fade and jump-to-latest pill that float just
+       * above this group.
        *
-       * We deliberately key off `backendTestRunActive` rather than the broader
-       * `isTurnInFlight`: hiding the pill while Verona is merely "thinking" or
-       * while a user POST is in flight would be jarring and unrelated to the
-       * pill's actual semantics.
+       * We anchor the gradient and jump-to-latest pill to the TOP of this
+       * wrapper (`bottom-full`) instead of using fixed pixel offsets from the
+       * page bottom. This guarantees they always sit immediately above
+       * whatever the bottom group currently contains — input only, or input
+       * plus approved-pill — and never overlap or conflict with the approved
+       * pill regardless of its presence.
        */}
-      {approvedCount > 0 && !backendTestRunActive && (
-        <div className="relative z-10 mx-auto w-full max-w-[760px] px-6 pb-2 shrink-0">
-          <div className="flex items-center gap-2 rounded-lg border border-border bg-foreground/[0.03] px-3 py-2 text-xs text-muted-foreground">
-            <span className="size-1.5 rounded-full bg-green-500" />
-            <span>{approvedCount} flow{approvedCount !== 1 ? 's' : ''} approved</span>
-            <span className="text-muted-foreground/40">·</span>
-            <span>Tell me to start testing when ready, or propose changes</span>
-          </div>
-        </div>
-      )}
+      <div className="relative shrink-0">
+        {/* gradient fade into bottom group */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 bottom-full h-8 bg-gradient-to-t from-background to-transparent"
+        />
 
-      <div className="shrink-0">
+        {/* jump-to-latest pill, floating just above the bottom group */}
+        {showJumpToBottom && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-full mb-3 flex justify-center">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={jumpToBottom}
+              className="pointer-events-auto rounded-full bg-background shadow-sm text-xs gap-1.5 h-8 px-3"
+            >
+              <ArrowDown className="size-3.5" />
+              Jump to latest
+            </Button>
+          </div>
+        )}
+
+        {/*
+         * The "N flows approved · Tell me to 'start testing' when ready" pill is a
+         * call-to-action prompting the user to kick off a run. While a test run is
+         * already in flight (pending/planning/running on this project) the prompt
+         * is stale and visually noisy, so we suppress it for the duration of the
+         * run. `backendTestRunActive` flips back to false the moment the run hits
+         * a terminal state (via the session-state poll's atomic snapshot), and the
+         * pill returns automatically — communicating to the user that the same N
+         * approved flows are still queued and ready to be re-run on demand.
+         *
+         * We deliberately key off `backendTestRunActive` rather than the broader
+         * `isTurnInFlight`: hiding the pill while Verona is merely "thinking" or
+         * while a user POST is in flight would be jarring and unrelated to the
+         * pill's actual semantics.
+         */}
+        {approvedCount > 0 && !backendTestRunActive && (
+          <div className="relative z-10 mx-auto w-full max-w-[760px] px-6 pb-2">
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-foreground/[0.03] px-3 py-2 text-xs text-muted-foreground">
+              <span className="size-1.5 rounded-full bg-green-500" />
+              <span>{approvedCount} flow{approvedCount !== 1 ? 's' : ''} approved</span>
+              <span className="text-muted-foreground/40">·</span>
+              <span>Tell me to start testing when ready, or propose changes</span>
+            </div>
+          </div>
+        )}
+
         <div className="mx-auto w-full max-w-[760px] px-6 pb-4 pt-2">
           <ChatInputForm
             githubReady={githubReady}
