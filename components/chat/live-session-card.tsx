@@ -153,17 +153,12 @@ export function LiveSessionCard({ metadata }: LiveSessionCardProps) {
         </div>
       )}
 
-      {isRunning && dashboardUrl && (
+      {isRunning && (
         <div className="px-4 py-2 border-t border-border">
-          <a
-            href={dashboardUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-          >
-            <ExternalLink className="size-3" />
-            Open session in Browserbase
-          </a>
+          <p className="text-xs text-muted-foreground">
+            This may take a while. You can safely navigate away — the test run
+            will keep going in the background.
+          </p>
         </div>
       )}
     </div>
