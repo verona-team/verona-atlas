@@ -544,8 +544,35 @@ export function ChatInterface({
   //     rows can coexist — one active + zero or more superseded — and
   //     only the clicked row's overrides should drop.
   const isTurnInFlight = isPosting || backendThinking || backendTestRunActive
+  // Polling gate intentionally EXCLUDES `isPosting`. Including it caused a
+  // self-cancelling race on the very first poll tick after submit:
+  //
+  //   t=0   setIsPosting(true) → isTurnInFlight=true → effect runs and
+  //         fires its immediate first poll tick, in parallel with the POST
+  //         to /api/chat.
+  //   t≈80  session-state responds before the POST has updated
+  //         chat_sessions.status='thinking' or `tool_start_test_run` has
+  //         created a test_runs row. So status='idle' AND activeTestRun=null.
+  //         pollOnce returns 'stop'; the loop exits. The setBackend*(false)
+  //         calls are no-ops because state was already false, so React
+  //         doesn't even re-render.
+  //   t≈420 POST returns 202 → setBackendThinking(true) + setIsPosting(false).
+  //         New isTurnInFlight = false || true || false = true. Old value
+  //         was also true (via isPosting). Dep didn't change → effect
+  //         doesn't re-run → polling stays dead until refresh. The
+  //         `live_session` row inserted later by `runner/execute.py` never
+  //         reaches the UI.
+  //
+  // Gating polling on `backendThinking || backendTestRunActive` instead
+  // means the loop only spins up once the server has committed something
+  // worth observing — backendThinking is set on the 202 response (after
+  // the POST handler has already written status='thinking'), and
+  // backendTestRunActive is set by a poll tick. The disabled-input gate
+  // still uses the broader `isProcessing`/`isTurnInFlight` so the UI
+  // stays locked while the POST is in flight.
+  const shouldPoll = backendThinking || backendTestRunActive
   useEffect(() => {
-    if (!isTurnInFlight) return
+    if (!shouldPoll) return
 
     let cancelled = false
     const abortController = new AbortController()
@@ -717,7 +744,7 @@ export function ChatInterface({
     // closure local advanced by mergeMessages. Re-running on every
     // message arrival would tear down the poll loop on each tick.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isTurnInFlight, sessionId, computeSessionThinking])
+  }, [shouldPoll, sessionId, computeSessionThinking])
 
   const [showJumpToBottom, setShowJumpToBottom] = useState(false)
 
