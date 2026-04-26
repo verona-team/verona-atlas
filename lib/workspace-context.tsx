@@ -33,7 +33,7 @@ interface WorkspaceActions {
 
 type WorkspaceContextValue = WorkspaceState & WorkspaceActions
 
-const WorkspaceContext = createContext<WorkspaceContextValue | null>(null)
+export const WorkspaceContext = createContext<WorkspaceContextValue | null>(null)
 
 interface WorkspaceProviderProps {
   children: ReactNode
