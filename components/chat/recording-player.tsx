@@ -1,8 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { AlertCircle, Loader2, Pause, Play } from 'lucide-react'
-import 'rrweb-player/dist/style.css'
 import { cn } from '@/lib/utils'
 import {
   DropdownMenu,
@@ -13,65 +12,15 @@ import {
 import { ExpandableContainer } from './expandable-frame'
 
 /**
- * Renders a session recording inline using `rrweb-player` under the hood,
- * but with rrweb's built-in controller hidden in favor of a custom React
- * UI: a centered overlay play/pause button, a top-right speed dropdown,
- * and a thin progress + elapsed-time row pinned below the frame. The
- * underlying Svelte component still owns playback (DOM mutation
- * scheduling, skip-inactive gap detection); we just drive it
- * imperatively via `play()` / `pause()` / `setSpeed()` / `goto()`.
- *
- * Architecture note: `rrweb-player` is a Svelte component that mutates
- * the DOM of its `target` element. React, in turn, owns its own
- * children's DOM. To prevent `removeChild` clashes during reconciliation
- * we keep the two trees in separate DOM subtrees:
- *   - One React-rendered overlay div for our controls + loading state.
- *   - One sibling `<div ref={mountRef} />` that React renders ONCE,
- *     never updates, and never adds children to. The Svelte player
- *     owns this node's contents exclusively.
- *
- * Recording payload shape: `runner/recordings.py` stores the
- * `/v1/sessions/{id}/recording` response verbatim, which is an array of
- * `{ data, sessionId, timestamp, type }`. `rrweb-player` expects
- * `eventWithTime` (`{ data, timestamp, type }`) so we strip `sessionId`
- * before handing them off.
+ * Renders a session recording inline as a native HTML5 ``<video>``
+ * with custom React overlay controls: a centered play/pause button,
+ * a top-right speed dropdown, and a thin progress + elapsed-time row
+ * pinned below the frame.
  */
-
-interface RawRecordingEvent {
-  data: unknown
-  sessionId?: string
-  timestamp: number
-  type: number
-}
-
-interface RrwebEvent {
-  data: unknown
-  timestamp: number
-  type: number
-}
 
 interface RecordingPlayerProps {
   recordingUrl: string
   className?: string
-}
-
-interface RrwebPlayerInstance {
-  triggerResize?: () => void
-  pause?: () => void
-  play?: () => void
-  toggle?: () => void
-  setSpeed?: (speed: number) => void
-  goto?: (timeOffset: number, play?: boolean) => void
-  $destroy?: () => void
-  /**
-   * Svelte component prop-update hatch. We use this to push new
-   * width/height into the player so it can rescale its replayer
-   * iframe on container resize (e.g. when the user expands the card
-   * to a larger modal).
-   */
-  $set?: (props: Record<string, unknown>) => void
-  addEventListener?: (event: string, handler: (params: unknown) => unknown) => void
-  getMetaData?: () => { startTime: number; endTime: number; totalTime: number }
 }
 
 const SPEED_OPTIONS = [0.5, 1, 2, 4]
@@ -84,9 +33,13 @@ function formatTime(ms: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
+function formatSpeed(value: number): string {
+  if (value === 0.5) return '.5x'
+  return `${value}x`
+}
+
 export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProps) {
-  const mountRef = useRef<HTMLDivElement>(null)
-  const playerRef = useRef<RrwebPlayerInstance | null>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -94,174 +47,36 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
   const [totalTime, setTotalTime] = useState(0)
   const [speed, setSpeed] = useState(1)
 
-  useEffect(() => {
-    let cancelled = false
-    let player: RrwebPlayerInstance | null = null
-    let resizeObserver: ResizeObserver | null = null
-    const target = mountRef.current
-
-    async function init() {
-      if (!target) return
-
-      setStatus('loading')
-      setErrorMessage(null)
-      setIsPlaying(false)
-      setCurrentTime(0)
-      setTotalTime(0)
-      setSpeed(1)
-
-      let events: RrwebEvent[]
-      try {
-        const res = await fetch(recordingUrl, { cache: 'force-cache' })
-        if (!res.ok) {
-          throw new Error(`Failed to fetch recording (${res.status})`)
-        }
-        const raw = (await res.json()) as RawRecordingEvent[]
-        if (!Array.isArray(raw) || raw.length === 0) {
-          throw new Error('Recording is empty')
-        }
-        events = raw.map(({ data, timestamp, type }) => ({ data, timestamp, type }))
-        if (events.length < 2) {
-          throw new Error('Recording has too few events to replay')
-        }
-      } catch (err) {
-        if (cancelled) return
-        const msg = err instanceof Error ? err.message : 'Failed to load recording'
-        setStatus('error')
-        setErrorMessage(msg)
-        return
-      }
-
-      if (cancelled) return
-
-      try {
-        const { default: rrwebPlayer } = await import('rrweb-player')
-        if (cancelled) return
-
-        // Initial size; the ResizeObserver below keeps the player in
-        // sync with the container as the user expands / collapses.
-        const measuredWidth = Math.max(320, target.clientWidth || 720)
-        const measuredHeight = Math.max(
-          180,
-          target.clientHeight || Math.round(measuredWidth * (9 / 16)),
-        )
-
-        player = new rrwebPlayer({
-          target,
-          props: {
-            events: events as never,
-            width: measuredWidth,
-            height: measuredHeight,
-            autoPlay: false,
-            // We render our own controls; rrweb's default controller
-            // bar is not shown.
-            showController: false,
-            skipInactive: true,
-            speed: 1,
-          },
-        }) as unknown as RrwebPlayerInstance
-        playerRef.current = player
-
-        const meta = player.getMetaData?.()
-        if (meta) setTotalTime(meta.totalTime)
-
-        // ui-update-current-time fires at ~16ms cadence during playback.
-        player.addEventListener?.('ui-update-current-time', (payload: unknown) => {
-          const p = payload as { payload?: number }
-          if (typeof p?.payload === 'number') setCurrentTime(p.payload)
-        })
-
-        // ui-update-player-state fires whenever play/pause/end transitions.
-        player.addEventListener?.('ui-update-player-state', (payload: unknown) => {
-          const p = payload as { payload?: 'playing' | 'paused' | 'live' }
-          if (p?.payload === 'playing') setIsPlaying(true)
-          else if (p?.payload === 'paused') setIsPlaying(false)
-        })
-
-        if (typeof ResizeObserver !== 'undefined') {
-          resizeObserver = new ResizeObserver((entries) => {
-            const rect = entries[0]?.contentRect
-            if (!rect) return
-            try {
-              // Push the new container size into the Svelte player so
-              // it rescales the replayer iframe. `triggerResize` alone
-              // only nudges the player to recompute scale against its
-              // *current* (unchanged) width/height props — useless
-              // when the wrapper actually grew (e.g. on expand).
-              const nextWidth = Math.max(320, Math.floor(rect.width))
-              const nextHeight = Math.max(180, Math.floor(rect.height))
-              player?.$set?.({ width: nextWidth, height: nextHeight })
-              player?.triggerResize?.()
-            } catch {
-              // ignore
-            }
-          })
-          resizeObserver.observe(target)
-        }
-
-        setStatus('ready')
-      } catch (err) {
-        if (cancelled) return
-        const msg = err instanceof Error ? err.message : 'Failed to render recording'
-        setStatus('error')
-        setErrorMessage(msg)
-      }
-    }
-
-    void init()
-
-    return () => {
-      cancelled = true
-      try {
-        resizeObserver?.disconnect()
-      } catch {
-        // ignore
-      }
-      try {
-        player?.$destroy?.()
-      } catch {
-        // ignore
-      }
-      playerRef.current = null
-    }
-  }, [recordingUrl])
-
   function handleTogglePlay() {
-    const player = playerRef.current
-    if (!player) return
-    try {
-      player.toggle?.()
-    } catch {
-      // rrweb-player can throw "replayer destroyed" if it raced with
-      // an unmount; safe to ignore.
+    const video = videoRef.current
+    if (!video) return
+    if (video.paused) {
+      void video.play().catch(() => {
+        // Autoplay-blocked or user gesture missing; safe to ignore —
+        // the click that fired this handler IS a user gesture so this
+        // path is rare in practice.
+      })
+    } else {
+      video.pause()
     }
   }
 
   function handleSetSpeed(next: number) {
-    const player = playerRef.current
-    if (!player) return
-    try {
-      player.setSpeed?.(next)
-      setSpeed(next)
-    } catch {
-      // ignore
-    }
+    const video = videoRef.current
+    if (!video) return
+    video.playbackRate = next
+    setSpeed(next)
   }
 
   function handleSeek(event: React.ChangeEvent<HTMLInputElement>) {
-    const player = playerRef.current
-    if (!player) return
-    const next = Number(event.target.value)
-    if (!Number.isFinite(next)) return
-    try {
-      player.goto?.(next, isPlaying)
-      setCurrentTime(next)
-    } catch {
-      // ignore
-    }
+    const video = videoRef.current
+    if (!video) return
+    const nextMs = Number(event.target.value)
+    if (!Number.isFinite(nextMs)) return
+    video.currentTime = nextMs / 1000
+    setCurrentTime(nextMs)
   }
 
-  // Format speed labels exactly like the screenshot: ".5x", "1x", "2x", "4x".
   const speedLabel = useMemo(() => formatSpeed(speed), [speed])
 
   return (
@@ -277,12 +92,10 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
           )}
         >
           {/*
-            Frame area: rrweb mount + overlay controls. When collapsed
-            it's a 16:9 box; when expanded it grows to fill the modal
-            height with `flex-1 min-h-0`. The ResizeObserver installed
-            during init() pushes new width/height into the Svelte
-            player whenever this box resizes, keeping the rrweb iframe
-            scaled to fit.
+            Frame area: <video> + overlay controls. When collapsed it's
+            a 16:9 box; when expanded it grows to fill the modal height
+            with `flex-1 min-h-0`. The video element scales naturally
+            via `object-contain`.
           */}
           <div
             className={cn(
@@ -290,17 +103,27 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
               expanded ? 'flex-1 min-h-0' : 'aspect-[16/9]',
             )}
           >
-            {/*
-              Svelte player mounts here. This div has NO React
-              children — React renders it once and never reconciles
-              its contents. The control overlays sit on a separate
-              absolutely-positioned subtree so React can update them
-              freely without touching this node.
-            */}
-            <div ref={mountRef} className="rrweb-player-mount absolute inset-0" />
+            <video
+              ref={videoRef}
+              src={recordingUrl}
+              preload="metadata"
+              playsInline
+              className="absolute inset-0 h-full w-full object-contain"
+              onLoadedMetadata={(e) => {
+                const d = e.currentTarget.duration
+                if (Number.isFinite(d)) setTotalTime(d * 1000)
+              }}
+              onLoadedData={() => setStatus('ready')}
+              onError={() => {
+                setStatus('error')
+                setErrorMessage('Failed to load recording')
+              }}
+              onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime * 1000)}
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+              onEnded={() => setIsPlaying(false)}
+            />
 
-            {/* Expand toggle, pinned bottom-right of the visual frame
-                so it doesn't sit awkwardly over the seek bar. */}
             {status === 'ready' && (
               <ExpandToggle
                 expandLabel="Expand recording"
@@ -411,9 +234,4 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
       )}
     </ExpandableContainer>
   )
-}
-
-function formatSpeed(value: number): string {
-  if (value === 0.5) return '.5x'
-  return `${value}x`
 }

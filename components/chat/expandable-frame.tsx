@@ -11,22 +11,17 @@ import { Maximize2, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 /**
- * Wraps a DOM-stateful child (live iframe, rrweb-player mount) in a
+ * Wraps a DOM-stateful child (live iframe, video element) in a
  * container that flips between an inline collapsed layout and a
  * centered fixed-position "modal" layout WITHOUT remounting children.
  *
- * Why CSS-only repositioning instead of a Portal:
- *   - The Browserbase live view is a long-lived `<iframe>`. Moving its
- *     DOM node remounts it and tears down the realtime stream.
- *   - The recording player is rrweb-player driving a Svelte subtree
- *     inside its mount element. Detaching that subtree mid-playback
- *     destroys the Replayer's iframe and resets state.
- *
- * The wrapper element stays in the same React subtree across the
- * toggle; only its className changes. While expanded, a sibling
- * placeholder is inserted ABOVE the wrapper at the exact pixel size
- * the wrapper occupied just before expanding — so the surrounding
- * chat doesn't snap shut.
+ * Why CSS-only repositioning instead of a Portal: the Browserbase
+ * live view is a long-lived `<iframe>`. Moving its DOM node remounts
+ * it and tears down the realtime stream. The wrapper element stays
+ * in the same React subtree across the toggle; only its className
+ * changes. While expanded, a sibling placeholder is inserted ABOVE
+ * the wrapper at the exact pixel size the wrapper occupied just
+ * before expanding — so the surrounding chat doesn't snap shut.
  *
  * Children is a render-prop that receives `{ expanded, ExpandToggle }`.
  * Callers MUST render `<ExpandToggle />` somewhere they want the

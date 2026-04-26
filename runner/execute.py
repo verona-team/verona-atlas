@@ -23,6 +23,7 @@ from runner.encryption import decrypt, encrypt
 from runner.logging import bind, test_log
 from runner.observability import collect_observability_data, diff_observability_snapshots
 from runner.recordings import save_session_recording
+from runner.screen_recorder import LiveViewRecorder
 from runner.browser import create_stagehand_session, cleanup_session
 
 SECONDS_PER_TEMPLATE = 7200  # 2 hour budget per template
@@ -687,6 +688,11 @@ async def execute_single_template(
     page = None
     playwright_inst = None
     browser = None
+    # Live-view screen recorder. Set up after the cloud browser is alive
+    # and we have a live_view_url; nulled if recording fails to start.
+    # ``stop()`` is idempotent so the finally block can call it as a
+    # safety net without coordinating with the success path.
+    recorder: LiveViewRecorder | None = None
 
     async def on_credentials_saved(email: str, password: str) -> None:
         """Callback invoked when the agent calls save_credentials."""
@@ -721,6 +727,34 @@ async def execute_single_template(
                 live_view_fullscreen_url=session_ctx.get("live_view_fullscreen_url"),
                 live_view_debugger_url=session_ctx.get("live_view_debugger_url"),
             )
+
+        # Start a second headless Chromium that points at the live-view
+        # embed URL with record_video_dir set. Best-effort: any failure
+        # (URL missing, launch failure, navigate timeout) leaves the
+        # test running with no recording rather than crashing it.
+        live_view_url_for_recording = session_ctx.get("live_view_url")
+        if live_view_url_for_recording:
+            recorder = LiveViewRecorder(
+                live_view_url=live_view_url_for_recording,
+                output_dir=f"/tmp/recordings/{test_run_id}/{tpl_id}",
+                test_run_id=test_run_id,
+                template_name=tpl_name,
+            )
+            try:
+                await recorder.start()
+            except Exception as e:
+                log.warn(
+                    "template_screen_recorder_start_failed",
+                    err_type=type(e).__name__,
+                    err=str(e),
+                )
+                # Make sure no half-started Playwright resources linger
+                # on the worker if start() raised mid-launch.
+                try:
+                    await recorder.stop()
+                except Exception:
+                    pass
+                recorder = None
 
         # Navigate to the app URL before starting the test loop
         app_url = project.get("app_url", "")
@@ -814,19 +848,34 @@ async def execute_single_template(
                     err=str(e),
                 )
 
-        # Save Browserbase session recording
+        # Stop the live-view recorder while the cloud browser is still
+        # alive (cleaner cut than after teardown). The webm flushes
+        # synchronously inside stop(); we then transcode + upload.
+        webm_path: str | None = None
+        if recorder is not None:
+            try:
+                webm_path = await recorder.stop()
+            except Exception as e:
+                log.warn(
+                    "template_screen_recorder_stop_failed",
+                    err_type=type(e).__name__,
+                    err=str(e),
+                )
+
         recording_url = None
-        if browserbase_session_id:
+        if webm_path:
             log.info(
                 "template_save_recording_begin",
                 browserbase_session_id=browserbase_session_id,
+                webm_path=webm_path,
             )
             try:
                 recording_url = await save_session_recording(
                     supabase,
-                    browserbase_session_id,
+                    webm_path,
                     test_run_id,
                     template.get("name", "unknown"),
+                    browserbase_session_id or "",
                 )
                 log.info(
                     "template_save_recording_ok",
@@ -914,6 +963,24 @@ async def execute_single_template(
         raise
 
     finally:
+        # Always tear down the recorder before the cloud browser. stop()
+        # is idempotent — on the success path this is a no-op because
+        # we already stopped it before save_session_recording; on the
+        # exception path it flushes whatever was captured so a partial
+        # webm survives. We deliberately discard the return value here:
+        # if the test crashed mid-run, there's no place to attach the
+        # recording_url anyway (the chat message gets a "failed"
+        # status with no recording).
+        if recorder is not None:
+            try:
+                await recorder.stop()
+            except Exception as e:
+                log.warn(
+                    "template_screen_recorder_finally_stop_failed",
+                    err_type=type(e).__name__,
+                    err=str(e),
+                )
+
         log.info(
             "template_cleanup_session",
             browserbase_session_id=browserbase_session_id,

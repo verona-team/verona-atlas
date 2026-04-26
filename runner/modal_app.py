@@ -34,6 +34,7 @@ app = modal.App("atlas-runner")
 # -----------------------------------------------------------------------------
 runner_image = (
     modal.Image.debian_slim(python_version="3.13")
+    .apt_install("ffmpeg")
     .pip_install(
         "stagehand>=3.19,<4",
         "supabase",
