@@ -111,21 +111,21 @@ function AdvancedSectionSkeleton() {
 
 /**
  * Skeleton mirroring `<ChatInterface />` after a turn already exists:
- * a couple of message bubbles in the scroll column and a chat input
- * pinned to the bottom. We deliberately don't render a "V" hero state
- * here because that's only shown when the thread is empty *and* not
- * processing — most navigations land on a thread with at least the
- * bootstrap turn already persisted.
+ * one user bubble + one assistant response in the scroll column, plus
+ * a chat input pinned to the bottom. Two bubbles is enough to anchor
+ * the "this is a chat" expectation without making the placeholder
+ * busier than the real content that's about to swap in. We deliberately
+ * don't render a "V" hero state here because that's only shown when
+ * the thread is empty *and* not processing — most navigations land on
+ * a thread with at least the bootstrap turn already persisted.
  */
 function ProjectChatSkeleton() {
   return (
     <div className="relative flex h-full flex-col" aria-busy="true">
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[760px] space-y-8 px-6 py-8">
-          <MessageBubbleSkeleton align="user" lines={1} />
-          <MessageBubbleSkeleton align="assistant" lines={3} />
-          <MessageBubbleSkeleton align="user" lines={2} />
-          <MessageBubbleSkeleton align="assistant" lines={4} />
+          <UserBubbleSkeleton />
+          <AssistantBubbleSkeleton />
         </div>
       </div>
 
@@ -144,37 +144,34 @@ function ProjectChatSkeleton() {
   )
 }
 
-function MessageBubbleSkeleton({
-  align,
-  lines,
-}: {
-  align: 'user' | 'assistant'
-  lines: number
-}) {
-  if (align === 'user') {
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[80%] space-y-2 rounded-2xl bg-foreground/[0.04] px-4 py-3">
-          {Array.from({ length: lines }).map((_, i) => (
-            <Skeleton
-              key={i}
-              className="h-4"
-              style={{ width: i === lines - 1 ? '60%' : '100%' }}
-            />
-          ))}
-        </div>
-      </div>
-    )
-  }
+/**
+ * Mirrors the real user bubble in `MessageBubble`: a short rounded-2xl
+ * pill, right-aligned, single line of text height. The real component
+ * uses `rounded-2xl bg-muted px-4 py-2.5 text-[15px] leading-relaxed`,
+ * which renders a ~40px-tall capsule for one line of content. We render
+ * the entire bubble as one Skeleton element with a fixed width so it
+ * actually looks like a user message instead of a tall thin column.
+ */
+function UserBubbleSkeleton() {
   return (
-    <div className="space-y-2">
-      {Array.from({ length: lines }).map((_, i) => (
-        <Skeleton
-          key={i}
-          className="h-4"
-          style={{ width: i === lines - 1 ? '40%' : '100%' }}
-        />
-      ))}
+    <div className="flex justify-end">
+      <Skeleton className="h-10 w-80 max-w-[80%] rounded-2xl" />
+    </div>
+  )
+}
+
+/**
+ * Mirrors an assistant text bubble: full-width markdown column with a
+ * few lines of body text. No bubble background — the real assistant
+ * bubble is plain text on the page background, not a chip.
+ */
+function AssistantBubbleSkeleton() {
+  return (
+    <div className="space-y-2.5">
+      <Skeleton className="h-4 w-full" />
+      <Skeleton className="h-4 w-[92%]" />
+      <Skeleton className="h-4 w-[88%]" />
+      <Skeleton className="h-4 w-[40%]" />
     </div>
   )
 }
