@@ -543,6 +543,18 @@ function DeleteProjectSection({ projectId, projectName, onDeleted }: { projectId
 
   const nameMatches = confirmText === projectName
 
+  // Pressing Enter in the confirmation input is treated as clicking
+  // "Permanently delete", mirroring the sign-up form pattern where Enter
+  // submits the form. Guarded on `nameMatches && !deleting` so the user
+  // can't accidentally bypass the typed-name confirmation, and so a
+  // duplicate Enter mid-delete doesn't fire a second DELETE request.
+  function handleConfirmKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== 'Enter') return
+    if (!nameMatches || deleting) return
+    e.preventDefault()
+    void handleDelete()
+  }
+
   return (
     <Card size="sm" className="ring-0 border border-destructive/30">
       <CardContent className="space-y-4">
@@ -571,6 +583,7 @@ function DeleteProjectSection({ projectId, projectName, onDeleted }: { projectId
                   id="delete-confirm"
                   value={confirmText}
                   onChange={(e) => setConfirmText(e.target.value)}
+                  onKeyDown={handleConfirmKeyDown}
                   placeholder={projectName}
                   autoComplete="off"
                   autoFocus
