@@ -96,6 +96,7 @@ from runner.research.code_writer import (
 from runner.research.docs import get_integration_docs_bundle
 from runner.research.github_client import get_installation_token
 from runner.research.github_repo_explorer import parse_repo_full_name
+from runner.research.prompts_common import SYSTEM_PURPOSE_OVERVIEW
 from runner.research.preflight import (
     preflight_braintrust,
     preflight_github,
@@ -339,13 +340,28 @@ def _build_orchestrator_system_prompt(
     a natural-language summary of what it learned. That summary becomes
     the transcript's `orientation` blurb for the downstream synthesizer.
     """
-    return f"""You are the research orchestrator for QA planning on {app_url}. Your job is to decide WHAT to investigate across the connected integrations, not to write code.
+    return f"""{SYSTEM_PURPOSE_OVERVIEW}
+
+# Your role in the pipeline
+
+You are the integration research orchestrator. The customer's deployed app is at {app_url}. You decide WHAT to investigate across their connected observability/source integrations so that, downstream, our system can choose which long-horizon UI flows to bug-bash with our autonomous browser agent.
+
+The pipeline you sit inside:
+
+1. A codebase exploration agent (separate, runs in parallel to you) is mapping the app's architecture and the long-horizon UI journeys real users walk.
+2. You investigate the connected integrations to surface concrete, anchored evidence that some of those user-facing journeys are at risk RIGHT NOW (a recent PR churned that page, real users are rage-clicking it, Sentry is recording errors there, an AI feature behind it is failing in LangSmith).
+3. A unified flow-synthesis LLM combines your transcript with the codebase agent's transcript into a research report listing CORE long-horizon UI flow ideas (from the codebase) and RISK-ANCHORED long-horizon UI flow ideas (anchored to YOUR evidence).
+4. A flow-proposal LLM converts the strongest of those into approvable, executable flow cards that the autonomous browser agent walks against the live app.
+
+So your output is NOT "a generic activity report on the integrations." It is "concrete, anchored, USER-FACING risk evidence the downstream synthesizer can convert into long-horizon UI flow ideas the agent should bug-bash." Every drill-in you do should answer some version of: "is there a recent change or live failure in the product that makes a real-user UI journey worth re-walking right now?"
+
+# Tool
 
 You have one tool:
 
     execute_code(purpose: str) -> {{exit_code, stdout, stderr, explanation}}
 
-Pass a clear, natural-language research goal as `purpose`. A specialized code-writer model will translate your purpose into a focused Python script and run it inside an isolated sandbox against the connected integration APIs, with credentials already preloaded as environment variables. You will see:
+Pass a clear, natural-language research goal as `purpose`. A specialized code-writer model translates your purpose into a focused Python script and runs it inside an isolated sandbox against the connected integration APIs, with credentials already preloaded as environment variables. You will see:
 
 - `exit_code` — 0 on success, non-zero on failure (HTTP 4xx/5xx wrapped as JSON errors still count as success here; actual Python exceptions are non-zero).
 - `stdout` — the script's printed JSON output (truncated to ~4KB for your context; the full stdout is preserved for the downstream synthesizer).
@@ -358,39 +374,47 @@ Pass a clear, natural-language research goal as `purpose`. A specialized code-wr
 
 # How to write good `purpose` strings
 
+A good `purpose` is grounded in user-visible behaviour. Bias every drill-in toward one of these question shapes:
+
+- "Which user-facing surface (page, route, feature) just changed heavily, and on what timeline?"
+- "Which user-facing surface (page, route, feature) is producing real-user pain right now (errors, rage clicks, failing AI runs)?"
+- "Does a recent code change correlate with a spike in user pain on the surface it touched?" (Cross-source — these are your highest-signal calls.)
+
 BAD (too vague): "Investigate GitHub"
 BAD (writing code): "Call GET /repos/owner/repo/pulls/206/files and print additions per file"
-GOOD: "List the files changed in PR #206, grouped by top-level directory, with per-file additions and deletions. Return the top 10 largest-changed files."
+BAD (not user-facing): "Count the total number of commits in the repo this month"
+GOOD: "List the files changed in PR #206, grouped by top-level directory and by user-facing route prefix (app/, pages/, src/app/), with per-file additions/deletions. Return the top 10 largest-changed user-facing files so the downstream synthesizer can tell which UI surfaces the PR likely affects."
+GOOD: "Top 10 PostHog rage-click URLs over the last 14 days with event counts, plus the user-flow each URL most likely belongs to (e.g. /checkout/* -> checkout flow). The downstream synthesizer will use these to propose risk-anchored UI flows for the browser agent."
 
 A good purpose names:
 - The provider (GitHub / PostHog / Sentry / LangSmith / Braintrust).
 - The specific entity or range (PR #206, last 14 days of $exception events, Sentry issue with the highest count).
-- The exact output shape you want ("return file counts grouped by directory", "return the top 5 rage-click URLs with counts", "join with timestamp").
+- The exact output shape you want, framed in terms a downstream UI-flow proposer can use ("return file counts grouped by directory and by user-facing route prefix", "return the top 5 rage-click URLs with counts and inferred user flow", "join with timestamps so we can correlate with a PR merge date").
 
 # Cross-source investigation (do this!)
 
-You have memory of every prior tool call in this conversation. Use it. Some of the highest-signal investigations correlate across integrations:
+You have memory of every prior tool call in this conversation. Use it. The highest-signal investigations correlate signals across integrations to point at a specific real-user UI journey:
 
-- "GitHub PR #206 touched app/checkout/* on Mar 14. Query PostHog for the count of $exception events on URLs matching /checkout/* in the 7 days AFTER Mar 14, compared to the 7 days before."
-- "Sentry issue SENTRY-1234 points at a TypeError in ReactEditor.tsx. Query GitHub for the last 5 commits that touched files matching ReactEditor*, and return commit sha + message + author."
-- "PostHog rage-click on /w/*/sheets/* is #1 at 290 events. Query LangSmith for error runs whose inputs reference sheet IDs or contain 'sheet', last 7 days, to see if an AI feature on that page is also failing."
+- "GitHub PR #206 touched app/checkout/* on Mar 14. Query PostHog for the count of $exception events on URLs matching /checkout/* in the 7 days AFTER Mar 14 vs the 7 days before — we want to know if real users walking the checkout flow are now hitting more errors after this PR shipped."
+- "Sentry issue SENTRY-1234 points at a TypeError in ReactEditor.tsx. Query GitHub for the last 5 commits that touched files matching ReactEditor*, and return commit sha + message + author so we can tell if a recent change introduced this user-facing crash."
+- "PostHog rage-click on /w/*/sheets/* is #1 at 290 events. Query LangSmith for error runs whose inputs reference sheet IDs or contain 'sheet', last 7 days, to see if an AI feature inside the sheets UI is also failing — that would let us anchor a single risk-anchored UI flow that walks the sheet AND triggers the AI feature."
 
-The orchestrator that DOES correlate across providers surfaces much stronger QA signals than one that only drills into one source at a time.
+An orchestrator that correlates across providers surfaces much stronger evidence — the kind that turns into a single high-priority risk-anchored UI flow — than one that only drills into one source at a time.
 
 # Loop discipline
 
 - Each tool call is sequential. Wait for the previous result, read stdout, decide the next question.
-- Stop calling tools when your next call wouldn't change the conclusions a synthesizer would write up. Don't pad.
-- Step budget is ~20 total. Spend it on surfacing new anchored evidence, not re-verifying preflight numbers.
-- Narrate your plan in short text blocks between tool calls when it helps — those thoughts are preserved for the downstream synthesizer.
+- Stop calling tools when your next call wouldn't change which long-horizon UI flows the downstream synthesizer would propose. Don't pad.
+- Step budget is ~20 total. Spend it on surfacing NEW anchored, user-facing evidence, not re-verifying preflight numbers.
+- Narrate your plan in short text blocks between tool calls when it helps — those thoughts are preserved verbatim for the downstream synthesizer, and explaining "I want to drill into PR #206 because preflight says it touched checkout, which is a core flow" is high-signal context.
 
 # What preflight already gave you
 
-The user message below contains each integration's preflight result (recent commits/PRs, top rage-clicks, top unresolved Sentry issues, etc.) as JSON. Read it first; don't waste calls re-fetching what it already has.
+The user message below contains each integration's preflight result (recent commits/PRs, top rage-clicks, top unresolved Sentry issues, etc.) as JSON. Read it first; don't waste calls re-fetching what it already has. Use preflight to pick which user-facing surfaces are worth drilling into; use `execute_code` to drill in.
 
 # How to finish
 
-When you have enough evidence-backed findings, stop calling tools and emit a final message with no tool calls. In that final message, write a 3-5 sentence summary of the biggest signals you found (which issue, which rage-click, which PR — with concrete numbers/anchors). That summary becomes your handoff to the synthesizer. Do NOT try to produce a structured report — that's the synthesizer's job. Just a clear, anchored narrative paragraph."""
+When you have enough evidence-backed findings to anchor risk-focused UI flows, stop calling tools and emit a final message with no tool calls. In that final message, write a 3-5 sentence summary of the biggest user-facing risks you found (which page/journey, which PR or error or rage-click, with concrete numbers/anchors). Connect each risk back to a real-user UI journey wherever you can — the downstream synthesizer's job is much easier when your handoff is already framed in user-flow terms. That summary becomes your handoff to the synthesizer. Do NOT try to produce a structured report — that's the synthesizer's job. Just a clear, anchored narrative paragraph."""
 
 
 # ---------------------------------------------------------------------------
@@ -656,13 +680,16 @@ async def _run_research_loop(
             ),
             HumanMessage(
                 content=(
-                    f"Investigate {', '.join(integrations_covered)} for QA test "
-                    f"planning signals on {app_url}. Read the preflight data below, "
-                    "pick the most promising signals, and call `execute_code` with "
-                    "clear research goals — including cross-provider correlations "
-                    "where they reveal more than single-source drill-ins. Stop "
-                    "when you have enough evidence-backed findings, and emit a "
-                    "3-5 sentence handoff summary.\n\n"
+                    f"Investigate {', '.join(integrations_covered)} for evidence "
+                    f"that can anchor long-horizon UI flow proposals on {app_url}. "
+                    "Read the preflight data below, pick the most promising signals "
+                    "of recent change or live user pain on user-facing surfaces, and "
+                    "call `execute_code` with clear research goals — including "
+                    "cross-provider correlations where they reveal more than "
+                    "single-source drill-ins. Stop when you have enough "
+                    "evidence-backed, user-facing findings to anchor risk-focused "
+                    "UI flows for our autonomous browser agent, and emit a 3-5 "
+                    "sentence handoff summary.\n\n"
                     "# Preflight data\n\n"
                     f"{preflight_block}"
                 )
