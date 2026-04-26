@@ -7,7 +7,7 @@ import { Loader2 } from 'lucide-react'
 import { signIn } from '@/app/actions/auth'
 import { HalftoneBackground } from '@/components/landing/halftone-background'
 import { toast } from 'sonner'
-import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
@@ -43,9 +43,6 @@ export default function LoginPage() {
             <CardTitle className="text-3xl font-normal tracking-tight sm:text-4xl">
               Welcome back
             </CardTitle>
-            <CardDescription>
-              Sign in to your account to continue
-            </CardDescription>
           </CardHeader>
 
           <CardContent className="px-6 sm:px-10">
