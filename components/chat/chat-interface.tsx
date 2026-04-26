@@ -979,9 +979,9 @@ export function ChatInterface({
                */}
               {!displayMessages.some((m) => m.role === 'assistant') && (
                 <p className="text-[15px] leading-[1.7] text-foreground">
-                  We&apos;re analyzing your app and finding UI flows worth
+                  I&apos;m analyzing your app and finding UI flows worth
                   testing. This may take a little while — feel free to
-                  navigate away, we&apos;ll keep working in the background.
+                  navigate away, I&apos;ll keep working in the background.
                 </p>
               )}
               <ThinkingIndicator />
