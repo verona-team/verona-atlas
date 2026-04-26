@@ -75,7 +75,10 @@ class CodebaseEvidenceSnippet(BaseModel):
     )
     relevance: str = Field(
         description=(
-            "One short sentence on why this snippet matters for QA planning."
+            "One short sentence on the user journey or user-facing surface "
+            "this snippet helps anchor — i.e. why it matters when downstream "
+            "synthesis is choosing which long-horizon UI flows our autonomous "
+            "browser agent should walk."
         )
     )
 
@@ -350,7 +353,10 @@ class _SynthEvidenceSnippet(BaseModel):
     )
     relevance: str = Field(
         description=(
-            "One short sentence on why this snippet matters for QA planning."
+            "One short sentence on the user journey or user-facing surface "
+            "this snippet helps anchor — i.e. why it matters when the "
+            "downstream synthesizer is choosing which long-horizon UI flows "
+            "the autonomous browser agent should walk."
         )
     )
 
@@ -366,27 +372,40 @@ class CodebaseExplorationSynthOutput(BaseModel):
     """
 
     summary: str = Field(
-        description="3-5 sentences on what the app is and its dominant flow."
+        description=(
+            "3-5 sentences on what this app IS and the dominant long-horizon "
+            "user journey a real signed-in user walks in a typical session. "
+            "This is the anchor the downstream flow proposer uses to pick "
+            "CORE flows for the autonomous browser agent to bug-bash."
+        )
     )
     architecture: str = Field(
         description=(
             "Stack + routing model + auth strategy + notable patterns "
-            "(monorepo, server actions, tRPC, etc.)."
+            "(monorepo, server actions, tRPC, etc.). Only include facts the "
+            "downstream proposer needs to construct concrete navigate URLs "
+            "and to know which auth gates the autonomous browser agent has "
+            "to clear."
         )
     )
     inferredUserFlows: list[str] = Field(
         description=(
-            "Concrete UI-level user flows a user actually does, each phrased "
-            "as a short action (e.g. 'Sign in with magic link', 'Create a "
-            "new sheet and add columns'). Derive from routes / pages / "
-            "components."
+            "Concrete, multi-step long-horizon user journeys real users "
+            "actually walk in the product. Each item should describe a "
+            "complete journey that takes a real user roughly 30-90 seconds, "
+            "not a single click — e.g. 'Sign in with magic link, then land "
+            "on dashboard and create a new sheet, add columns, edit a cell, "
+            "and confirm persistence after reload'. Derive from routes / "
+            "pages / mutation surfaces. Aim for 8-12 such journeys."
         )
     )
     testingImplications: str = Field(
         description=(
-            "Risks a QA human should prioritize given what was seen "
-            "(auth surface area, payment flows, forms with complex "
-            "validation, new or heavily churned modules, accessibility)."
+            "User-facing surfaces the downstream synthesizer should bias "
+            "toward when proposing long-horizon UI flows for our autonomous "
+            "browser agent (heavy auth/permission gates, payment flows, "
+            "complex forms, recently-churned or new modules, sharing or "
+            "collaboration paths, AI features the agent might trigger)."
         )
     )
     keyPathsExamined: list[str] = Field(
@@ -486,22 +505,26 @@ class FlowSynthOutput(BaseModel):
     coreFlows: list[str] = Field(
         default_factory=list,
         description=(
-            "Long-horizon user journeys a signed-in user does in a typical "
-            "session — NOT tied to any specific recent change. Each flow "
-            "MUST be a multi-step sequence of 4-8 concrete UI interactions "
-            "connected by arrows (→). Authentication, if required, is the "
-            "FIRST step of a larger flow, never the whole flow. Target "
-            "~60% of total flows."
+            "CORE long-horizon UI flows our autonomous browser agent should "
+            "bug-bash regardless of recent change — the load-bearing "
+            "journeys real users walk every session (auth, the product's "
+            "main verb, primary CRUD, settings, billing, sharing). Each "
+            "flow MUST be a multi-step real-user journey of 4-8 concrete "
+            "UI interactions connected by arrows (→). Authentication, if "
+            "required, is the FIRST step of a larger journey, never the "
+            "whole flow. Target ~60% of total flows."
         ),
     )
     riskFocusedFlows: list[str] = Field(
         default_factory=list,
         description=(
-            "Long-horizon flows anchored to specific recent evidence (a "
-            "PR, rage-click, Sentry issue, LangSmith failure). Each must "
-            "cite the anchor in the flow description and still be a "
-            "4-8 step sequence with arrows (→). Target ~40% of total "
-            "flows."
+            "RISK-ANCHORED long-horizon UI flows: the same multi-step "
+            "real-user journey shape, but routed through a surface where "
+            "recent integration evidence shows risk (PR, rage-click, "
+            "Sentry issue, LangSmith failure). Each MUST cite the anchor "
+            "in the flow description and still read as a real-user journey "
+            "of 4-8 UI interactions with arrows (→), not a synthetic bug "
+            "repro. Target ~40% of total flows."
         ),
     )
     drillInHighlights: list[str] = Field(

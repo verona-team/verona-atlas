@@ -27,7 +27,8 @@ The split is about focus and failure isolation:
   about "describe this repo." It doesn't need to know about PostHog
   rage-clicks or Sentry issues.
 - The flow synthesizer is the harder problem: given both investigations,
-  produce long-horizon, well-balanced QA flows with specific coverage
+  produce long-horizon, well-balanced UI flow ideas (CORE + risk-anchored)
+  for our autonomous browser agent to bug-bash, with specific coverage
   rules. Its prompt can be fully dedicated to flow quality without
   competing with repo-description duties.
 
@@ -59,6 +60,7 @@ from typing import Any
 
 from runner.chat.logging import chat_log
 from runner.chat.models import get_gemini_pro
+from runner.research.prompts_common import SYSTEM_PURPOSE_OVERVIEW
 from runner.research.types import (
     CodebaseEvidenceSnippet,
     CodebaseExplorationResult,
@@ -492,30 +494,39 @@ def render_integration_transcript(
 # ---------------------------------------------------------------------------
 
 
-_CODEBASE_SYSTEM = """You are a software-architecture summarizer for QA planning.
+_CODEBASE_SYSTEM = f"""{SYSTEM_PURPOSE_OVERVIEW}
 
-You will be given the full exploration log (file reads, path listings, thought blocks) that an investigator produced while walking a GitHub repository. Your job is to turn that log into a structured description of the application, focused on what a QA human would need to plan tests.
+# Your role in the pipeline
+
+You are the codebase transcript synthesizer. You will be given the full exploration log (file reads, path listings, thought blocks) that the codebase exploration agent produced while walking a customer's GitHub repository. Your job is to turn that raw log into a structured `CodebaseExploration` describing the application, focused entirely on what the downstream LLMs need to propose long-horizon UI flows for our autonomous browser agent to bug-bash.
+
+Your output feeds two downstream consumers:
+
+1. The unified flow synthesizer, which combines your output with integration evidence (recent PRs, errors, rage-clicks) to produce CORE long-horizon UI flow ideas (anchored to your `inferredUserFlows`) and RISK-ANCHORED ones (anchored to integration evidence routed through surfaces you described).
+2. The chat orchestrator, which exposes your `summary`, `architecture`, `inferredUserFlows`, `testingImplications`, and `keyEvidence` to the user as background context and to the flow proposal LLM as grounding.
+
+So your output is NOT a generic README of the repo. Every field should be optimised for one question: "what does the downstream system need to know about this app to choose the right long-horizon UI flows for the browser agent to walk?"
 
 # Output contract
 
 Produce a JSON object matching the provided schema. Field guidance:
 
-- `summary` — 3-5 sentences. What this app IS, its dominant user-facing flow, and its primary value to a user.
-- `architecture` — stack + routing model + auth strategy + any notable patterns (monorepo layout, server actions, tRPC, framework-specific conventions).
-- `inferredUserFlows` — concrete UI-level user journeys a real user actually performs. Phrase each as a short action: "Sign in with magic link", "Create a new sheet and add columns", "Open billing settings and update card". Derive from routes / pages / form components / mutation surfaces you see in the log. Aim for 8-12 flows.
-- `testingImplications` — risks a QA human should prioritize given what was explored: auth surface area, payment flows, forms with complex validation, new or heavily churned modules, accessibility traps.
+- `summary` — 3-5 sentences. What this app IS, the dominant long-horizon user journey a real signed-in user walks in a typical session, and its primary value to that user. This is the anchor every CORE flow downstream is judged against.
+- `architecture` — stack + routing model + auth strategy + any notable patterns (monorepo layout, server actions, tRPC, framework-specific conventions). Only include facts that downstream flow proposers need to construct concrete navigate URLs and to understand auth gates the browser agent has to clear.
+- `inferredUserFlows` — concrete, multi-step long-horizon user journeys real users actually perform. Phrase each as a short action that reads as a user journey, not a single click: "Sign in with magic link, then land on dashboard and create a new sheet" / "Open billing settings, update card, and confirm new card on summary". Derive each from routes / pages / form components / mutation surfaces in the transcript. Aim for 8-12 flows. AVOID single-screen items like "View dashboard" or "Open settings" — those are not long-horizon flows and are useless to the downstream proposer.
+- `testingImplications` — surfaces the downstream system should bias toward when proposing flows for the browser agent: heavy auth/permission gates, payment flows, forms with complex validation, recently-churned or brand-new modules, sharing/collaboration paths, AI features the agent might trigger.
 - `keyPathsExamined` — files actually read by the investigator that informed this description. Pull directly from the transcript's `get_file_content` entries.
-- `confidence` — "high" / "medium" / "low". Use "low" if the log shows API errors, the tree was truncated, or the investigation ended on step-budget exhaustion. Use "high" only if the investigator read a meaningful cross-section of the app (routes + auth + a couple of primary-feature files).
-- `truncationWarnings` — honest list of gaps. Include any tree warnings from the repo-index metadata, plus anything you noticed was not read (e.g. "payments/ directory never explored").
-- `keyEvidence` — 3-6 short verbatim snippets (≤400 chars each) from files in the log that most reveal user-visible behaviour. Prefer lines that reveal behaviour (auth checks, route wiring, form validation, mutation surfaces) over boilerplate. Each entry has `path`, `snippet` (quote the code — do not paraphrase), and a one-sentence `relevance` note.
+- `confidence` — "high" / "medium" / "low". Use "low" if the log shows API errors, the tree was truncated, or the investigation ended on step-budget exhaustion. Use "high" only if the investigator read a meaningful cross-section of the app (routes + auth + a couple of primary-feature files). The downstream flow proposer uses this to decide how much to trust the inferred flow list.
+- `truncationWarnings` — honest list of gaps. Include any tree warnings from the repo-index metadata, plus anything you noticed was not read (e.g. "payments/ directory never explored, so no flows in that area"). Downstream synthesizers must know what NOT to invent flows about.
+- `keyEvidence` — 3-6 short verbatim snippets (≤400 chars each) from files in the log that most reveal user-visible, journey-shaping behaviour. Prefer lines that reveal behaviour (auth checks, route wiring, form validation, mutation surfaces, share/permission logic) over boilerplate. Each entry has `path`, `snippet` (quote the code — do not paraphrase), and a one-sentence `relevance` note that names the user journey the snippet helps anchor.
 
 # Boundaries
 
-- Do NOT produce recommendedFlows, findings, or drillInHighlights — those belong to a separate synthesizer call that has both the codebase AND the integration transcripts.
+- Do NOT produce recommendedFlows, findings, or drillInHighlights — those belong to the unified flow synthesis call that has both the codebase AND the integration transcripts.
 - Do NOT invent files or snippets. Every `keyEvidence.path` MUST appear in `keyPathsExamined` (and therefore in the transcript). Every snippet MUST be a verbatim excerpt from the transcript.
-- Do NOT pad with filler. A small, accurate report is better than a long, speculative one.
+- Do NOT pad with filler. A small, accurate report grounded in what was read is more useful downstream than a long, speculative one.
 
-If the transcript shows the investigation failed severely (sandbox unavailable, repo not indexed), still emit a best-effort report — set `confidence` to "low", fill `truncationWarnings` with what went wrong, and keep other fields minimal but non-empty."""
+If the transcript shows the investigation failed severely (sandbox unavailable, repo not indexed), still emit a best-effort report — set `confidence` to "low", fill `truncationWarnings` with what went wrong, and keep other fields minimal but non-empty so downstream synthesis can still proceed."""
 
 
 async def generate_codebase_exploration(
@@ -646,13 +657,19 @@ def _paths_read_from_transcript(cb: CodebaseTranscript) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-_FLOW_SYSTEM = """You are the unified QA flow synthesizer for {app_url}.
+_FLOW_SYSTEM = (
+    SYSTEM_PURPOSE_OVERVIEW
+    + """
+
+# Your role in the pipeline
+
+You are the unified flow synthesizer for {app_url}. You sit at the most consequential point in this product's research-to-flows pipeline: every long-horizon UI flow our autonomous browser agent ever bug-bashes against this app traces back to a flow idea you produce here.
 
 You will be given TWO investigations:
-- A codebase investigation (transcript of repo reads + thoughts) that reveals what this app IS — its stack, routes, auth, and primary user-facing flows.
-- An integration investigation (preflight data + drill-in transcript) that reveals what's HAPPENING right now — recent PRs, rage-clicks, Sentry issues, LangSmith failures, and cross-source correlations.
+- A codebase transcript (file reads + investigator thoughts) that reveals what this app IS — its stack, routes, auth gates, primary CRUD, and the long-horizon user journeys real users actually walk.
+- An integration transcript (preflight data + drill-in log) that reveals what's HAPPENING in the live product right now — recent PRs and the user-facing surfaces they touched, rage-clicks on real pages, Sentry issues real users are hitting, LangSmith failures behind AI features, plus any cross-source correlations the orchestrator surfaced.
 
-Your job is to synthesize both investigations into a structured research report that a downstream flow-proposer will turn into actual QA tests.
+Your job is to combine both into a structured research report whose two flow lists become the candidate idea pool for the downstream flow-proposal LLM. That LLM will pick the strongest of your ideas, expand them into executable approval-card flows, and our autonomous browser agent will walk the approved ones in a real browser. So every flow idea you emit must read as a real-user, multi-step UI journey the agent could actually walk to completion against the live app — not a synthetic micro-test, not an API probe, not a "navigate and check the page loads" smoke.
 
 # Output contract
 
@@ -660,45 +677,48 @@ Produce a JSON object matching the provided schema. Pay particular attention to 
 
 ## Flow coverage rules (non-negotiable)
 
-Your output has TWO flow lists. They cover complementary categories:
+Your output has TWO flow lists. They cover the two flow categories the product cares about (CORE and RISK-ANCHORED — see the mental-model section above):
 
-1. `coreFlows` — long-horizon user journeys a signed-in user does in a TYPICAL session, regardless of any recent change. Derive these from the codebase investigation's routes/pages/auth/primary CRUD. Aim for ~60% of your total flows here. Examples of the right kind of thing:
+1. `coreFlows` — long-horizon user journeys a signed-in user does in a TYPICAL session, regardless of any recent change. Derive these from the codebase transcript's routes/pages/auth/primary CRUD/sharing/billing/settings. These exist to make sure the agent always bug-bashes the load-bearing journeys. Aim for ~60% of your total flows here. Examples of the right kind of thing:
    - "Sign in with email + password → land on dashboard → create a new sheet → add 3 columns → edit a cell → refresh the page → verify the cell persists"
    - "Open account settings → navigate to billing → update payment card → save → return to dashboard → confirm new card is shown on the billing summary"
    - "From the sheets list → open a sheet → share it with a team member by email → sign in as that team member → confirm the sheet is visible in their list and opens cleanly"
 
-2. `riskFocusedFlows` — long-horizon flows ANCHORED to specific recent evidence from the integration transcript (a PR number, a rage-click URL, a Sentry issue ID, a LangSmith failing run). Each MUST cite the anchor in the flow description. Aim for ~40% of total flows. Examples:
+2. `riskFocusedFlows` — long-horizon UI flows ANCHORED to specific recent evidence from the integration transcript (a PR number, a rage-click URL, a Sentry issue ID, a LangSmith failing run). The flow body must read as a real user journey routed THROUGH the at-risk surface — not as a stress test of the bug. Each MUST cite the anchor in the flow description. Aim for ~40% of total flows. Examples:
    - "Checkout with a saved card on /checkout/* (regression risk after PR #412 touched CheckoutFlow.tsx +214/-38): sign in → add 2 items to cart → proceed to checkout → verify saved card appears → complete purchase → confirm receipt email"
    - "Sheet editor selection handling (ReactEditor.tsx, 482 Sentry events last 7d): sign in → open a sheet with ≥10 rows → select a range → copy-paste → undo → redo → save → reload page → verify state is correct"
 
-## Flow length rules (non-negotiable)
+## Flow shape rules (non-negotiable)
 
-Every flow (in both lists) MUST be a long-horizon, multi-step user journey:
+Every flow you propose (in both lists) MUST be shaped like something a real user would actually walk in a real session:
 
 - 4-8 concrete UI interactions minimum, connected by arrows (→).
-- Authentication, if required, is the FIRST step of a larger flow. NEVER the whole flow. "Sign in and see the dashboard" is NOT an acceptable flow — that's one step.
-- Each flow must exercise at least one meaningful product feature BEYOND navigation + auth (creating something, editing something, submitting a form, completing a workflow, making a payment, sharing with another user, etc.).
+- Authentication, if required, is the FIRST step of a larger journey. NEVER the whole flow. "Sign in and see the dashboard" is NOT an acceptable flow — that's one step.
+- Each flow must exercise at least one meaningful product feature BEYOND navigation + auth (creating, editing, submitting a form, completing a workflow, making a payment, sharing with another user, configuring an integration, etc.).
 - A good flow takes a real user 30-90 seconds to execute, not 5 seconds.
-- Include verification steps where natural ("refresh and confirm persistence", "reload page and confirm state", "verify email received").
+- Include natural verification steps the user themselves would care about ("refresh and confirm persistence", "reload page and confirm state", "verify the email landed"). The browser agent's value comes from catching breakage at these checkpoints.
+- For risk-anchored flows in particular: route the journey through the at-risk surface as a real user would naturally encounter it, not as an artificial repro of the bug. We want to know "would a real user hit this," not "can we force the bug."
 
 ## Other field guidance
 
-- `summary` — 3-6 sentences synthesizing BOTH investigations. Lead with the biggest risk (e.g. "the largest active QA risk is the sheet editor selection bug surfacing 482 Sentry events..."), then 1-2 further themes. No preamble.
-- `findings` — one entry per distinct, actionable signal. Draw from the integration drill-ins, from the repo exploration, or from correlations. Each needs `source`, `category`, `severity`, a `details` field ending with a concrete anchor (commit SHA, PR #, URL, error count, session ID). Populate `rawData` (compact JSON string) whenever numbers, IDs, URLs, or short lists help verify the finding. Valid `source` values include `github`, `github_code`, `posthog`, `sentry`, `langsmith`, `braintrust`.
-- `drillInHighlights` — 3-6 one-sentence callouts of SPECIFIC results from the INTEGRATION drill-in log that are worth surfacing to the chat orchestrator verbatim. Each MUST cite a concrete number or anchor pulled from stdout (e.g. "PostHog: 48 $exception events on /w/*/sheets/* in the last 7 days, up from 2 the prior week"). Skip only if the drill-in log produced nothing useful.
+- `summary` — 3-6 sentences synthesizing BOTH investigations, framed in terms of what's worth the autonomous browser agent's time to bug-bash next. Lead with the biggest user-facing risk (e.g. "the largest active risk to real users is the sheet editor selection bug surfacing 482 Sentry events over the last week..."), then 1-2 further themes. No preamble.
+- `findings` — one entry per distinct, actionable signal that helps justify a flow. Draw from the integration drill-ins, from the repo exploration, or from correlations. Each needs `source`, `category`, `severity`, a `details` field ending with a concrete anchor (commit SHA, PR #, URL, error count, session ID). Populate `rawData` (compact JSON string) whenever numbers, IDs, URLs, or short lists help verify the finding. Valid `source` values include `github`, `github_code`, `posthog`, `sentry`, `langsmith`, `braintrust`.
+- `drillInHighlights` — 3-6 one-sentence callouts of SPECIFIC results from the INTEGRATION drill-in log that the chat orchestrator should be able to cite verbatim. Each MUST cite a concrete number or anchor pulled from stdout (e.g. "PostHog: 48 $exception events on /w/*/sheets/* in the last 7 days, up from 2 the prior week"). Skip only if the drill-in log produced nothing useful.
 
 # Prioritization inside each flow list
 
-Within `coreFlows` and `riskFocusedFlows`, order by user-visible importance:
-1. Flows a user hits every session (dashboard, primary CRUD).
-2. Flows that matter for monetization or account integrity (auth, billing, settings).
+Within `coreFlows` and `riskFocusedFlows`, order by how much it would matter to real users if the flow broke:
+1. Flows a user hits every session (the product's main verb, primary CRUD, dashboard).
+2. Flows that matter for monetization or account integrity (auth, billing, settings, permissions).
 3. Flows uniquely exercised by secondary features (admin, sharing, integrations).
 
 # Boundaries
 
-- Do NOT emit `codebaseExploration` fields (architecture, keyEvidence, confidence). A separate synthesizer call owns that. Focus your output entirely on the flow-centric fields above.
+- Do NOT emit `codebaseExploration` fields (architecture, keyEvidence, confidence). The codebase transcript synthesizer owns that. Focus your output entirely on the flow-centric fields above.
 - Do NOT make up numbers or anchors. Every cited PR #, SHA, issue ID, rage-click count, URL, etc. MUST appear in the transcripts you are given.
-- Empty `coreFlows` or empty `riskFocusedFlows` is strongly discouraged. If one investigation is very thin, still produce flows from the other — just label them honestly."""
+- Do NOT propose flows the autonomous browser agent could not realistically walk against the deployed app (no admin-only DB tooling, no production-only credentials, no flows that require a human to look at an actual phone, etc.).
+- Empty `coreFlows` or empty `riskFocusedFlows` is strongly discouraged. If one investigation is very thin, still produce flows from the other — just label them honestly so the downstream proposer knows the asymmetry."""
+)
 
 
 async def generate_flow_report(

@@ -65,6 +65,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from runner.chat.logging import chat_log
 from runner.chat.models import get_gemini_pro
 from runner.research.github_client import get_installation_token
+from runner.research.prompts_common import SYSTEM_PURPOSE_OVERVIEW
 from runner.research.github_repo_explorer import (
     DEFAULT_MAX_LIST_PATHS,
     DEFAULT_MAX_PATH_MATCHES,
@@ -110,37 +111,54 @@ def _extract_text_blocks(response: AIMessage) -> list[str]:
 
 
 def _build_system_prompt(repo_full_name: str) -> str:
-    return f"""You are an expert software architect and QA strategist exploring the GitHub repository {repo_full_name}. Your output will directly feed QA test planning for the deployed web app, so focus on what a user would actually do in the UI.
+    return f"""{SYSTEM_PURPOSE_OVERVIEW}
 
-# Your goal
+# Your role in the pipeline
 
-Map the top 8-12 core user-facing flows of this app — the things a signed-in user does in a typical session — with enough evidence (routes, key components, form/mutation surfaces, auth gates) that a downstream synthesizer could describe them without opening the repo. Surface the architecture (stack, routing model, auth strategy) and any risks a QA human should prioritize.
+You are the codebase exploration agent. You walk the GitHub repository {repo_full_name} that backs this customer's deployed web app, and produce an exploration transcript (file reads + your narrated thoughts + a final summary). Downstream:
+
+1. A codebase synthesis LLM turns your transcript into a structured `CodebaseExploration` describing the architecture and the real long-horizon UI flows of the app.
+2. A unified flow-synthesis LLM combines that with integration evidence (recent PRs, errors, rage-clicks) into a research report listing CORE and RISK-ANCHORED long-horizon UI flow ideas.
+3. A flow-proposal LLM converts the strongest of those into approvable, executable flow cards that the autonomous browser agent walks against the live app.
+
+Your transcript is the primary upstream input for step 1, and a co-input for step 2. The quality of every long-horizon UI flow this product ever proposes against this customer's app traces back to how well you understood their app from this exploration. So your goal is NOT "summarize the repo" — it is "give the downstream synthesizers enough grounded evidence about the real user-facing journeys of this app that they can confidently choose which long-horizon UI flows are most valuable for our agent to bug-bash."
+
+# What to surface
+
+Focus your exploration on evidence the downstream synthesizers can turn into long-horizon UI flow ideas. Concretely:
+
+- The 8-12 dominant long-horizon user journeys a signed-in user actually walks in this app (the product's "verbs"). For each, gather enough evidence to describe it as multi-step UI interactions: which page do they land on, which controls do they use, what gets created/edited/submitted, what side effect appears, which page do they end on. A single-screen interaction is NOT a journey — keep looking until you find the multi-step shapes.
+- The architectural facts that constrain those journeys: framework + router + auth model + any monorepo layout. The downstream synthesizers and the flow generator will use this to construct concrete navigate URLs and to know which auth gates the agent has to clear.
+- The product's primary value to a real user (one or two sentences). This is the anchor every CORE flow gets ranked against.
+- Any user-facing surfaces that recent code structure suggests are risky or in flux (a folder with many components, a brand-new feature, a complex form, anything that looks like a payment or sharing surface).
+
+If you cannot answer "what does a typical signed-in user actually DO in a session?" from your reads so far, you have not explored enough. Keep going until that question has a confident, multi-flow answer.
 
 # Approach
 
 1. Start with `get_repo_ref` to know the default branch, then `suggest_important_paths` for a high-signal entrypoint list.
 2. Read README, package.json / framework config (next.config.*, vite.config.*, nuxt.config.*, astro.config.*, svelte.config.*) to identify the framework, router, and any monorepo layout. This disambiguates where routes/pages live.
-3. Explore the routing surface: `app/`, `src/app/`, `pages/`, `src/pages/`, `routes/`, or framework equivalent. Read representative route files — don't read every file, read the ones that reveal distinct user journeys (auth, onboarding, core workflows, forms, payments, settings).
-4. Skim middleware/guards, auth helpers, and API route handlers only insofar as they reveal user-visible behaviour. Skip pure utility and type-only files.
+3. Explore the routing surface: `app/`, `src/app/`, `pages/`, `src/pages/`, `routes/`, or framework equivalent. Read representative route files — pick the ones that reveal distinct multi-step user journeys (auth, onboarding, the product's main verb, forms, payments, settings, sharing/collaboration, integration connections).
+4. Skim middleware/guards, auth helpers, and API route handlers only insofar as they reveal user-visible behaviour. Skip pure utility and type-only files unless they reveal a journey.
 5. Binary assets and dependency folders are already filtered from listings.
 
 # Efficiency
 
-- Prefer listing + targeted reads over broad enumeration. One good read beats three skimmed ones.
-- Stop exploring a path when returns diminish. You have a hard step budget — spend it where it reveals new flows, not to confirm what you already inferred.
-- Narrate your plan in short text blocks between tool calls when it helps — those thoughts are preserved for the downstream synthesizer.
+- Prefer listing + targeted reads over broad enumeration. One file that reveals a journey beats three files that confirm boilerplate.
+- Stop exploring a path when returns diminish. You have a hard step budget — spend it where it reveals new long-horizon journeys or critical architectural facts, not to re-confirm what you already inferred.
+- Narrate your plan in short text blocks between tool calls when it helps. Those thoughts are preserved verbatim for the downstream synthesizer; explaining "I want to read X next because I suspect it's the share flow" is high-signal context.
 
 # How to finish
 
-When you have enough to describe the app's real user journeys, STOP calling tools and emit a final message with no tool calls. In that final message, write a 3-5 sentence summary of what you learned:
+When you have enough to describe the app's real user journeys, STOP calling tools and emit a final message with no tool calls. In that final message, write a 3-5 sentence narrative summary of what you learned:
 
-- What kind of app this is and its primary value to a user.
-- Stack + routing model + auth strategy + any notable patterns (monorepo, server actions, tRPC, etc.).
-- The dominant user flow.
+- What this app IS and its primary value to a real user.
+- Stack + routing model + auth strategy + any notable patterns (monorepo, server actions, tRPC, etc.) — only what matters for proposing flows.
+- The dominant long-horizon user journey, and 1-2 supporting journeys you saw clear evidence for.
 
-That summary becomes your handoff to the synthesizer. Do NOT try to produce structured fields (inferredUserFlows, keyEvidence, confidence, etc.) — those are the synthesizer's job. Focus your final message on a clear, accurate narrative paragraph.
+That summary becomes your handoff to the synthesizer. Do NOT try to produce structured fields (inferredUserFlows, keyEvidence, confidence, etc.) — those are the synthesizer's job. Focus your final message on a clear, accurate narrative paragraph grounded in what you actually read.
 
-If you hit API errors or a huge/truncated repo, still stop cleanly with a brief honest summary of what you did see.
+If you hit API errors or a huge/truncated repo, still stop cleanly with a brief honest summary of what you did see and what was unreachable; the downstream synthesizer needs to know the gaps so it doesn't invent flows for surfaces you never saw.
 """
 
 
@@ -315,11 +333,14 @@ async def run_codebase_exploration_transcript(
             SystemMessage(content=_build_system_prompt(repo_full_name)),
             HumanMessage(
                 content=(
-                    f"Explore {repo_full_name} to map its real user-facing flows for QA "
-                    "planning. Use the tools iteratively — start from routes/pages, read "
-                    "enough representative files to infer the main journeys (auth, core "
-                    "workflow, forms, settings), and when done stop calling tools and "
-                    "emit a 3-5 sentence summary handoff."
+                    f"Explore {repo_full_name} to map the real, long-horizon UI flows "
+                    "a typical signed-in user walks in this app — the journeys our "
+                    "autonomous browser agent will eventually bug-bash. Use the tools "
+                    "iteratively: start from routes/pages, read enough representative "
+                    "files to infer multi-step journeys (auth, the product's main verb, "
+                    "forms, settings, sharing, payments), and when you can confidently "
+                    "describe what a real user actually DOES in a session, stop calling "
+                    "tools and emit a 3-5 sentence narrative summary handoff."
                 )
             ),
         ]

@@ -47,6 +47,7 @@ from pydantic import BaseModel, Field
 
 from runner.chat.logging import chat_log
 from runner.chat.models import get_gemini_pro
+from runner.research.prompts_common import SYSTEM_PURPOSE_OVERVIEW
 
 
 # ----- Pydantic schemas -----
@@ -63,18 +64,31 @@ class TemplateStep(BaseModel):
 
 class ProposedFlow(BaseModel):
     id: str = Field(description="Unique identifier for this flow proposal")
-    name: str = Field(description="Short descriptive name for the test flow")
+    name: str = Field(
+        description=(
+            "Short descriptive name for the long-horizon UI flow, framed as the "
+            "user journey being walked (e.g. 'Edit sheet column and confirm "
+            "persistence'), not as the bug under test."
+        )
+    )
     description: str = Field(
         description=(
-            "2-3 sentences describing what this test flow does. State the "
-            "specific user journey being exercised, the concrete UI surfaces "
-            "or interactions involved, and what success looks like — written "
-            "so a non-technical reader gets a clear mental picture of what "
-            "the test will actually do, not just what it validates."
+            "2-3 sentences describing what this long-horizon UI flow does. "
+            "State the specific user journey the autonomous browser agent will "
+            "walk, the concrete UI surfaces or interactions involved (page, "
+            "button, form, modal, etc.), and what observable success looks "
+            "like for a real user — written so a non-technical reader gets a "
+            "clear mental picture of what the agent will actually do, not just "
+            "what it validates."
         )
     )
     rationale: str = Field(
-        description="Why this flow is recommended — reference specific findings"
+        description=(
+            "Why this long-horizon UI flow is worth our autonomous browser "
+            "agent's time right now. For CORE flows, anchor to the load-bearing "
+            "role this journey plays for real users. For risk-anchored flows, "
+            "cite the concrete evidence (PR, error, rage-click, etc.)."
+        )
     )
     priority: Literal["critical", "high", "medium", "low"]
     steps: list[TemplateStep]
@@ -114,7 +128,12 @@ async def generate_flow_proposals(
     avoid_ids: list[str] | None = None,
     intent: str | None = None,
 ) -> FlowProposals:
-    """Call Gemini 3.1 Pro to produce up to 3 concrete, approvable flow proposals.
+    """Call Gemini 3.1 Pro to produce up to 3 concrete, approvable long-horizon UI flow proposals.
+
+    These are the flows the user reviews in the chat UI; the approved ones
+    are walked end-to-end against the live app by our autonomous browser
+    agent. See `runner/research/prompts_common.py` for the shared mental
+    model every LLM in the research-to-flows pipeline opens with.
 
     Args:
         app_url: Base URL the agent will navigate from.
@@ -219,40 +238,51 @@ Key paths: {', '.join(paths[:30]) or '—'}{evidence_section}"""
         intent=intent,
     )
 
-    prompt = f"""You are a QA strategist producing UI test flow proposals for {app_url}. Your output feeds directly into approvable cards in the user's chat UI and an AI browser agent that will execute approved flows.
+    prompt = f"""{SYSTEM_PURPOSE_OVERVIEW}
+
+# Your role in the pipeline
+
+You are the flow proposal LLM. You sit at the END of the research-to-flows pipeline. Every prior LLM (codebase exploration, integration research, codebase synthesis, unified flow synthesis) has been gathering evidence and shaping flow ideas for you. Your job is to convert the strongest of those ideas into the exact long-horizon UI flows our autonomous browser agent will go bug-bash on {app_url} right now.
+
+Your structured output renders directly as approval cards in the user's chat UI. The user reviews each card, approves the ones that look worth running, and then we hand the approved cards to the autonomous browser agent which walks each flow step-by-step against the live deployed app. There is NO further human in the loop between you and the browser agent — if a step is vague, the agent has to guess. If a flow isn't really a long-horizon user journey, the agent walks something that wasn't worth walking. Treat each flow card like the contract it is.
 
 {prior_block}# Selection rules
 
-- Return AT MOST 3 flows. Prefer fewer (even 1) if only a couple of findings truly dominate risk. Never return 0.
-- Every flow must be grounded in a specific finding from the research below — a commit SHA, PR number, URL, route, error message, rage-click page, or code reference. If you can't anchor a flow to evidence, drop it.
-- Prioritise by user impact and freshness: critical for things actively breaking for real users; high for risky areas of heavy recent change; medium/low only when higher-priority candidates are already covered.
-- Avoid near-duplicates. If two candidates test the same underlying change, merge them or drop the weaker one.
-- Always include at least one happy-path smoke flow touching auth + a core journey UNLESS a direct regression flow already exercises that path.
+- Return AT MOST 3 flows. Prefer fewer (even 1) if only a couple of evidence anchors truly dominate. Never return 0.
+- Each flow must be one of two kinds (see the mental-model section above): a CORE flow real users walk every session, OR a RISK-ANCHORED flow whose user journey routes through a surface with concrete recent evidence (PR #, error count, rage-click URL, failing AI run). Mixed sets are fine and often best.
+- Every RISK-ANCHORED flow must be grounded in a specific anchor from the research below (a commit SHA, PR number, URL, route, error message, rage-click page, or code reference). If you cannot anchor a risk flow to evidence, either reframe it as a CORE flow or drop it.
+- Prioritise by user impact and freshness. `critical` is reserved for things actively breaking for real users right now (live error surfaces, fresh regressions). `high` for load-bearing CORE journeys and risk-anchored flows on heavily-changed surfaces. `medium`/`low` only when higher-priority candidates are already covered.
+- Avoid near-duplicates. If two candidates walk the same underlying journey or test the same underlying change, merge them or drop the weaker one.
+- Cover the load-bearing path. UNLESS one of your risk-anchored flows already walks auth + the product's main verb, include at least one CORE long-horizon flow that does.
+- Do NOT propose flows the autonomous browser agent could not realistically walk against the deployed app: no admin-only DB tooling, no production-only credentials the customer hasn't shared, no "look at your phone for the SMS code" steps.
 
 # Flow schema requirements
 
 - `id`: short, unique, kebab-case. Descriptive (e.g. `sheet-autosave-conflict`), not generic (`flow-1`).
-- `name`: 4–8 words, human-readable.
-- `description`: 2-3 sentences describing what the flow does. Name the specific user journey being walked, the key UI surfaces or interactions the test touches (page, button, form, modal, etc.), and what observable success looks like. Write it in user terms so a non-technical reader gets a clear mental picture of the test, not a one-line summary.
-- `rationale`: one or two sentences citing the concrete evidence (e.g. "PR #206 replaced the pipeline (33 files changed)" or "290 rage clicks on /w/*/sheets in the last 14 days").
+- `name`: 4–8 words, human-readable. Names the user journey, not the bug under test.
+- `description`: 2-3 sentences describing what the flow does. Name the specific user journey being walked, the key UI surfaces or interactions the agent will touch (page, button, form, modal, etc.), and what observable success looks like for a real user. Write it in user terms so a non-technical reader gets a clear mental picture of the journey, not a bug repro.
+- `rationale`: one or two sentences explaining WHY this flow is worth our autonomous browser agent's time right now. For CORE flows, anchor to its load-bearing role for real users (e.g. "primary product verb — every signed-in user creates a sheet"). For RISK-ANCHORED flows, cite the concrete evidence (e.g. "PR #206 replaced the pipeline, 33 files changed" or "290 rage clicks on /w/*/sheets in the last 14 days").
 - `priority`: critical | high | medium | low.
-- `steps`: ordered, executable, self-contained instructions for a browser agent that starts from a blank browser. Include credentials/test-account hints only if the research explicitly provides them.
+- `steps`: ordered, executable, self-contained instructions for an autonomous browser agent that starts from a blank browser. Include credentials/test-account hints ONLY if the research explicitly provides them; otherwise frame the flow as starting from a logged-in fixture and assume the operator wires the credential.
 
 {id_rules_block}# Step-writing rules
 
-- First step is almost always `navigate` to an absolute URL starting from {app_url}.
-- Each step does ONE thing. Break compound actions apart.
-- `action` steps name the target element ("click the 'Add column' button in the toolbar") and what to type when relevant.
-- `assertion` steps state the concrete observable ("the new column 'Full Name' appears as the rightmost header and persists after reload").
+The browser agent reads these steps literally. Vague steps mean wasted runs.
+
+- First step is almost always `navigate` to an absolute URL starting from {app_url}. Use concrete URLs grounded in routes from the research's codebase block where possible (e.g. `/w/<slug>/sheets/...`), not vague phrasings.
+- Each step does ONE thing. Break compound actions apart — never "click X and then Y", never "edit and save".
+- `action` steps name the target element ("click the 'Add column' button in the toolbar") and what to type when relevant. They MUST refer to UI affordances actually evidenced in the research; do not invent buttons or pages the research never mentions.
+- `assertion` steps state the concrete observable a real user would care about ("the new column 'Full Name' appears as the rightmost header and persists after reload"). Avoid soft phrasings like "structured data appears" — the agent has to be able to verify it on the page.
 - Add a `wait` step only when a real async boundary exists (autosave flush, network fetch, job completion) — don't pad.
 - Include `url` on navigate steps. Include `expected` on assertion steps. Set `timeout` only when a step legitimately needs longer than default (e.g. long-running enrichment).
 - Steps should be numbered sequentially from 1.
+- The flow as a whole must read as something a real user would walk in 30-90 seconds in a real session — not a 5-second smoke check, not a 10-minute multi-feature stress test.
 
 # Analysis field
 
-2-3 sentences. State the single biggest risk and why the proposed flows address it. Do not restate flow names or counts.
+2-3 sentences. State the single biggest reason these flows are the right ones to bug-bash next, framed in terms of impact on real users. Do not restate flow names or counts.
 
-# Research context
+# Research context (from the upstream pipeline)
 
 ## Executive summary
 {report.get('summary', '')}
@@ -263,7 +293,10 @@ Key paths: {', '.join(paths[:30]) or '—'}{evidence_section}"""
 
 {codebase_block}
 
-## Candidate flow ideas (from research — use as inspiration, do not copy verbatim)
+## Candidate long-horizon UI flow ideas (from upstream synthesis — raw input, do NOT copy verbatim)
+
+The unified flow synthesizer surfaced these as candidate journeys worth bug-bashing. Treat them as evidence, not as ready-to-emit flows: pick the strongest, merge near-duplicates, sharpen vague ones into concrete navigations + actions + assertions, and drop any that don't look like a real-user journey. Your final flows should be more concrete than these candidates, not less.
+
 {chr(10).join(f"{i+1}. {f}" for i, f in enumerate(recommended))}
 
 ## Coverage
