@@ -19,6 +19,23 @@ from playwright.async_api import async_playwright
 from runner.logging import test_log
 from runner.prompts import STAGEHAND_SESSION_MODEL
 
+# Cloud-browser viewport. MUST stay 16:9 to match the live-view embed
+# frame (`aspect-[16/9]` in `components/chat/live-session-card.tsx`)
+# and the screen recorder (also 1280×720, in `runner/screen_recorder.py`).
+# If the cloud browser is any other aspect ratio, the Browserbase
+# debugger player letterboxes the stream inside its iframe — that
+# letterbox showed up as a stripe of white padding at the bottom of
+# the expanded live-view modal AND as a split-second cut-off /
+# re-letterbox flash when the iframe resized during the inline →
+# expanded transition. (Browserbase's default viewport is 1024×768 /
+# 4:3, which is the source of the bug.) Keeping the cloud browser,
+# the recorder, and the inline+expanded frames all on the same 16:9
+# aspect makes the iframe content fill edge-to-edge in both states,
+# so resizing the iframe is a pure bitmap rescale with no layout
+# reflow inside the embedded player.
+CLOUD_BROWSER_VIEWPORT_WIDTH = 1280
+CLOUD_BROWSER_VIEWPORT_HEIGHT = 720
+
 
 def _install_dialog_handlers(context: Any) -> None:
     """Auto-dismiss JS dialogs on every page in this context (incl. ones opened later).
@@ -204,7 +221,21 @@ async def create_stagehand_session() -> dict[str, Any]:
 
         test_log("debug", "browser_session_step", step="start_stagehand_session")
         t2 = time.time()
-        session = await client.sessions.start(model_name=STAGEHAND_SESSION_MODEL)
+        # Pin the cloud-browser viewport to 1280×720 (16:9). See module
+        # docstring: this matches the live-view embed frame and the
+        # screen recorder, which together prevent letterbox padding /
+        # resize-flash in the expanded live-view modal.
+        session = await client.sessions.start(
+            model_name=STAGEHAND_SESSION_MODEL,
+            browserbase_session_create_params={
+                "browser_settings": {
+                    "viewport": {
+                        "width": CLOUD_BROWSER_VIEWPORT_WIDTH,
+                        "height": CLOUD_BROWSER_VIEWPORT_HEIGHT,
+                    },
+                },
+            },
+        )
         session_id = session.id
         test_log(
             "info",
