@@ -136,11 +136,13 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
                 {/*
                   Speed pill. Shifted leftward when expanded so it
                   doesn't collide with the modal close button (which
-                  also sits top-right).
+                  also sits top-right). z-20 so it sits above the
+                  full-frame play/pause button (z-10) — otherwise
+                  clicks on the pill bubble through to play/pause.
                 */}
                 <div
                   className={cn(
-                    'absolute z-10',
+                    'absolute z-20',
                     expanded ? 'right-14 top-3' : 'right-2 top-2',
                   )}
                 >
@@ -208,12 +210,38 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
                 )}
               </div>
             )}
+
+            {/*
+              When expanded, overlay the seek bar at the bottom of the
+              video frame so the modal is filled by the recording
+              instead of having a separate light-coloured controls row
+              underneath. The gradient lets the bottom of the video
+              fade behind the controls (standard video-player chrome)
+              instead of getting obscured by a hard panel. z-20 to sit
+              above the full-frame play/pause button (z-10).
+            */}
+            {expanded && status === 'ready' && (
+              <div className="absolute bottom-0 left-0 right-0 z-20 flex items-center gap-3 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-4 pt-10 pb-3">
+                <span className="tabular-nums text-[11px] text-white/80 min-w-[36px]">
+                  {formatTime(currentTime)}
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={Math.max(1, totalTime)}
+                  value={Math.min(currentTime, totalTime)}
+                  step={50}
+                  onChange={handleSeek}
+                  aria-label="Seek"
+                  className="recording-player-seek flex-1"
+                />
+              </div>
+            )}
           </div>
 
-          {/* Seek + elapsed-time row, pinned below the frame and
-              inside the expandable container so it scales with the
-              modal when the user expands. */}
-          {status === 'ready' && (
+          {/* Inline (collapsed) seek + elapsed-time row, pinned below
+              the video frame so the chat card flow stays intact. */}
+          {!expanded && status === 'ready' && (
             <div className="flex items-center gap-3 bg-background px-4 py-2.5 shrink-0">
               <span className="tabular-nums text-[11px] text-muted-foreground min-w-[36px]">
                 {formatTime(currentTime)}
