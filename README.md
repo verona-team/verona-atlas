@@ -2,7 +2,7 @@
 
 > Verona bug bashes your product like a human
 
-Connect your GitHub repo + observability platforms. Atlas spins up cloud browsers, runs AI-driven test flows, and reports back.
+Connect your GitHub repo + observability platforms. Atlas spins up cloud browsers, runs test flows, and reports back.
 
 ## Stack
 
