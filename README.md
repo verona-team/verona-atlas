@@ -2,7 +2,7 @@
 
 > Verona bug bashes your product like a human
 
-Connect your app, GitHub repo, PostHog project, and Slack workspace. Atlas spins up cloud browsers, runs AI-driven test flows, and reports back.
+Connect your app, GitHub repo, PostHog project, Slack workspace, Sentry org, LangSmith project, and Braintrust project. Atlas spins up cloud browsers, runs AI-driven test flows, and reports back.
 
 ## Stack
 
