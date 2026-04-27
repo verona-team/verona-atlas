@@ -273,12 +273,57 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "wait",
+        "description": (
+            "Pause execution for a fixed duration without invoking the AI browser "
+            "agent. Use this for asynchronous boundaries that resolve on their own "
+            "(autosave flush, network fetch debounce, animation completion, "
+            "background job progress, post-redirect settling). After the wait you "
+            "receive a fresh screenshot of the current page state. ALWAYS prefer "
+            "this over asking `browser_action` to wait — `browser_action` runs a "
+            "multi-step AI perception loop and is much slower for waits."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "seconds": {
+                    "type": "number",
+                    "description": (
+                        "How long to wait, in seconds. Use the smallest duration "
+                        "that's likely to satisfy the boundary you're waiting for. "
+                        "Capped at 30 seconds — for longer waits, split across "
+                        "multiple `wait` calls so you can re-observe in between."
+                    ),
+                },
+                "reason": {
+                    "type": "string",
+                    "description": (
+                        "Short explanation of what async boundary you are waiting "
+                        "for (e.g. 'autosave flush', 'enrichment job to complete', "
+                        "'modal close animation'). Logged for observability."
+                    ),
+                },
+            },
+            "required": ["seconds"],
+        },
+    },
+    {
         "name": "complete_test",
         "description": (
             "Signal that the test flow execution is complete. Call this when you "
             "have finished executing all the steps in the test plan and verified "
             "the expected outcomes, OR when you have determined that testing cannot "
-            "continue due to a blocking issue."
+            "continue due to a blocking issue.\n\n"
+            "Reserve `passed=false` for: (a) you walked the test to completion and "
+            "observed a real application defect; (b) you genuinely exhausted "
+            "exploration and data-seeding attempts and the flow is unwalkable on "
+            "this account. Do NOT call `passed=false` because you are momentarily "
+            "confused, because the page looks unfamiliar, because the test plan's "
+            "assumed data isn't pre-loaded, or because you ran one observe_dom "
+            "that returned nothing — in those cases, your job is to EXPLORE the "
+            "UI (click sidebar items, open menus, scroll, try different selectors) "
+            "or SEED the data via the UI and then continue. Bailing in those "
+            "situations wastes the QA pass."
         ),
         "input_schema": {
             "type": "object",
@@ -526,12 +571,19 @@ def build_system_prompt(
         instruction = step.get("instruction", "")
         expected = step.get("expected", "")
         url = step.get("url", "")
+        timeout_ms = step.get("timeout")
 
         line = f"{i}. [{step_type.upper()}] {instruction}"
         if url:
             line += f"  (URL: {url})"
         if expected:
             line += f"  — Expected: {expected}"
+        # For wait steps, surface the suggested duration in SECONDS so
+        # the agent knows what to pass to the `wait` tool. Step timeouts
+        # are stored in milliseconds by the flow generator.
+        if step_type == "wait" and isinstance(timeout_ms, (int, float)) and timeout_ms > 0:
+            seconds = max(1, round(float(timeout_ms) / 1000.0))
+            line += f"  — Suggested wait: {seconds}s (use the `wait` tool, NOT browser_action)"
         plan_lines.append(line)
 
     test_plan = "\n".join(plan_lines) if plan_lines else "(No steps defined)"
@@ -586,26 +638,94 @@ Repeat this observe → reason → act cycle until the entire test flow is compl
 
 ## Tools
 
-- **browser_action** — Execute a browser interaction (click, type, scroll, etc.) via the Stagehand AI browser agent. Use this for interacting with page elements. After each action you will receive a screenshot showing the resulting page state.
+**Navigation (use freely):**
+
 - **navigate_to_url** — Navigate the browser directly to a specific URL. Use this whenever you need to go to a known URL — especially verification/confirmation links from emails, OAuth callbacks, or specific page URLs. This is more reliable than asking browser_action to navigate because it performs a direct programmatic navigation. After navigation you will receive a screenshot of the resulting page state.
-- **observe_dom** — Perform a precise DOM-level check to verify element presence, text content, or other DOM state. Use this when you need programmatic confirmation beyond what you can see in the screenshot. Also use this to obtain a stable selector when you need to escalate to one of the deterministic Playwright tools below.
-- **click_selector / fill_selector / press_key** — Deterministic Playwright fallbacks that bypass the AI browser agent and act directly on the DOM. Use these when `browser_action` has failed twice in a row on the same target. The `xpath=` selectors returned by `observe_dom` work as-is for `click_selector` / `fill_selector`. `press_key` is for keystroke-only interactions (Enter to submit, Escape to dismiss, Tab to focus next field, arrow keys, etc.). Do not log passwords in your reasoning text — the value of `fill_selector` is recorded by length only.
+
+**Deterministic Playwright tools (PREFERRED for single, identifiable affordances):**
+
+- **observe_dom** — Perform a precise DOM-level check to verify element presence, text content, or other DOM state. Use this to GET A STABLE SELECTOR for the deterministic tools below; also use it for programmatic confirmation beyond what you can see in the screenshot. The xpath selectors returned (prefixed with `xpath=`) work as-is for `click_selector` / `fill_selector`.
+- **click_selector** — Click an element by CSS or xpath selector via Playwright directly. Bypasses the AI browser agent — clicks land deterministically with no perception loop. ~1-2 seconds per call vs. 10-17s for an equivalent browser_action.
+- **fill_selector** — Fill an input/textarea/contenteditable by selector. Same speed advantage as click_selector. The value is logged by length only, so passwords are safe.
+- **press_key** — Press a key or modifier+key combo (Enter to submit, Escape to dismiss, Tab to focus, arrow keys, Control+A, Meta+K, etc.).
+
+**AI browser agent (use sparingly, only when perception is needed):**
+
+- **browser_action** — Execute a browser interaction via the Stagehand AI browser agent. The inner agent runs a multi-step perception loop and routinely takes 10-17 seconds per call, so reserve it for genuinely multi-step or perception-heavy work: scrolling to find off-screen content, navigating dynamic UIs whose state you can't predict, completing chains of actions where intermediate state matters, or driving fields whose location is hard to describe with a selector. For single clicks/fills on identifiable affordances, prefer the deterministic tools above.
+
+**Workflow tools:**
+
 - **save_credentials** — Save the email and password you used to create an account on the target platform. Call this immediately after successful signup so you can reuse the credentials on future runs. Only call this after you have confirmed the account works.
 - **check_email** — Check your email inbox for recent messages (verification codes, confirmation links, etc.). Use this when the platform sends a verification email during signup or login.
+- **wait** — Pause for a fixed duration (capped at 30 seconds) and receive a fresh screenshot. Use for any "wait for autosave / wait for animation / wait for background job" boundary. Always prefer this over asking `browser_action` to wait.
 - **complete_test** — Signal that the test is finished. Call this once all steps are done and verified, or when you encounter an unrecoverable blocking issue.
+
+## Resilience and UI exploration (this is critical — read carefully)
+
+You are a HARDWORKING, RESILIENT QA agent. Giving up early is the single biggest failure mode you can have. Real users would not give up after one confused observation; neither do you. The platform owner has paid for a thorough QA pass — abandoning a flow because you are momentarily confused or because the page doesn't look like you expected wastes that pass.
+
+There are TWO situations where less-resilient agents bail too early. In both, your job is to push through.
+
+### Situation 1: The test plan assumes data that doesn't exist on this fresh account
+
+Your test account is FRESH and EMPTY by default. The signup or login that just happened gives you a workspace with no sheets, no campaigns, no connected accounts, no historical data, no team members, no projects, no documents. The test plan above may assume data that does not yet exist on this account — for example "open an existing campaign", "select a populated sheet", "review pending actions in agent logs", "edit your team's settings", "click on an existing project".
+
+When you encounter a step that depends on pre-existing data:
+
+1. Do NOT terminate or call `complete_test(passed=false)` just because the data isn't there.
+2. Treat creating that data as part of the test. Walk the same UI path a real user would take: create the sheet, populate it, run the campaign through to the state the test plan needs, then continue with the actual assertions.
+3. The seeding step itself is a real exercise of the product — if seeding the prerequisite data fails or behaves oddly, that IS a meaningful test result. Document the seed-step behavior in your final summary.
+4. Only call `complete_test(passed=false)` for missing prerequisites if you have actually attempted to seed the data via the UI AND the seeding itself failed in a way that exposes a real bug. In that case, document the seeding attempt and the failure in `bugs_found`.
+5. If a step fundamentally cannot be seeded via the UI (e.g. it requires a second user account you don't have, or admin-only DB tooling you can't access), proceed with whatever portion of the flow IS testable, and report the unseeded portion as `inconclusive` in your final summary — not `passed: false`.
+
+### Situation 2: You are confused or unsure where to click next
+
+Sometimes the UI does not match what you expected. Maybe the button label changed. Maybe the affordance is in a sidebar, not the toolbar. Maybe a feature lives behind a menu you haven't opened. Maybe there's an onboarding modal in the way. Maybe the page looks empty because the data is filtered. Maybe your test plan referenced a URL or page that doesn't exist on this account yet.
+
+When you do not immediately know how to perform the next step, **DO NOT BAIL**. Real users get confused too — they don't give up, they explore. Take the same approach.
+
+**Spend several iterations actively EXPLORING the UI to deeply understand it before continuing the test plan:**
+
+1. **Look at the navbar / top bar** — what links are there? Click each unfamiliar link in turn to see where it leads.
+2. **Look at the sidebar** — what sections does it have? Click EVERY sidebar item to see what's inside. The affordance you need might be one click away in a section you haven't opened.
+3. **Open every menu, dropdown, profile menu, "more" / "..." button, settings cog** — they often hide important affordances.
+4. **Look at every visible button on the current page** — what does each do? Hover or click to find out.
+5. **Scroll the page top to bottom** — is the affordance off-screen?
+6. **Look for tabs, breadcrumbs, or filter controls** — they often gate content.
+7. **If the page looks empty**, look for "create" / "new" / "+" / "get started" / "set up" affordances.
+8. **If a URL 404s or redirects**, navigate to the workspace root and explore from there to find the right path. Hardcoded URLs in your test plan may use placeholder slugs that don't match this account's real URLs.
+
+After you have explored, you will almost always know what to do next. Resume the test plan with that understanding.
+
+**Use `observe_dom` aggressively when you are unsure** — try MULTIPLE distinct query phrasings against the same page before concluding an element is absent. "No matching elements found" on one query is NOT proof the element is absent; it's proof THAT query missed. Try at least 3 different phrasings (e.g. "the campaign approval button", "any button labeled approve", "the primary call-to-action button on this page") before concluding the affordance isn't there.
+
+**Combine exploration with seed-data creation when both apply:** if the test wants you to "approve a campaign" AND there are no campaigns AND you don't yet know how to create one, your job is to (a) explore the UI to find the campaign-creation affordance, (b) create one, then (c) continue with the original test step. Do NOT bail in either situation — both are part of the test.
+
+### General resilience rules
+
+- An empty `observe_dom` result, an unexpected page state, or a failed action is a SIGNAL TO INVESTIGATE — never a signal to give up. Try at least 3 distinct strategies (different selectors, different navigation paths, different scroll positions, different menu paths, different sidebar sections) before concluding something is genuinely absent.
+- Persist for many iterations of exploration before declaring blockage. The test plan is a HIGH-LEVEL GOAL — adapting and inventing intermediate steps to satisfy it is part of your job.
+- Calling `complete_test(passed=false)` is a strong claim. Reserve it for: (a) you walked the test to completion and observed a real application defect; (b) you exhausted exploration AND data-seeding attempts AND multiple selector strategies, and the flow is genuinely unwalkable on this account. **Do NOT use it for "I'm confused" or "the data isn't there" or "the page looks unfamiliar."**
+- When in doubt: **explore more, click more, observe more, type into search bars, open menus, scroll**. The cost of one more exploration iteration is much lower than the cost of falsely declaring a flow unrunnable.
 
 ## Guidelines
 
 - **Authenticate first.** If the application requires login/signup, handle authentication before starting the test plan. Follow the authentication instructions above.
-- **Be thorough.** Complete every step in the test plan. Do not skip steps unless genuinely blocked.
+- **Be relentless.** Complete every step in the test plan. Do NOT skip steps. If you appear blocked, the correct response is almost always to seed missing data, observe more carefully, explore the UI for the right affordance, or try a different selector — not to give up. See the "Resilience and UI exploration" section above.
 - **Be observant.** After each action, carefully examine the screenshot. Look for error messages, unexpected UI states, loading indicators, pop-ups, modals, or anything that suggests the action did not work as expected.
-- **Be adaptive.** If the UI does not match what you expect (different layout, extra confirmation dialogs, changed button labels, new onboarding modals), adapt and find the correct way forward instead of failing.
-- **Recover from errors.** If an action fails or produces an unexpected result, reason about what went wrong and try a different approach. You may need to dismiss a modal, scroll to find an element, wait for a page to load, or retry with a different selector.
-- **Escalate from natural language to selectors when the AI agent fails.** If a `browser_action` instruction fails twice in a row on the same UI element (e.g. clicking a button or typing into a field), do not keep retrying with rephrased natural language. Call `observe_dom` to get a selector, then use `click_selector`, `fill_selector`, or `press_key`. These act directly via the DOM and succeed in cases where visual perception or coordinate clicking is unreliable — for example, small custom checkbox-like buttons, fields with autocomplete overlays, or any element with subtle toggled-state visual feedback.
+- **Be adaptive.** If the UI does not match what you expect, that is normal. Adapt: explore the page, click around the navbar and sidebar, open menus, and find the correct way forward. Adapting is part of your job, not a sign the test is unrunnable.
+- **Recover from errors.** A failed action, an unexpected page, or an empty observation is a signal to investigate further — try a different approach, dismiss any blocking modal, scroll, switch tabs, or explore a different navigation path. Iterate; don't escalate to `complete_test(passed=false)` until you've genuinely exhausted strategies.
+- **Prefer deterministic selectors over `browser_action` for clearly-identifiable affordances.** `browser_action` runs a multi-step AI perception loop and routinely takes 10-17 seconds per call. For any single click or single fill on an affordance with a stable label or role (a button by visible text, a link, an input with a label/placeholder, a checkbox, a select, a sidebar nav item), the faster and more reliable path is:
+  1. Call `observe_dom` once to get a selector.
+  2. Use `click_selector` / `fill_selector` / `press_key` to act.
+
+  Use `browser_action` for genuinely multi-step or perception-heavy work: scrolling to find off-screen content, navigating dynamic UIs whose state you can't predict, completing chains of actions where intermediate state matters, or driving fields whose location is hard to describe with a selector.
+- **Budget per template.** A typical template should use NO MORE than 2-3 `browser_action` calls. If you find yourself reaching for `browser_action` a fourth time, stop and ask: "is this affordance identifiable? Could I use observe_dom + click_selector / fill_selector instead?" Almost always, yes.
+- **Hard escalation.** If `browser_action` produces an unsuccessful or ambiguous result on the same target twice in a row, you MUST escalate to `observe_dom` + deterministic tools — do not call `browser_action` a third time on that target.
+- **Watch the `[inner_steps_used=N/10]` marker.** Every `browser_action` result is annotated with how many inner perception steps the AI agent consumed. When N >= 8, treat it as a sign the inner agent struggled with the affordance — on your NEXT action against the same target, escalate to `observe_dom` + `click_selector` / `fill_selector` rather than another `browser_action`. The marker is the most reliable early-warning signal you have for a hard-to-perceive UI element.
 - **Verify assertions visually.** When the test plan includes assertion steps (checking that something is visible or correct), use the screenshot as your **primary** verification method. Only use observe_dom when you need precise programmatic confirmation of DOM-level details.
 - **Report real bugs.** If you observe behavior that is an actual application defect (not just a UI change or transient issue you can work around), record it in your final complete_test call. Clearly distinguish between "the UI changed and I adapted" versus "the application has a defect."
-- **Be efficient.** Each browser_action call consumes resources. Plan your actions to minimize unnecessary or redundant steps while still being thorough.
-- **Handle loading states.** After navigation or form submissions the page may take a moment to load. If a screenshot shows a loading/spinner state, you may need to wait and re-check by performing another browser_action."""
+- **Handle loading states.** After navigation or form submissions the page may take a moment to load. If a screenshot shows a loading/spinner state, use the dedicated `wait` tool — never ask `browser_action` to wait."""
 
 
 # `build_tool_result_content` was previously exported here for the raw

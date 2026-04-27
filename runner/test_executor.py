@@ -57,8 +57,75 @@ _LANGCHAIN_TOOLS = list(TOOLS)
 # ---------------------------------------------------------------------------
 
 
+def _looks_like_dead_connection(err: BaseException) -> bool:
+    """Return True if `err` indicates the Playwright/CDP connection has died.
+
+    These are the errors that cascade after a `Page.handleJavaScriptDialog`
+    race kills the driver. Once we see one, the page object is unusable
+    and we need to re-acquire from the context (if it's still alive).
+    """
+    msg = str(err).lower()
+    return (
+        "connection closed" in msg
+        or "target closed" in msg
+        or "browser has been closed" in msg
+        or "protocol error" in msg
+    )
+
+
+async def _try_recover_page(page):
+    """Attempt to recover a usable page after a connection-level failure.
+
+    Returns the recovered page, or None if recovery isn't possible.
+    Caller should re-attempt screenshot / interaction against the
+    recovered page or, if None, treat the session as unhealthy.
+    """
+    try:
+        context = page.context
+    except Exception:
+        return None
+    try:
+        live_pages = list(context.pages)
+    except Exception:
+        return None
+    # Prefer the most recent live page from the context.
+    for candidate in reversed(live_pages):
+        if candidate is page:
+            continue
+        try:
+            _ = candidate.url  # touch to verify it's live
+            test_log(
+                "info",
+                "executor_page_recovery_used_existing",
+                url=candidate.url[:200],
+            )
+            return candidate
+        except Exception:
+            continue
+    # No usable existing page; try opening a new one.
+    try:
+        new_page = await context.new_page()
+        test_log("info", "executor_page_recovery_opened_new")
+        return new_page
+    except Exception as e:
+        test_log(
+            "warn",
+            "executor_page_recovery_failed",
+            err_type=type(e).__name__,
+            err=str(e)[:200],
+        )
+        return None
+
+
 async def capture_page_state(page) -> dict:
-    """Capture a snapshot of the current browser page state via Playwright."""
+    """Capture a snapshot of the current browser page state via Playwright.
+
+    On a connection-level failure (Stagehand racing a dialog and crashing
+    the driver, etc.), we try ONCE to recover by re-acquiring a live page
+    from the same context and re-attempting the screenshot. If recovery
+    fails, we return an empty screenshot so the outer loop continues
+    rather than crashing the whole template.
+    """
     url = ""
     screenshot_b64 = ""
     try:
@@ -79,12 +146,41 @@ async def capture_page_state(page) -> dict:
             err_type=type(e).__name__,
             err=str(e),
         )
+        if _looks_like_dead_connection(e):
+            recovered = await _try_recover_page(page)
+            if recovered is not None:
+                try:
+                    raw = await recovered.screenshot(type="png")
+                    if isinstance(raw, bytes):
+                        screenshot_b64 = base64.b64encode(raw).decode("ascii")
+                    elif isinstance(raw, str):
+                        screenshot_b64 = raw
+                    try:
+                        url = recovered.url
+                    except Exception:
+                        pass
+                    test_log("info", "executor_screenshot_recovered")
+                except Exception as e2:
+                    test_log(
+                        "warn",
+                        "executor_screenshot_recovery_failed",
+                        err_type=type(e2).__name__,
+                        err=str(e2)[:200],
+                    )
 
     return {
         "url": url,
         "screenshot_base64": screenshot_b64,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# Mirrors the `max_steps` we pass to Stagehand's `session.execute` below.
+# Surfaced to the outer agent in the tool result so it can detect when the
+# inner agent burned its full step budget on a single instruction (a strong
+# signal that the affordance is hard for the AI agent and the outer agent
+# should escalate to deterministic Playwright tools).
+INNER_MAX_STEPS = 10
 
 
 async def execute_browser_action(
@@ -97,6 +193,10 @@ async def execute_browser_action(
     """Run a single instruction through the Stagehand v3 execute (agent) endpoint.
 
     Returns a dict with the execution outcome and post-action page state.
+    Includes `inner_steps_used` (count of Stagehand inner-agent perception
+    steps actually consumed, derived from `result_data.actions`) so the
+    outer ReAct loop can surface that signal to the outer model and bias
+    it toward deterministic selectors when the inner agent struggles.
 
     *inner_system_prompt* is the system prompt for the inner CUA agent. It
     must explicitly authorize signup/login flows and identify the application
@@ -107,13 +207,14 @@ async def execute_browser_action(
     success = True
     error: str | None = None
     agent_output: str | None = None
+    inner_steps_used: int | None = None
 
     t0 = time.time()
     try:
         response = await session.execute(
             execute_options={
                 "instruction": instruction,
-                "max_steps": 10,
+                "max_steps": INNER_MAX_STEPS,
             },
             agent_config={
                 "model": stagehand_agent_model_config(),
@@ -125,6 +226,16 @@ async def execute_browser_action(
         elapsed = time.time() - t0
         result_data = response.data.result
         agent_output = result_data.message
+        # Count the inner agent's perception steps. The Stagehand v3
+        # response carries an `actions` list (see
+        # `stagehand.types.session_execute_response.DataResult.actions`);
+        # `len(actions)` is the inner step count.
+        try:
+            actions_list = getattr(result_data, "actions", None)
+            if actions_list is not None:
+                inner_steps_used = len(actions_list)
+        except Exception:
+            inner_steps_used = None
         if not result_data.success:
             success = False
             error = result_data.message or "Agent execute reported failure"
@@ -134,6 +245,8 @@ async def execute_browser_action(
                 elapsed_s=round(elapsed, 3),
                 error=error,
                 instruction=instruction[:200],
+                inner_steps_used=inner_steps_used,
+                inner_max_steps=INNER_MAX_STEPS,
             )
         else:
             test_log(
@@ -142,6 +255,8 @@ async def execute_browser_action(
                 elapsed_s=round(elapsed, 3),
                 agent_output_preview=(agent_output or "")[:200],
                 instruction=instruction[:200],
+                inner_steps_used=inner_steps_used,
+                inner_max_steps=INNER_MAX_STEPS,
             )
     except Exception as e:
         elapsed = time.time() - t0
@@ -163,6 +278,7 @@ async def execute_browser_action(
         "success": success,
         "error": error,
         "agent_output": agent_output,
+        "inner_steps_used": inner_steps_used,
         "page_state": page_state,
     }
 
@@ -334,6 +450,60 @@ async def execute_fill_selector(
     return {
         "success": success,
         "error": error,
+        "page_state": page_state,
+    }
+
+
+_WAIT_MAX_SECONDS = 30.0
+
+
+async def execute_wait(
+    page,
+    seconds: float,
+    *,
+    reason: str | None = None,
+) -> dict:
+    """Pause for `seconds` (capped at _WAIT_MAX_SECONDS) and return a fresh page state.
+
+    This is a non-AI-driven wait — pure `asyncio.sleep` followed by a
+    Playwright screenshot. Always preferred over routing waits through
+    `browser_action`, which spins up a multi-step Stagehand perception
+    loop and routinely costs 10× the requested duration.
+    """
+    try:
+        requested = float(seconds)
+    except (TypeError, ValueError):
+        requested = 0.0
+    capped = max(0.0, min(requested, _WAIT_MAX_SECONDS))
+
+    t0 = time.time()
+    try:
+        await asyncio.sleep(capped)
+        elapsed = time.time() - t0
+        test_log(
+            "info",
+            "executor_wait_ok",
+            elapsed_s=round(elapsed, 3),
+            requested_seconds=requested,
+            capped_seconds=capped,
+            reason=(reason or "")[:200],
+        )
+    except Exception as e:
+        elapsed = time.time() - t0
+        test_log(
+            "warn",
+            "executor_wait_failed",
+            elapsed_s=round(elapsed, 3),
+            err_type=type(e).__name__,
+            err=str(e),
+        )
+
+    page_state = await capture_page_state(page)
+    return {
+        "success": True,
+        "error": None,
+        "capped_seconds": capped,
+        "requested_seconds": requested,
         "page_state": page_state,
     }
 
@@ -602,6 +772,23 @@ async def execute_check_email(
 # ---------------------------------------------------------------------------
 
 
+def _followup_has_screenshot(msg: BaseMessage) -> bool:
+    """True if `msg` is a screenshot follow-up HumanMessage with a real image block.
+
+    Used by the executor's session-health watchdog: when EVERY follow-up
+    in a turn lacks an image block (because the page is dead), we count
+    that turn as an "empty screenshot" iteration. Two such turns in a
+    row triggers a clean session-unhealthy bailout.
+    """
+    content = getattr(msg, "content", None)
+    if not isinstance(content, list):
+        return False
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "image":
+            return True
+    return False
+
+
 def _screenshot_message(url: str, screenshot_b64: str, note: str) -> HumanMessage:
     """Build a HumanMessage with a text note + PNG screenshot block.
 
@@ -815,6 +1002,11 @@ async def execute_template(
     llm_error: str | None = None
     iterations_used = 0
     credentials_saved = False
+    # Tracks consecutive iterations whose post-action screenshot came back
+    # empty after a connection-recovery attempt — used as a signal that the
+    # browser session is genuinely dead and the loop should bail rather
+    # than spin uselessly.
+    consecutive_empty_screenshots = 0
 
     if initial_state["screenshot_base64"]:
         screenshots.append({
@@ -936,11 +1128,30 @@ async def execute_template(
                 action_record["error"] = result["error"]
                 action_record["url_after"] = result["page_state"]["url"]
                 action_record["instruction"] = instruction
+                action_record["inner_steps_used"] = result.get("inner_steps_used")
 
                 if result["success"]:
-                    result_text = result["agent_output"] or "Action completed successfully."
+                    base_text = result["agent_output"] or "Action completed successfully."
                 else:
-                    result_text = f"Action failed: {result['error']}"
+                    base_text = f"Action failed: {result['error']}"
+
+                # Surface the inner-agent step count so the outer model can
+                # detect "the inner CUA agent struggled and burned its
+                # budget on this target" and escalate to deterministic
+                # selectors on its next call against the same target.
+                inner_steps = result.get("inner_steps_used")
+                step_marker = ""
+                if isinstance(inner_steps, int):
+                    step_marker = (
+                        f"\n\n[inner_steps_used={inner_steps}/{INNER_MAX_STEPS}]"
+                    )
+                    if inner_steps >= INNER_MAX_STEPS:
+                        step_marker += (
+                            " [WARN: inner agent exhausted its step budget — "
+                            "consider escalating to observe_dom + click_selector "
+                            "/ fill_selector for the next attempt on this target]"
+                        )
+                result_text = f"{base_text}{step_marker}"
 
                 messages.append(
                     ToolMessage(
@@ -1304,6 +1515,60 @@ async def execute_template(
                     )
                 )
 
+            elif tool_name == "wait":
+                wait_seconds = tool_input.get("seconds", 0)
+                wait_reason = tool_input.get("reason") or None
+                test_log(
+                    "info",
+                    "executor_tool_call",
+                    template_name=tpl_name,
+                    iteration=iteration,
+                    tool=tool_name,
+                    requested_seconds=wait_seconds,
+                    reason=(wait_reason or "")[:200],
+                )
+
+                result = await execute_wait(page, wait_seconds, reason=wait_reason)
+                action_record["success"] = result["success"]
+                action_record["url_after"] = result["page_state"]["url"]
+                action_record["requested_seconds"] = result["requested_seconds"]
+                action_record["capped_seconds"] = result["capped_seconds"]
+                if wait_reason:
+                    action_record["reason"] = wait_reason
+
+                capped = result["capped_seconds"]
+                requested = result["requested_seconds"]
+                if requested != capped:
+                    result_text = (
+                        f"Waited {capped}s (requested {requested}s; capped at "
+                        f"{_WAIT_MAX_SECONDS}s)."
+                    )
+                else:
+                    result_text = f"Waited {capped}s."
+
+                messages.append(
+                    ToolMessage(
+                        content=result_text,
+                        tool_call_id=tool_id,
+                        name=tool_name,
+                    )
+                )
+                followups.append(
+                    _screenshot_message(
+                        url=result["page_state"]["url"],
+                        screenshot_b64=result["page_state"]["screenshot_base64"],
+                        note=f"Result of {tool_name}: {result_text}",
+                    )
+                )
+
+                if result["page_state"]["screenshot_base64"]:
+                    screenshots.append({
+                        "label": f"iter_{iteration}_{tool_name}",
+                        "base64": result["page_state"]["screenshot_base64"],
+                        "url": result["page_state"]["url"],
+                        "timestamp": result["page_state"]["timestamp"],
+                    })
+
             elif tool_name == "complete_test":
                 test_passed = tool_input.get("passed", False)
                 test_summary = tool_input.get("summary", "")
@@ -1364,6 +1629,45 @@ async def execute_template(
         #    ToolMessage(...) * N
         #    HumanMessage(screenshot) * N
         messages.extend(followups)
+
+        # Health check: if a tool ran but EVERY follow-up screenshot in
+        # this turn came back empty, that's a strong signal the browser
+        # session has died (typically post-dialog-race ProtocolError).
+        # We tolerate one such turn (recovery may have come too late
+        # for screenshot but the page object will still work next iter)
+        # but bail after two consecutive turns to avoid spinning on a
+        # dead session.
+        if followups:
+            had_screenshot_this_turn = any(
+                _followup_has_screenshot(m) for m in followups
+            )
+            if had_screenshot_this_turn:
+                consecutive_empty_screenshots = 0
+            else:
+                consecutive_empty_screenshots += 1
+                test_log(
+                    "warn",
+                    "executor_iteration_no_screenshot",
+                    template_name=tpl_name,
+                    iteration=iteration,
+                    consecutive_empty=consecutive_empty_screenshots,
+                )
+                if consecutive_empty_screenshots >= 2:
+                    test_log(
+                        "error",
+                        "executor_browser_session_unhealthy",
+                        template_name=tpl_name,
+                        iteration=iteration,
+                        consecutive_empty=consecutive_empty_screenshots,
+                    )
+                    test_summary = (
+                        "Browser session became unhealthy mid-test (consecutive "
+                        "empty screenshots after recovery attempts) and could not "
+                        "be recovered. Test execution was halted."
+                    )
+                    test_passed = False
+                    completed = True
+                    break
 
         if early_complete:
             break

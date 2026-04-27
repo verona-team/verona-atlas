@@ -103,13 +103,19 @@ def test_render_codebase_basic() -> None:
     assert evictions == 0, "small transcript should not trigger eviction"
     assert "# Codebase investigation — acme/app" in rendered
     assert "Next.js app with Clerk auth" in rendered
+    # Thoughts surface BOTH in the leading aggregate AND inline.
+    assert "## Investigator reasoning" in rendered
+    assert rendered.count("Start with package.json.") >= 2, (
+        "thought text should appear in both the aggregate section and inline"
+    )
     assert "[thought]" in rendered
-    assert "Start with package.json." in rendered
     assert "[tool:get_repo_ref]" in rendered
     assert "[tool:get_file_content path=package.json" in rendered
     assert '"name": "acme"' in rendered
     assert "[tool:list_repo_paths prefix='app/']" in rendered
     assert "app/page.tsx" in rendered
+    # Aggregate section should appear BEFORE the chronological log.
+    assert rendered.index("## Investigator reasoning") < rendered.index("## Exploration log")
     print(_green("  ok: codebase transcript renders with header + entries"))
 
 
@@ -156,6 +162,10 @@ def test_render_integration_basic() -> None:
     assert "[tool:execute_code] exit=0" in rendered
     assert "List files changed in PR #42" in rendered
     assert "import httpx" in rendered
+    # Investigator reasoning aggregate present and ordered before the drill-in log.
+    assert "## Investigator reasoning" in rendered
+    assert rendered.count("Let me drill into PR #42.") >= 2
+    assert rendered.index("## Investigator reasoning") < rendered.index("## Drill-in log")
     print(_green("  ok: integration transcript renders with preflight + exec log"))
 
 

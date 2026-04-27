@@ -317,6 +317,9 @@ async def _build_sandbox_env(
 # ---------------------------------------------------------------------------
 
 
+_ALL_KNOWN_PROVIDERS = ["github", "posthog", "sentry", "langsmith", "braintrust"]
+
+
 def _build_orchestrator_system_prompt(
     app_url: str,
     integrations_covered: list[str],
@@ -339,7 +342,17 @@ def _build_orchestrator_system_prompt(
     to produce structured output at the end — its last turn is simply
     a natural-language summary of what it learned. That summary becomes
     the transcript's `orientation` blurb for the downstream synthesizer.
+
+    The "Hard rules" + repeated covered-list framing exists so the
+    orchestrator stops issuing `purpose` strings naming providers that
+    aren't actually configured for this project (PostHog, Sentry, etc.
+    when only GitHub is connected). The model needs to see the constraint
+    both at policy-imprint position (top of prompt) and at recency-bias
+    position (just before its decision turn) for it to land reliably.
     """
+    covered_list = ", ".join(integrations_covered) if integrations_covered else "(none)"
+    uncovered = [p for p in _ALL_KNOWN_PROVIDERS if p not in integrations_covered]
+    uncovered_list = ", ".join(uncovered) if uncovered else "(none)"
     return f"""{SYSTEM_PURPOSE_OVERVIEW}
 
 # Your role in the pipeline
@@ -355,6 +368,16 @@ The pipeline you sit inside:
 
 So your output is NOT "a generic activity report on the integrations." It is "concrete, anchored, USER-FACING risk evidence the downstream synthesizer can convert into long-horizon UI flow ideas the agent should bug-bash." Every drill-in you do should answer some version of: "is there a recent change or live failure in the product that makes a real-user UI journey worth re-walking right now?"
 
+# Hard rules (non-negotiable)
+
+1. **The ONLY providers you may investigate are listed under "Connected integrations" below.** For this project, the connected providers are: **{covered_list}**.
+2. **Do NOT issue purposes that name, target, or require credentials from any other provider.** The following providers are NOT connected for this project and are off-limits: **{uncovered_list}**. Their environment variables (e.g. `POSTHOG_API_KEY`, `SENTRY_AUTH_TOKEN`, `LANGSMITH_API_KEY`, `BRAINTRUST_API_KEY`) are NOT set in the sandbox; the code writer cannot fabricate them, and any `purpose` that targets one of these providers will fail with a `KeyError` or 4xx and waste a step.
+3. **If you find yourself wanting to drill into an off-limits provider, do not.** Either:
+   a. Drill into a connected provider in a way that surfaces equivalent signal (e.g. if PostHog isn't connected but you want user-pain evidence, look at GitHub issue comments, PR review comments, or commit messages mentioning user reports), or
+   b. Stop and emit your handoff summary, noting in the summary that the off-limits provider's signal is a known gap so the synthesizer doesn't invent flows about it.
+4. **Every `purpose` string you emit must be answerable using ONLY the connected providers' APIs.** If your purpose mentions "PostHog rage clicks", "Sentry exceptions", "LangSmith errors", "Braintrust experiments", etc., and the corresponding provider isn't in the connected list above, that purpose is INVALID. Rewrite it before you emit it, or skip it.
+5. Before each `execute_code` call, take one quiet moment to re-read the purpose you are about to send. If it names or implies any provider not in the connected list, rewrite it to use only connected providers, or do not send it.
+
 # Tool
 
 You have one tool:
@@ -367,10 +390,6 @@ Pass a clear, natural-language research goal as `purpose`. A specialized code-wr
 - `stdout` — the script's printed JSON output (truncated to ~4KB for your context; the full stdout is preserved for the downstream synthesizer).
 - `stderr` — any Python exception traceback or error stream (truncated).
 - `explanation` — one-sentence note from the code writer describing what the script did (useful for verifying the code writer understood your goal).
-
-# Connected integrations
-
-{', '.join(integrations_covered)}
 
 # How to write good `purpose` strings
 
@@ -414,7 +433,15 @@ The user message below contains each integration's preflight result (recent comm
 
 # How to finish
 
-When you have enough evidence-backed findings to anchor risk-focused UI flows, stop calling tools and emit a final message with no tool calls. In that final message, write a 3-5 sentence summary of the biggest user-facing risks you found (which page/journey, which PR or error or rage-click, with concrete numbers/anchors). Connect each risk back to a real-user UI journey wherever you can — the downstream synthesizer's job is much easier when your handoff is already framed in user-flow terms. That summary becomes your handoff to the synthesizer. Do NOT try to produce a structured report — that's the synthesizer's job. Just a clear, anchored narrative paragraph."""
+When you have enough evidence-backed findings to anchor risk-focused UI flows, stop calling tools and emit a final message with no tool calls. In that final message, write a 3-5 sentence summary of the biggest user-facing risks you found (which page/journey, which PR or error or rage-click, with concrete numbers/anchors). Connect each risk back to a real-user UI journey wherever you can — the downstream synthesizer's job is much easier when your handoff is already framed in user-flow terms. That summary becomes your handoff to the synthesizer. Do NOT try to produce a structured report — that's the synthesizer's job. Just a clear, anchored narrative paragraph.
+
+# Connected integrations (READ THIS BEFORE EVERY `execute_code` CALL)
+
+For this project, the ONLY connected providers are: **{covered_list}**.
+
+Off-limits (do NOT investigate these — their credentials are not configured): **{uncovered_list}**.
+
+Before sending any `execute_code(purpose=...)` call, re-read the purpose. If it names or implies any provider in the off-limits list above, rewrite it to use only connected providers, or stop and emit your handoff summary instead. A purpose that targets an off-limits provider WILL fail with a missing-env-var error and waste your step budget; the synthesizer cannot use the resulting empty stdout."""
 
 
 # ---------------------------------------------------------------------------
@@ -671,6 +698,18 @@ async def _run_research_loop(
             for t in integrations_covered
         )
 
+        uncovered_providers = [
+            p for p in _ALL_KNOWN_PROVIDERS if p not in integrations_covered
+        ]
+        uncovered_reminder = (
+            f"\n\nReminder: only investigate the connected providers "
+            f"({', '.join(integrations_covered) or 'none'}). Do NOT issue "
+            f"purposes that target {', '.join(uncovered_providers)} — those "
+            "providers are not connected for this project and their credentials "
+            "are not in the sandbox. A purpose targeting any of them will fail "
+            "with a missing-env-var error."
+        ) if uncovered_providers else ""
+
         messages: list = [
             SystemMessage(
                 content=_build_orchestrator_system_prompt(
@@ -689,7 +728,8 @@ async def _run_research_loop(
                     "single-source drill-ins. Stop when you have enough "
                     "evidence-backed, user-facing findings to anchor risk-focused "
                     "UI flows for our autonomous browser agent, and emit a 3-5 "
-                    "sentence handoff summary.\n\n"
+                    "sentence handoff summary."
+                    f"{uncovered_reminder}\n\n"
                     "# Preflight data\n\n"
                     f"{preflight_block}"
                 )

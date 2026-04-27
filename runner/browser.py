@@ -7,6 +7,7 @@ Playwright to that session over CDP for direct page interaction.
 
 Migration reference: https://docs.stagehand.dev/v3/migrations/python
 """
+import asyncio
 import os
 import time
 from typing import Any
@@ -17,6 +18,69 @@ from playwright.async_api import async_playwright
 
 from runner.logging import test_log
 from runner.prompts import STAGEHAND_SESSION_MODEL
+
+
+def _install_dialog_handlers(context: Any) -> None:
+    """Auto-dismiss JS dialogs on every page in this context (incl. ones opened later).
+
+    Stagehand's CUA agent races us to handle dialogs (beforeunload, alert,
+    confirm), and when a dialog auto-closes before Stagehand's
+    `Page.handleJavaScriptDialog` call lands, the resulting `ProtocolError`
+    ('No dialog is showing') propagates through the Playwright driver and
+    KILLS THE WHOLE BROWSER CONNECTION. Once the connection dies, every
+    subsequent `page.screenshot` raises `Connection closed while reading
+    from the driver` and the test session is unrecoverable.
+
+    We pre-empt this by installing our own dialog handler at the context
+    level so dialogs are dismissed synchronously by us before Stagehand's
+    handler can race. Registered on every existing page AND on any future
+    page via `context.on("page", ...)`.
+
+    The dismiss is wrapped in a try/except because if Stagehand's handler
+    happens to win the race anyway, our `dismiss()` will raise an "already
+    handled" error — which we want to swallow, not propagate.
+    """
+    async def _handle(dialog: Any) -> None:
+        try:
+            await dialog.dismiss()
+        except Exception as e:
+            # Most likely: another handler already dismissed it. Log at
+            # debug level so we have a trail without spamming on every
+            # benign race.
+            test_log(
+                "debug",
+                "browser_dialog_dismiss_noop",
+                err_type=type(e).__name__,
+                err=str(e)[:200],
+            )
+
+    def _on_page(p: Any) -> None:
+        try:
+            p.on("dialog", lambda d: asyncio.create_task(_handle(d)))
+        except Exception as e:
+            test_log(
+                "warn",
+                "browser_dialog_handler_register_failed",
+                err_type=type(e).__name__,
+                err=str(e)[:200],
+            )
+
+    try:
+        for existing in list(context.pages):
+            _on_page(existing)
+        context.on("page", _on_page)
+        test_log(
+            "debug",
+            "browser_dialog_handlers_installed",
+            existing_page_count=len(context.pages),
+        )
+    except Exception as e:
+        test_log(
+            "warn",
+            "browser_dialog_handlers_install_failed",
+            err_type=type(e).__name__,
+            err=str(e)[:200],
+        )
 
 
 def _strip_provider_prefix(model: str) -> tuple[str, str]:
@@ -165,6 +229,10 @@ async def create_stagehand_session() -> dict[str, Any]:
 
         test_log("debug", "browser_session_step", step="acquire_page")
         context = browser.contexts[0]
+        # Install the auto-dismiss dialog handler BEFORE acquiring the
+        # page so even the very first navigation's beforeunload/confirm
+        # dialogs are caught.
+        _install_dialog_handlers(context)
         page = context.pages[0] if context.pages else await context.new_page()
         test_log(
             "debug",

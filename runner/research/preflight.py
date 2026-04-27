@@ -15,12 +15,48 @@ loop can see partial data even when one integration errors.
 """
 from __future__ import annotations
 
+import asyncio
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
 
 from runner.encryption import decrypt
+
+
+# How many of the most recently merged PRs we drill into for per-file churn.
+# 5 is enough to identify the genuinely hot files without ballooning the
+# preflight time budget; each drill-in is one extra GitHub call.
+_GH_CHURN_PR_DEPTH = 5
+
+# Cap on the size of `topChangedPaths` in the preflight result.
+_GH_TOP_CHANGED_LIMIT = 20
+
+# File patterns we never include in `topChangedPaths` — they're never the
+# right "read me first" target for the codebase agent.
+_GH_CHURN_EXCLUDE_RE = re.compile(
+    r"(?:"
+    r"\.test\.[^/]+$|"
+    r"\.spec\.[^/]+$|"
+    r"\.snap$|"
+    r"(?:^|/)__tests?__/|"
+    r"(?:^|/)tests?/|"
+    r"\.lock$|"
+    r"^pnpm-lock\.yaml$|"
+    r"^package-lock\.json$|"
+    r"^yarn\.lock$|"
+    r"^poetry\.lock$|"
+    r"^Cargo\.lock$|"
+    r"^go\.sum$"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _is_churn_excluded(path: str) -> bool:
+    """Return True if `path` matches a pattern we never seed the codebase agent with."""
+    return bool(_GH_CHURN_EXCLUDE_RE.search(path))
 
 
 async def preflight_github(
@@ -70,6 +106,17 @@ async def preflight_github(
         closed_prs_resp.json() if closed_prs_resp.status_code == 200 else []
     )
 
+    merged_prs = [p for p in closed_prs_raw if p.get("merged_at")]
+
+    # Drill in on the N most recently merged PRs to compute per-file churn.
+    # Each call hits `/pulls/{n}/files`; we run them in parallel.
+    top_changed_paths = await _aggregate_top_changed_paths(
+        owner=owner,
+        repo=repo,
+        merged_prs=merged_prs,
+        headers=headers,
+    )
+
     return {
         "success": True,
         "commits": {
@@ -104,10 +151,96 @@ async def preflight_github(
                 "merged_at": p.get("merged_at"),
                 "head_branch": (p.get("head") or {}).get("ref"),
             }
-            for p in closed_prs_raw
-            if p.get("merged_at")
+            for p in merged_prs
         ],
+        "topChangedPaths": top_changed_paths,
     }
+
+
+async def _aggregate_top_changed_paths(
+    *,
+    owner: str,
+    repo: str,
+    merged_prs: list[dict[str, Any]],
+    headers: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Return the top-N file paths by recent churn across the most-recent merged PRs.
+
+    For up to `_GH_CHURN_PR_DEPTH` of the most-recently-merged PRs (already
+    sorted desc by `updated`), fetches `/pulls/{n}/files` in parallel and
+    aggregates per-file additions+deletions plus the set of PR numbers that
+    touched each file.
+
+    Test files, lock files, and snapshots are dropped — they're never the
+    "read me first" target for the codebase agent. Returns at most
+    `_GH_TOP_CHANGED_LIMIT` entries, sorted by total churn descending.
+
+    Best-effort: any individual PR-files fetch failure is logged via the
+    return value being missing for that PR; the aggregate continues with
+    whatever succeeded. Returns an empty list rather than raising.
+    """
+    if not merged_prs:
+        return []
+
+    target_prs = merged_prs[:_GH_CHURN_PR_DEPTH]
+
+    async def _fetch_pr_files(client: httpx.AsyncClient, pr_number: int) -> list[dict[str, Any]]:
+        try:
+            resp = await client.get(
+                f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files",
+                headers=headers,
+                params={"per_page": 100},
+            )
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            return data if isinstance(data, list) else []
+        except httpx.HTTPError:
+            return []
+
+    filtered_prs = [p for p in target_prs if p.get("number") is not None]
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        results = await asyncio.gather(
+            *(_fetch_pr_files(client, int(p.get("number"))) for p in filtered_prs),
+            return_exceptions=False,
+        )
+
+    # path -> {"additions": int, "deletions": int, "prs": set[int]}
+    agg: dict[str, dict[str, Any]] = {}
+    for pr, files in zip(filtered_prs, results):
+        pr_number = pr.get("number")
+        for f in files or []:
+            filename = f.get("filename")
+            if not isinstance(filename, str) or not filename:
+                continue
+            if _is_churn_excluded(filename):
+                continue
+            entry = agg.setdefault(
+                filename,
+                {"additions": 0, "deletions": 0, "prs": set()},
+            )
+            entry["additions"] += int(f.get("additions") or 0)
+            entry["deletions"] += int(f.get("deletions") or 0)
+            if isinstance(pr_number, int):
+                entry["prs"].add(pr_number)
+
+    sorted_paths = sorted(
+        agg.items(),
+        key=lambda kv: (kv[1]["additions"] + kv[1]["deletions"]),
+        reverse=True,
+    )
+
+    return [
+        {
+            "path": path,
+            "additions": data["additions"],
+            "deletions": data["deletions"],
+            "prCount": len(data["prs"]),
+            "prNumbers": sorted(data["prs"]),
+        }
+        for path, data in sorted_paths[:_GH_TOP_CHANGED_LIMIT]
+    ]
 
 
 async def preflight_posthog(

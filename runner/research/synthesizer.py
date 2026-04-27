@@ -396,6 +396,43 @@ def _integration_stub(original: TranscriptEntry) -> TranscriptEntry:
 # ---------------------------------------------------------------------------
 
 
+def _render_thoughts_section(entries: list[TranscriptEntry]) -> str:
+    """Render a leading 'Investigator reasoning' aggregate of all thought entries.
+
+    Pulls every `kind == "thought"` entry into a numbered list at the
+    TOP of the rendered transcript so the synthesizer sees the
+    investigator's mid-run hypotheses as a coherent block. The same
+    thoughts ALSO render inline in the chronological log below, so
+    chronology is preserved — this section just gives the synthesizer
+    a high-priority "read this first" view.
+
+    Returns an empty string if there are no thoughts (so callers can
+    skip the section entirely with a simple truthy check).
+    """
+    thoughts = [e for e in entries if e.kind == "thought"]
+    if not thoughts:
+        return ""
+    lines = [
+        f"## Investigator reasoning (verbatim mid-run thoughts — {len(thoughts)} entries)",
+        "",
+        "These are the reasoning text blocks the investigator emitted between "
+        "tool calls. Read them carefully — they are the highest-signal expression "
+        "of WHY each evidence call was made, and the working hypotheses the "
+        "investigator formed about real-user risk and user-facing journeys. "
+        "These thoughts also appear inline in the chronological log below; "
+        "this section is a 'read first' aggregate for high-priority context.",
+        "",
+    ]
+    for i, t in enumerate(thoughts, 1):
+        text = (t.text or "").strip()
+        if not text:
+            continue
+        lines.append(f"### Thought {i}")
+        lines.append(text)
+        lines.append("")
+    return "\n".join(lines)
+
+
 def render_codebase_transcript(
     cb: CodebaseTranscript,
     *,
@@ -431,7 +468,17 @@ def render_codebase_transcript(
         [
             f"- stepBudgetExhausted: {cb.step_budget_exhausted}",
             "",
-            f"## Exploration log ({len(entries)} entries)",
+        ]
+    )
+
+    thoughts_block = _render_thoughts_section(entries)
+    if thoughts_block:
+        header_lines.append(thoughts_block)
+        header_lines.append("")
+
+    header_lines.extend(
+        [
+            f"## Exploration log ({len(entries)} entries — chronological, includes thoughts inline)",
             "",
         ]
     )
@@ -470,9 +517,20 @@ def render_integration_transcript(
         f"## Sandbox available: {intg.sandbox_available}",
         f"## Step budget exhausted: {intg.step_budget_exhausted}",
         "",
-        "## Preflight data",
-        "",
     ]
+
+    thoughts_block = _render_thoughts_section(entries)
+    if thoughts_block:
+        header_lines.append(thoughts_block)
+        header_lines.append("")
+
+    header_lines.extend(
+        [
+            "## Preflight data",
+            "",
+        ]
+    )
+
     preflight_sections: list[str] = []
     for t in intg.integrations_covered + intg.integrations_skipped:
         data = intg.preflight_results.get(t)
@@ -483,7 +541,9 @@ def render_integration_transcript(
         )
     header = "\n".join(header_lines) + "\n".join(preflight_sections)
 
-    drill_header = f"\n\n## Drill-in log ({len(entries)} entries)\n\n"
+    drill_header = (
+        f"\n\n## Drill-in log ({len(entries)} entries — chronological, includes thoughts inline)\n\n"
+    )
     body = "\n\n".join(_render_integration_entry(e) for e in entries)
     rendered = header + drill_header + body
     return rendered, evictions
@@ -495,6 +555,10 @@ def render_integration_transcript(
 
 
 _CODEBASE_SYSTEM = f"""{SYSTEM_PURPOSE_OVERVIEW}
+
+# How to read the input
+
+The user message contains the rendered exploration transcript. It begins with an "Investigator reasoning" section that aggregates the investigator's verbatim mid-run thoughts. **THIS IS YOUR HIGHEST-SIGNAL CONTEXT** — the investigator's working hypotheses about user-facing journeys, risky surfaces, and what each file revealed typically express more about the right shape of the structured output than the raw tool outputs do. Read the "Investigator reasoning" section first and let it shape your interpretation of the chronological log that follows.
 
 # Your role in the pipeline
 
@@ -543,6 +607,8 @@ async def generate_codebase_exploration(
     """
     rendered, evictions = render_codebase_transcript(cb)
 
+    thought_entries = [e for e in cb.entries if e.kind == "thought"]
+    thought_total_chars = sum(len(e.text or "") for e in thought_entries)
     chat_log(
         "info",
         "research_codebase_exploration_begin",
@@ -551,6 +617,8 @@ async def generate_codebase_exploration(
         rendered_tokens_est=_estimate_tokens(rendered),
         evictions=evictions,
         entries=len(cb.entries),
+        thought_count=len(thought_entries),
+        thought_total_chars=thought_total_chars,
     )
 
     model = get_gemini_pro()
@@ -661,6 +729,10 @@ _FLOW_SYSTEM = (
     SYSTEM_PURPOSE_OVERVIEW
     + """
 
+# How to read the input
+
+The user message contains TWO rendered transcripts (codebase + integration), separated by `---`. EACH transcript begins with an "Investigator reasoning" section aggregating that investigator's verbatim mid-run thoughts. **THESE TWO REASONING BLOCKS ARE YOUR HIGHEST-SIGNAL CONTEXT** — the investigators' working hypotheses about real-user risk and user-facing journeys typically reveal more about what's worth proposing than the raw tool outputs alone. Read both reasoning sections first; let the codebase investigator's hypotheses shape which CORE flows you choose, and let the integration investigator's hypotheses shape which RISK-ANCHORED flows you choose. Then use the chronological logs as supporting evidence to ground specifics (concrete file paths, PR numbers, error counts, etc.).
+
 # Your role in the pipeline
 
 You are the unified flow synthesizer for {app_url}. You sit at the most consequential point in this product's research-to-flows pipeline: every long-horizon UI flow our autonomous browser agent ever bug-bashes against this app traces back to a flow idea you produce here.
@@ -738,6 +810,8 @@ async def generate_flow_report(
 
     user_content = f"{cb_rendered}\n\n---\n\n{intg_rendered}\n\n---\n\nProduce the flow-focused research report now."
 
+    cb_thoughts = [e for e in cb.entries if e.kind == "thought"]
+    intg_thoughts = [e for e in intg.entries if e.kind == "thought"]
     chat_log(
         "info",
         "research_flow_synthesis_begin",
@@ -748,6 +822,10 @@ async def generate_flow_report(
         intg_rendered_tokens_est=_estimate_tokens(intg_rendered),
         cb_entries_evicted=cb_evictions,
         intg_entries_evicted=intg_evictions,
+        cb_thought_count=len(cb_thoughts),
+        cb_thought_total_chars=sum(len(e.text or "") for e in cb_thoughts),
+        intg_thought_count=len(intg_thoughts),
+        intg_thought_total_chars=sum(len(e.text or "") for e in intg_thoughts),
     )
 
     model = get_gemini_pro()
