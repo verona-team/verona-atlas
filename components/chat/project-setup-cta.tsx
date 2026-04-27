@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Lock } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   AdvancedIntegrationsSection,
@@ -16,6 +16,11 @@ import {
   type IntegrationStatus,
 } from "@/components/integrations/integration-cards";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useWorkspace } from "@/lib/workspace-context";
 import {
   invalidateSettingsCache,
@@ -197,11 +202,6 @@ export function ProjectSetupCTA({
           <p className="mt-2 text-sm text-muted-foreground">{subcopy}</p>
         </header>
 
-        <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
-          <Lock className="h-3 w-3" aria-hidden />
-          <span>Tokens and API keys are encrypted at rest.</span>
-        </div>
-
         <div className="space-y-3">
           <GitHubCard
             projectId={projectId}
@@ -241,26 +241,40 @@ export function ProjectSetupCTA({
         </div>
 
         <div className="mt-6">
-          <Button
-            onClick={handleContinue}
-            disabled={!githubReady || continuing}
-            size="lg"
-            className="w-full h-11 text-sm"
-          >
-            {continuing ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Starting...
-              </>
-            ) : (
-              <>Continue</>
-            )}
-          </Button>
-          {!githubReady && !continuing && (
-            <p className="mt-2 text-center text-xs text-muted-foreground">
-              Connect GitHub above to continue.
-            </p>
-          )}
+          {(() => {
+            const continueButton = (
+              <Button
+                onClick={handleContinue}
+                disabled={!githubReady || continuing}
+                size="lg"
+                className="w-full h-11 text-sm"
+              >
+                {continuing ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Starting...
+                  </>
+                ) : (
+                  <>Continue</>
+                )}
+              </Button>
+            );
+            // Disabled native buttons swallow pointer events, so wrap in a
+            // div trigger so the tooltip explaining the block actually fires.
+            // Only render the tooltip while the block is the missing-GitHub
+            // case — never while a submission is in flight.
+            if (githubReady || continuing) return continueButton;
+            return (
+              <Tooltip>
+                <TooltipTrigger render={<div className="block w-full" />}>
+                  {continueButton}
+                </TooltipTrigger>
+                <TooltipContent side="top" align="center">
+                  Connect GitHub to continue.
+                </TooltipContent>
+              </Tooltip>
+            );
+          })()}
         </div>
       </div>
     </div>

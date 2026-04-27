@@ -151,4 +151,4 @@ See `.env.example` for the full list. Key variables:
 
 ## License
 
-Private — All rights reserved.
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the full text and [NOTICE](NOTICE) for attribution.
