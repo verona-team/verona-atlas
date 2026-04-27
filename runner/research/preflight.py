@@ -198,15 +198,17 @@ async def _aggregate_top_changed_paths(
         except httpx.HTTPError:
             return []
 
+    filtered_prs = [p for p in target_prs if p.get("number") is not None]
+
     async with httpx.AsyncClient(timeout=60) as client:
         results = await asyncio.gather(
-            *(_fetch_pr_files(client, int(p.get("number"))) for p in target_prs if p.get("number") is not None),
+            *(_fetch_pr_files(client, int(p.get("number"))) for p in filtered_prs),
             return_exceptions=False,
         )
 
     # path -> {"additions": int, "deletions": int, "prs": set[int]}
     agg: dict[str, dict[str, Any]] = {}
-    for pr, files in zip(target_prs, results):
+    for pr, files in zip(filtered_prs, results):
         pr_number = pr.get("number")
         for f in files or []:
             filename = f.get("filename")
