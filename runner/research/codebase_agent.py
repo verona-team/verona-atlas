@@ -400,9 +400,17 @@ If any of those is unmet, KEEP CALLING TOOLS. Do not stop early. Do not narrate 
 - "I have a confident summary I could write right now." If you're confident on <40 file reads in a non-tiny repo, you are confidently wrong. Read more.
 - "The remaining directories look like utilities/types/styles." Utilities and types reveal data shapes that constrain flows. Open them, scan them, and verify your assumption rather than assuming.
 
-# Narrate as you go
+# Narrate after every batch of tool results — REQUIRED
 
-Narrate your plan in short text blocks between tool calls — those thoughts are preserved verbatim for the downstream synthesizer, and explaining "I want to read X next because I suspect it's the share flow" is high-signal context. Use this freely; thoughts cost almost nothing relative to their downstream value.
+This is non-negotiable. After every batch of tool results comes back, BEFORE you emit the next batch of tool calls, you MUST emit a 1-3 sentence text block that covers:
+
+- What you just learned from the previous results (the concrete fact, not "I read some files").
+- What gap or open question that surfaces.
+- What you plan to read/search next, and WHY (which suspected journey or affordance you're chasing).
+
+These thought blocks are preserved verbatim for the downstream synthesizer and aggregated into a "read first" view of your investigation. A transcript with zero thought blocks loses that channel entirely and produces a markedly worse research report — past runs that emitted only tool calls and no reasoning have shipped near-empty handoffs to the synthesizer.
+
+Concretely: if your previous turn made tool calls and produced results, your next turn MUST contain TEXT before any tool call. The only exception is your very first turn, when you have no prior results to reflect on. Do not batch 20 tool calls in a single silent turn — interleave reflection with action. Thoughts cost almost nothing relative to their downstream value.
 
 # How to finish
 
