@@ -16,6 +16,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 export type IntegrationStatus = {
   id: string
@@ -419,6 +426,19 @@ export function PostHogCard({
 /*  Sentry                                                             */
 /* ------------------------------------------------------------------ */
 
+type SentryDiscoveredProject = {
+  organizationSlug: string
+  projectSlug: string
+  projectName: string
+}
+
+// Encodes the org/project pair as a single string for the Select value, since
+// only the pair uniquely identifies a project (a project slug can repeat
+// across orgs the token has access to).
+function projectKey(p: { organizationSlug: string; projectSlug: string }): string {
+  return `${p.organizationSlug}/${p.projectSlug}`
+}
+
 export function SentryCard({
   projectId,
   integration,
@@ -430,24 +450,87 @@ export function SentryCard({
 }) {
   const [expanded, setExpanded] = useState(false)
   const [authToken, setAuthToken] = useState('')
-  const [orgSlug, setOrgSlug] = useState('')
-  const [projSlug, setProjSlug] = useState('')
+  const [discovering, setDiscovering] = useState(false)
+  const [discoverError, setDiscoverError] = useState<string | null>(null)
+  const [projects, setProjects] = useState<SentryDiscoveredProject[] | null>(null)
+  const [selectedKey, setSelectedKey] = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
 
+  function resetForm() {
+    setAuthToken('')
+    setDiscovering(false)
+    setDiscoverError(null)
+    setProjects(null)
+    setSelectedKey('')
+  }
+
+  function useDifferentToken() {
+    setProjects(null)
+    setSelectedKey('')
+    setDiscoverError(null)
+  }
+
+  async function discover() {
+    setDiscovering(true)
+    setDiscoverError(null)
+    try {
+      const res = await fetch('/api/integrations/sentry/discover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ authToken }),
+      })
+      const data = (await res.json()) as {
+        projects?: SentryDiscoveredProject[]
+        error?: string
+      }
+      if (!res.ok) {
+        setDiscoverError(data.error || 'Failed to reach Sentry')
+        return
+      }
+      const list = data.projects ?? []
+      setProjects(list)
+      if (list.length === 1) setSelectedKey(projectKey(list[0]))
+    } catch {
+      setDiscoverError('Failed to reach Sentry')
+    } finally {
+      setDiscovering(false)
+    }
+  }
+
   async function connect() {
+    const selected = projects?.find((p) => projectKey(p) === selectedKey)
+    if (!selected) return
     setSubmitting(true)
     try {
       const res = await fetch('/api/integrations/sentry/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, authToken, organizationSlug: orgSlug, projectSlug: projSlug }),
+        body: JSON.stringify({
+          projectId,
+          authToken,
+          organizationSlug: selected.organizationSlug,
+          projectSlug: selected.projectSlug,
+        }),
       })
       const data = await res.json()
-      if (!res.ok) { toast.error(data.error || 'Failed to connect'); return }
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to connect')
+        return
+      }
       toast.success('Sentry connected')
       setExpanded(false)
+      resetForm()
       onRefresh()
-    } catch { toast.error('Connection failed') } finally { setSubmitting(false) }
+    } catch {
+      toast.error('Connection failed')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  function cancel() {
+    setExpanded(false)
+    resetForm()
   }
 
   return (
@@ -463,25 +546,96 @@ export function SentryCard({
       )}
       {!integration && expanded && (
         <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="sentry-token">Auth token</Label>
-            <Input id="sentry-token" value={authToken} onChange={(e) => setAuthToken(e.target.value)} placeholder="sntryu_..." type="password" />
-            <p className="text-xs text-muted-foreground">
-              Create a <a href="https://sentry.io/settings/account/api/auth-tokens/" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-foreground">User Auth Token</a> with <code className="rounded bg-muted px-1 py-0.5 text-[11px]">project:read</code> and <code className="rounded bg-muted px-1 py-0.5 text-[11px]">event:read</code> scopes.
-            </p>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="sentry-org">Organization slug</Label>
-            <Input id="sentry-org" value={orgSlug} onChange={(e) => setOrgSlug(e.target.value)} placeholder="my-org" />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="sentry-proj">Project slug</Label>
-            <Input id="sentry-proj" value={projSlug} onChange={(e) => setProjSlug(e.target.value)} placeholder="my-project" />
-          </div>
-          <div className="flex gap-2">
-            <Button size="sm" onClick={connect} disabled={submitting || !authToken || !orgSlug || !projSlug}>{submitting ? 'Connecting...' : 'Save'}</Button>
-            <Button variant="ghost" size="sm" onClick={() => setExpanded(false)}>Cancel</Button>
-          </div>
+          {projects === null ? (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="sentry-token">Auth token</Label>
+                <Input
+                  id="sentry-token"
+                  value={authToken}
+                  onChange={(e) => setAuthToken(e.target.value)}
+                  placeholder="sntryu_..."
+                  type="password"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Create a <a href="https://sentry.io/settings/account/api/auth-tokens/" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-foreground">User Auth Token</a> with <code className="rounded bg-muted px-1 py-0.5 text-[11px]">project:read</code> and <code className="rounded bg-muted px-1 py-0.5 text-[11px]">event:read</code> scopes. We&apos;ll list the projects it can access.
+                </p>
+              </div>
+              {discoverError && (
+                <p className="text-xs text-destructive">{discoverError}</p>
+              )}
+              <div className="flex gap-2">
+                <Button size="sm" onClick={discover} disabled={discovering || !authToken}>
+                  {discovering ? 'Finding projects…' : 'Find projects'}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={cancel}>Cancel</Button>
+              </div>
+            </>
+          ) : projects.length === 0 ? (
+            <>
+              <p className="text-xs text-muted-foreground">
+                This token has no project access. Generate a token with <code className="rounded bg-muted px-1 py-0.5 text-[11px]">project:read</code> scope on the project you want to connect.
+              </p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={useDifferentToken}>Use a different token</Button>
+                <Button variant="ghost" size="sm" onClick={cancel}>Cancel</Button>
+              </div>
+            </>
+          ) : projects.length === 1 ? (
+            <>
+              <div className="space-y-1.5">
+                <Label>Project</Label>
+                <p className="text-sm font-medium">
+                  {projects[0].organizationSlug}/{projects[0].projectSlug}
+                </p>
+                <button
+                  type="button"
+                  onClick={useDifferentToken}
+                  className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                >
+                  Use a different token
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={connect} disabled={submitting}>
+                  {submitting ? 'Connecting…' : 'Save'}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={cancel}>Cancel</Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="sentry-project-select">Project</Label>
+                <Select value={selectedKey} onValueChange={(v) => setSelectedKey(v ?? '')}>
+                  <SelectTrigger id="sentry-project-select">
+                    <SelectValue placeholder="Choose a project" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {projects.map((p) => (
+                      <SelectItem key={projectKey(p)} value={projectKey(p)}>
+                        {p.organizationSlug}/{p.projectSlug}
+                        {p.projectName && p.projectName !== p.projectSlug ? ` — ${p.projectName}` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <button
+                  type="button"
+                  onClick={useDifferentToken}
+                  className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                >
+                  Use a different token
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={connect} disabled={submitting || !selectedKey}>
+                  {submitting ? 'Connecting…' : 'Save'}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={cancel}>Cancel</Button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </IntegrationCard>

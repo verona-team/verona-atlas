@@ -18,6 +18,19 @@ export interface SentryIssue {
   permalink: string
 }
 
+export interface SentryAccessibleProject {
+  organizationSlug: string
+  projectSlug: string
+  projectName: string
+}
+
+export class SentryAuthError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'SentryAuthError'
+  }
+}
+
 export interface SentryEvent {
   eventID: string
   title: string
@@ -33,6 +46,47 @@ function headers(authToken: string): Record<string, string> {
     Authorization: `Bearer ${authToken}`,
     "Content-Type": "application/json",
   }
+}
+
+// Lists every project the auth token can see, paired with its organization
+// slug. Used by the connect flow so users only paste a token and pick from a
+// list, instead of typing slugs by hand. Throws SentryAuthError on 401/403 so
+// the API route can return a clear "bad token" message rather than a generic
+// failure.
+export async function fetchAccessibleProjects(
+  authToken: string,
+): Promise<SentryAccessibleProject[]> {
+  const response = await fetch(`${SENTRY_API_BASE}/projects/`, {
+    headers: headers(authToken),
+  })
+
+  if (response.status === 401 || response.status === 403) {
+    throw new SentryAuthError(
+      'Sentry rejected the auth token. Check the token and that it has project:read scope.',
+    )
+  }
+
+  if (!response.ok) {
+    throw new Error(`Sentry API error: ${response.status} ${response.statusText}`)
+  }
+
+  const projects = (await response.json()) as Array<Record<string, unknown>>
+  return projects
+    .map((project) => {
+      const organization = project.organization as Record<string, unknown> | undefined
+      const orgSlug = organization?.slug
+      const projSlug = project.slug
+      if (typeof orgSlug !== 'string' || typeof projSlug !== 'string') return null
+      return {
+        organizationSlug: orgSlug,
+        projectSlug: projSlug,
+        projectName:
+          typeof project.name === 'string' && project.name.length > 0
+            ? project.name
+            : projSlug,
+      }
+    })
+    .filter((p): p is SentryAccessibleProject => p !== null)
 }
 
 export async function validateSentryConnection(config: SentryConfig): Promise<boolean> {
