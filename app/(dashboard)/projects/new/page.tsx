@@ -12,7 +12,7 @@ export default function NewProjectPage() {
 
   useEffect(() => {
     if (existingProjectId) {
-      router.replace(`/projects/${existingProjectId}`)
+      router.replace(`/projects/${existingProjectId}/chat`)
     } else {
       setShowNewProjectModal(true)
       router.replace('/projects')

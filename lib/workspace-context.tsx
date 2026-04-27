@@ -96,7 +96,7 @@ export function WorkspaceProvider({
     (id: string | null) => {
       queueMicrotask(() => setActiveProjectIdState(id))
       if (id) {
-        router.push(`/projects/${id}`)
+        router.push(`/projects/${id}/chat`)
       }
     },
     [router],

@@ -108,7 +108,7 @@ export function AppSidebar() {
               return (
                 <Link
                   key={project.id}
-                  href={`/projects/${project.id}`}
+                  href={`/projects/${project.id}/chat`}
                   tabIndex={sidebarCollapsed ? -1 : 0}
                   className={cn(
                     'flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',

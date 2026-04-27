@@ -236,7 +236,7 @@ export function NewProjectModal() {
         );
       }
       await refreshProjects();
-      router.push(`/projects/${projectId}`);
+      router.push(`/projects/${projectId}/chat`);
       setShowNewProjectModal(false);
       // NOTE: `onOpenChange` does NOT fire for programmatic close (only for
       // Escape / outside-click / close-button), so we must clear state here
@@ -263,7 +263,7 @@ export function NewProjectModal() {
     reset();
     if (newProjectId) {
       await refreshProjects();
-      router.push(`/projects/${newProjectId}`);
+      router.push(`/projects/${newProjectId}/chat`);
     }
   }
 
