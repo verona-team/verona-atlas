@@ -355,7 +355,7 @@ export function NewProjectModal() {
               <DialogTitle>Connect Integrations</DialogTitle>
               <DialogDescription>
                 GitHub is required. Other integrations can be added later from
-                settings.
+                settings. All secrets are encrypted at rest.
               </DialogDescription>
             </DialogHeader>
 
