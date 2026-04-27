@@ -394,7 +394,7 @@ def get_claude_opus_integration_orchestrator(
 
 def get_claude_opus_flow_synthesis(
     *,
-    max_tokens: int = 32_000,
+    max_tokens: int = 128_000,
     timeout: float = 600.0,
     max_retries: int = 2,
 ) -> "ChatAnthropic":
@@ -427,12 +427,27 @@ def get_claude_opus_flow_synthesis(
 
     Defaults rationale:
 
-    - `max_tokens=32_000`: full output ceiling for the structured
-      response. The flow synthesizer's output is moderately large
-      (3 core flows × multi-step prose + 3 risk flows × multi-step
-      prose + 4-8 findings + drill-in highlights) and adaptive
-      thinking burns through tokens before emitting the structured
-      payload — 32k is comfortable.
+    - `max_tokens=128_000`: matches Opus 4.7's full output ceiling.
+      Flow synthesis is a one-shot structured-output call — NOT a
+      streaming ReAct turn — so the precedent it follows is
+      `get_claude_opus_code_writer` and `get_gemini_pro` (both at
+      their respective full ceilings), not `get_claude_opus_outer`
+      / `get_claude_opus_codebase_agent` /
+      `get_claude_opus_integration_orchestrator` (32K, capped to
+      bound runaway ReAct turns since hundreds of those run per
+      research cycle).
+
+      Reasoning models burn output tokens on adaptive-thinking
+      blocks BEFORE they emit the final structured payload. The
+      structured payload itself is moderately large (summary +
+      findings + ~3 core flows × multi-step prose + ~3 risk flows
+      × multi-step prose + drill-in highlights). Capping below the
+      model's ceiling silently truncates the schema response when
+      a turn reasons hard against a rich transcript — which is
+      exactly the failure mode we're trying to avoid (mirrors the
+      `keyEvidence`-drops-to-0 regression seen on Gemini). Letting
+      the model self-terminate on the natural stop token is the
+      safe default.
     - `timeout=600.0` (10 minutes): a flow-synthesis call against a
       ~180K-token combined transcript can take noticeably longer
       than a ReAct-loop per-turn call. The longer ceiling avoids
