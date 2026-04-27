@@ -558,7 +558,7 @@ export function SentryCard({
                   type="password"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Create a <a href="https://sentry.io/settings/account/api/auth-tokens/" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-foreground">User Auth Token</a> with <code className="rounded bg-muted px-1 py-0.5 text-[11px]">project:read</code> and <code className="rounded bg-muted px-1 py-0.5 text-[11px]">event:read</code> scopes. We&apos;ll list the projects it can access.
+                  Create a <a href="https://sentry.io/settings/account/api/auth-tokens/" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-foreground">User Auth Token</a> with <code className="rounded bg-muted px-1 py-0.5 text-[11px]">project:read</code> and <code className="rounded bg-muted px-1 py-0.5 text-[11px]">event:read</code> scopes.
                 </p>
               </div>
               {discoverError && (
