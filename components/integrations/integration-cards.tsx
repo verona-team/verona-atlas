@@ -466,6 +466,9 @@ export function SentryCard({
           <div className="space-y-1.5">
             <Label htmlFor="sentry-token">Auth token</Label>
             <Input id="sentry-token" value={authToken} onChange={(e) => setAuthToken(e.target.value)} placeholder="sntryu_..." type="password" />
+            <p className="text-xs text-muted-foreground">
+              Create a <a href="https://sentry.io/settings/account/api/auth-tokens/" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-foreground">User Auth Token</a> with <code className="rounded bg-muted px-1 py-0.5 text-[11px]">project:read</code> and <code className="rounded bg-muted px-1 py-0.5 text-[11px]">event:read</code> scopes.
+            </p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="sentry-org">Organization slug</Label>
