@@ -16,13 +16,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { SearchablePicker } from '@/components/ui/searchable-picker'
 
 export type IntegrationStatus = {
   id: string
@@ -607,19 +601,18 @@ export function SentryCard({
             <>
               <div className="space-y-1.5">
                 <Label htmlFor="sentry-project-select">Project</Label>
-                <Select value={selectedKey} onValueChange={(v) => setSelectedKey(v ?? '')}>
-                  <SelectTrigger id="sentry-project-select">
-                    <SelectValue placeholder="Choose a project" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {projects.map((p) => (
-                      <SelectItem key={projectKey(p)} value={projectKey(p)}>
-                        {p.organizationSlug}/{p.projectSlug}
-                        {p.projectName && p.projectName !== p.projectSlug ? ` — ${p.projectName}` : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchablePicker
+                  id="sentry-project-select"
+                  value={selectedKey}
+                  onChange={(v) => setSelectedKey(v)}
+                  items={projects.map((p) => ({
+                    value: projectKey(p),
+                    label: `${p.organizationSlug}/${p.projectSlug}${
+                      p.projectName && p.projectName !== p.projectSlug ? ` — ${p.projectName}` : ''
+                    }`,
+                  }))}
+                  placeholder="Choose a project"
+                />
                 <button
                   type="button"
                   onClick={useDifferentToken}

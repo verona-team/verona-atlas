@@ -174,8 +174,6 @@ export function SlackChannelPicker({
         onChange={(v) => void handleChange(v)}
         items={items}
         placeholder="Select a channel…"
-        searchPlaceholder="Search channels..."
-        emptyText="No channels found."
       />
     </div>
   )
