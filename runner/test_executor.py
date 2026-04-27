@@ -175,6 +175,14 @@ async def capture_page_state(page) -> dict:
     }
 
 
+# Mirrors the `max_steps` we pass to Stagehand's `session.execute` below.
+# Surfaced to the outer agent in the tool result so it can detect when the
+# inner agent burned its full step budget on a single instruction (a strong
+# signal that the affordance is hard for the AI agent and the outer agent
+# should escalate to deterministic Playwright tools).
+INNER_MAX_STEPS = 10
+
+
 async def execute_browser_action(
     session,
     page,
@@ -185,6 +193,10 @@ async def execute_browser_action(
     """Run a single instruction through the Stagehand v3 execute (agent) endpoint.
 
     Returns a dict with the execution outcome and post-action page state.
+    Includes `inner_steps_used` (count of Stagehand inner-agent perception
+    steps actually consumed, derived from `result_data.actions`) so the
+    outer ReAct loop can surface that signal to the outer model and bias
+    it toward deterministic selectors when the inner agent struggles.
 
     *inner_system_prompt* is the system prompt for the inner CUA agent. It
     must explicitly authorize signup/login flows and identify the application
@@ -195,13 +207,14 @@ async def execute_browser_action(
     success = True
     error: str | None = None
     agent_output: str | None = None
+    inner_steps_used: int | None = None
 
     t0 = time.time()
     try:
         response = await session.execute(
             execute_options={
                 "instruction": instruction,
-                "max_steps": 10,
+                "max_steps": INNER_MAX_STEPS,
             },
             agent_config={
                 "model": stagehand_agent_model_config(),
@@ -213,6 +226,16 @@ async def execute_browser_action(
         elapsed = time.time() - t0
         result_data = response.data.result
         agent_output = result_data.message
+        # Count the inner agent's perception steps. The Stagehand v3
+        # response carries an `actions` list (see
+        # `stagehand.types.session_execute_response.DataResult.actions`);
+        # `len(actions)` is the inner step count.
+        try:
+            actions_list = getattr(result_data, "actions", None)
+            if actions_list is not None:
+                inner_steps_used = len(actions_list)
+        except Exception:
+            inner_steps_used = None
         if not result_data.success:
             success = False
             error = result_data.message or "Agent execute reported failure"
@@ -222,6 +245,8 @@ async def execute_browser_action(
                 elapsed_s=round(elapsed, 3),
                 error=error,
                 instruction=instruction[:200],
+                inner_steps_used=inner_steps_used,
+                inner_max_steps=INNER_MAX_STEPS,
             )
         else:
             test_log(
@@ -230,6 +255,8 @@ async def execute_browser_action(
                 elapsed_s=round(elapsed, 3),
                 agent_output_preview=(agent_output or "")[:200],
                 instruction=instruction[:200],
+                inner_steps_used=inner_steps_used,
+                inner_max_steps=INNER_MAX_STEPS,
             )
     except Exception as e:
         elapsed = time.time() - t0
@@ -251,6 +278,7 @@ async def execute_browser_action(
         "success": success,
         "error": error,
         "agent_output": agent_output,
+        "inner_steps_used": inner_steps_used,
         "page_state": page_state,
     }
 
@@ -1100,11 +1128,30 @@ async def execute_template(
                 action_record["error"] = result["error"]
                 action_record["url_after"] = result["page_state"]["url"]
                 action_record["instruction"] = instruction
+                action_record["inner_steps_used"] = result.get("inner_steps_used")
 
                 if result["success"]:
-                    result_text = result["agent_output"] or "Action completed successfully."
+                    base_text = result["agent_output"] or "Action completed successfully."
                 else:
-                    result_text = f"Action failed: {result['error']}"
+                    base_text = f"Action failed: {result['error']}"
+
+                # Surface the inner-agent step count so the outer model can
+                # detect "the inner CUA agent struggled and burned its
+                # budget on this target" and escalate to deterministic
+                # selectors on its next call against the same target.
+                inner_steps = result.get("inner_steps_used")
+                step_marker = ""
+                if isinstance(inner_steps, int):
+                    step_marker = (
+                        f"\n\n[inner_steps_used={inner_steps}/{INNER_MAX_STEPS}]"
+                    )
+                    if inner_steps >= INNER_MAX_STEPS:
+                        step_marker += (
+                            " [WARN: inner agent exhausted its step budget — "
+                            "consider escalating to observe_dom + click_selector "
+                            "/ fill_selector for the next attempt on this target]"
+                        )
+                result_text = f"{base_text}{step_marker}"
 
                 messages.append(
                     ToolMessage(
