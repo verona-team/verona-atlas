@@ -57,8 +57,75 @@ _LANGCHAIN_TOOLS = list(TOOLS)
 # ---------------------------------------------------------------------------
 
 
+def _looks_like_dead_connection(err: BaseException) -> bool:
+    """Return True if `err` indicates the Playwright/CDP connection has died.
+
+    These are the errors that cascade after a `Page.handleJavaScriptDialog`
+    race kills the driver. Once we see one, the page object is unusable
+    and we need to re-acquire from the context (if it's still alive).
+    """
+    msg = str(err).lower()
+    return (
+        "connection closed" in msg
+        or "target closed" in msg
+        or "browser has been closed" in msg
+        or "protocol error" in msg
+    )
+
+
+async def _try_recover_page(page):
+    """Attempt to recover a usable page after a connection-level failure.
+
+    Returns the recovered page, or None if recovery isn't possible.
+    Caller should re-attempt screenshot / interaction against the
+    recovered page or, if None, treat the session as unhealthy.
+    """
+    try:
+        context = page.context
+    except Exception:
+        return None
+    try:
+        live_pages = list(context.pages)
+    except Exception:
+        return None
+    # Prefer the most recent live page from the context.
+    for candidate in reversed(live_pages):
+        if candidate is page:
+            continue
+        try:
+            _ = candidate.url  # touch to verify it's live
+            test_log(
+                "info",
+                "executor_page_recovery_used_existing",
+                url=candidate.url[:200],
+            )
+            return candidate
+        except Exception:
+            continue
+    # No usable existing page; try opening a new one.
+    try:
+        new_page = await context.new_page()
+        test_log("info", "executor_page_recovery_opened_new")
+        return new_page
+    except Exception as e:
+        test_log(
+            "warn",
+            "executor_page_recovery_failed",
+            err_type=type(e).__name__,
+            err=str(e)[:200],
+        )
+        return None
+
+
 async def capture_page_state(page) -> dict:
-    """Capture a snapshot of the current browser page state via Playwright."""
+    """Capture a snapshot of the current browser page state via Playwright.
+
+    On a connection-level failure (Stagehand racing a dialog and crashing
+    the driver, etc.), we try ONCE to recover by re-acquiring a live page
+    from the same context and re-attempting the screenshot. If recovery
+    fails, we return an empty screenshot so the outer loop continues
+    rather than crashing the whole template.
+    """
     url = ""
     screenshot_b64 = ""
     try:
@@ -79,6 +146,27 @@ async def capture_page_state(page) -> dict:
             err_type=type(e).__name__,
             err=str(e),
         )
+        if _looks_like_dead_connection(e):
+            recovered = await _try_recover_page(page)
+            if recovered is not None:
+                try:
+                    raw = await recovered.screenshot(type="png")
+                    if isinstance(raw, bytes):
+                        screenshot_b64 = base64.b64encode(raw).decode("ascii")
+                    elif isinstance(raw, str):
+                        screenshot_b64 = raw
+                    try:
+                        url = recovered.url
+                    except Exception:
+                        pass
+                    test_log("info", "executor_screenshot_recovered")
+                except Exception as e2:
+                    test_log(
+                        "warn",
+                        "executor_screenshot_recovery_failed",
+                        err_type=type(e2).__name__,
+                        err=str(e2)[:200],
+                    )
 
     return {
         "url": url,
@@ -602,6 +690,23 @@ async def execute_check_email(
 # ---------------------------------------------------------------------------
 
 
+def _followup_has_screenshot(msg: BaseMessage) -> bool:
+    """True if `msg` is a screenshot follow-up HumanMessage with a real image block.
+
+    Used by the executor's session-health watchdog: when EVERY follow-up
+    in a turn lacks an image block (because the page is dead), we count
+    that turn as an "empty screenshot" iteration. Two such turns in a
+    row triggers a clean session-unhealthy bailout.
+    """
+    content = getattr(msg, "content", None)
+    if not isinstance(content, list):
+        return False
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "image":
+            return True
+    return False
+
+
 def _screenshot_message(url: str, screenshot_b64: str, note: str) -> HumanMessage:
     """Build a HumanMessage with a text note + PNG screenshot block.
 
@@ -815,6 +920,11 @@ async def execute_template(
     llm_error: str | None = None
     iterations_used = 0
     credentials_saved = False
+    # Tracks consecutive iterations whose post-action screenshot came back
+    # empty after a connection-recovery attempt — used as a signal that the
+    # browser session is genuinely dead and the loop should bail rather
+    # than spin uselessly.
+    consecutive_empty_screenshots = 0
 
     if initial_state["screenshot_base64"]:
         screenshots.append({
@@ -1364,6 +1474,45 @@ async def execute_template(
         #    ToolMessage(...) * N
         #    HumanMessage(screenshot) * N
         messages.extend(followups)
+
+        # Health check: if a tool ran but EVERY follow-up screenshot in
+        # this turn came back empty, that's a strong signal the browser
+        # session has died (typically post-dialog-race ProtocolError).
+        # We tolerate one such turn (recovery may have come too late
+        # for screenshot but the page object will still work next iter)
+        # but bail after two consecutive turns to avoid spinning on a
+        # dead session.
+        if followups:
+            had_screenshot_this_turn = any(
+                _followup_has_screenshot(m) for m in followups
+            )
+            if had_screenshot_this_turn:
+                consecutive_empty_screenshots = 0
+            else:
+                consecutive_empty_screenshots += 1
+                test_log(
+                    "warn",
+                    "executor_iteration_no_screenshot",
+                    template_name=tpl_name,
+                    iteration=iteration,
+                    consecutive_empty=consecutive_empty_screenshots,
+                )
+                if consecutive_empty_screenshots >= 2:
+                    test_log(
+                        "error",
+                        "executor_browser_session_unhealthy",
+                        template_name=tpl_name,
+                        iteration=iteration,
+                        consecutive_empty=consecutive_empty_screenshots,
+                    )
+                    test_summary = (
+                        "Browser session became unhealthy mid-test (consecutive "
+                        "empty screenshots after recovery attempts) and could not "
+                        "be recovered. Test execution was halted."
+                    )
+                    test_passed = False
+                    completed = True
+                    break
 
         if early_complete:
             break
