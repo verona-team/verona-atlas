@@ -465,7 +465,7 @@ export function SentryCard({
         <div className="space-y-3">
           <div className="space-y-1.5">
             <Label htmlFor="sentry-token">Auth token</Label>
-            <Input id="sentry-token" value={authToken} onChange={(e) => setAuthToken(e.target.value)} placeholder="sntrys_..." type="password" />
+            <Input id="sentry-token" value={authToken} onChange={(e) => setAuthToken(e.target.value)} placeholder="sntryu_..." type="password" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="sentry-org">Organization slug</Label>
