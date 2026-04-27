@@ -441,7 +441,7 @@ def get_claude_opus_flow_synthesis(
     - **No `temperature` kwarg:** Opus 4.7's profile.
 
     Context-window note: Opus 4.7 has a 1M-token input window, so
-    the combined rendered input (both transcripts × the shared 300K
+    the combined rendered input (both transcripts × the shared 330K
     `PER_TRACK_SOFT_TOKEN_CAP` + system prompt + structured-output
     budget) fits comfortably without any special handling at this
     call site.
