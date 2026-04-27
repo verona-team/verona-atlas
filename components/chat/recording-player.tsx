@@ -113,7 +113,7 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
                 const d = e.currentTarget.duration
                 if (Number.isFinite(d)) setTotalTime(d * 1000)
               }}
-              onLoadedData={() => setStatus('ready')}
+              onLoadedData={() => setStatus((s) => s === 'loading' ? 'ready' : s)}
               onError={() => {
                 setStatus('error')
                 setErrorMessage('Failed to load recording')
