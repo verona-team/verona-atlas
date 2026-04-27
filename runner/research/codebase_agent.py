@@ -203,13 +203,15 @@ async def _fetch_churn_seed(
         except httpx.HTTPError:
             return []
 
+    filtered_prs = [p for p in target_prs if p.get("number") is not None]
+
     files_by_pr = await asyncio.gather(
-        *(_fetch_pr_files(int(p["number"])) for p in target_prs if p.get("number") is not None),
+        *(_fetch_pr_files(int(p["number"])) for p in filtered_prs),
         return_exceptions=False,
     )
 
     agg: dict[str, dict[str, Any]] = {}
-    for pr, files in zip(target_prs, files_by_pr):
+    for pr, files in zip(filtered_prs, files_by_pr):
         pr_number = pr.get("number")
         for f in files or []:
             filename = f.get("filename")
