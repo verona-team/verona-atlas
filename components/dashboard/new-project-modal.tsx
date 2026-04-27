@@ -8,7 +8,7 @@ import {
   type SyntheticEvent,
 } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Loader2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -353,6 +353,11 @@ export function NewProjectModal() {
                 settings.
               </DialogDescription>
             </DialogHeader>
+
+            <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+              <Lock className="h-3 w-3" aria-hidden />
+              <span>Tokens and API keys are encrypted at rest.</span>
+            </div>
 
             <div className="space-y-3 mt-2">
               <GitHubCard

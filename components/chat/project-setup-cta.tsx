@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import {
   AdvancedIntegrationsSection,
@@ -196,6 +196,11 @@ export function ProjectSetupCTA({
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">{subcopy}</p>
         </header>
+
+        <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
+          <Lock className="h-3 w-3" aria-hidden />
+          <span>Tokens and API keys are encrypted at rest.</span>
+        </div>
 
         <div className="space-y-3">
           <GitHubCard
