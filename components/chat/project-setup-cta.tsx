@@ -199,7 +199,7 @@ export function ProjectSetupCTA({
 
         <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
           <Lock className="h-3 w-3" aria-hidden />
-          <span>Tokens and API keys are encrypted at rest before they touch our database.</span>
+          <span>Tokens and API keys are encrypted at rest.</span>
         </div>
 
         <div className="space-y-3">
