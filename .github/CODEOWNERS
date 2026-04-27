@@ -1,0 +1,33 @@
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# When "Require review from Code Owners" is enabled in the branch ruleset,
+# a PR that touches a matching file requires approval from a listed owner
+# before it can merge. The last matching pattern wins.
+
+# Default — every file requires davidx33's approval.
+* @davidx33
+
+# Security-critical paths (explicit, even though they match the default).
+# Keep these listed so that if collaborators are added later with broader
+# ownership, these paths still require davidx33 specifically.
+/lib/encryption.ts        @davidx33
+/runner/encryption.py     @davidx33
+/runner/auth.py           @davidx33
+/proxy.ts                 @davidx33
+
+# Database schema — irreversible in production.
+/supabase/migrations/     @davidx33
+/lib/supabase/types.ts    @davidx33
+
+# Supply chain.
+/package.json             @davidx33
+/pnpm-lock.yaml           @davidx33
+
+# Repo configuration & CI.
+/.github/                 @davidx33
+/next.config.ts           @davidx33
+/vercel.json              @davidx33
+
+# Licensing.
+/LICENSE                  @davidx33
+/NOTICE                   @davidx33
