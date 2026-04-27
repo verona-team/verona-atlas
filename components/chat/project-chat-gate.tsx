@@ -3,6 +3,7 @@
 import { useCallback, useState } from 'react'
 import { ChatInterface } from '@/components/chat/chat-interface'
 import { ProjectSetupCTA } from '@/components/chat/project-setup-cta'
+import type { ProjectIntegrationStatus } from '@/lib/integrations/list-project'
 import type { ChatMessage } from '@/lib/supabase/types'
 
 /**
@@ -30,12 +31,17 @@ type ChatInterfaceProps = React.ComponentProps<typeof ChatInterface>
 type ProjectChatGateProps = {
   bootstrapDispatched: boolean
   initialMessages: ChatMessage[]
+  /** Server-rendered integration statuses for the pre-bootstrap CTA. Lets the
+   *  CTA's integration cards paint with their true statuses immediately,
+   *  instead of flashing "Not connected" until the client fetch resolves. */
+  initialIntegrations: ProjectIntegrationStatus[]
   chatProps: Omit<ChatInterfaceProps, 'initialMessages'>
 }
 
 export function ProjectChatGate({
   bootstrapDispatched,
   initialMessages,
+  initialIntegrations,
   chatProps,
 }: ProjectChatGateProps) {
   const [dispatched, setDispatched] = useState(bootstrapDispatched)
@@ -63,7 +69,7 @@ export function ProjectChatGate({
         projectId={chatProps.projectId}
         projectName={chatProps.projectName}
         appUrl={chatProps.appUrl}
-        initialGithubReady={chatProps.githubReady}
+        initialIntegrations={initialIntegrations}
         onDispatched={handleDispatched}
       />
     )

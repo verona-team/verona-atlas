@@ -22,10 +22,24 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useWorkspace } from "@/lib/workspace-context";
+import type { ProjectIntegrationStatus } from "@/lib/integrations/list-project";
 import {
   invalidateSettingsCache,
   prefetchSettings,
 } from "@/lib/settings-prefetch";
+
+/**
+ * Stable, content-based key for the integrations list. Used to skip
+ * redundant `setIntegrations` calls when a refetch returns identical data,
+ * and to seed `lastIntegrationsKeyRef` from the SSR-rendered list so the
+ * first post-mount fetch (which returns the same data) doesn't churn.
+ */
+function integrationsKey(list: IntegrationStatus[]): string {
+  return list
+    .map((i) => `${i.id}:${i.status}:${JSON.stringify(i.meta ?? {})}`)
+    .sort()
+    .join("|");
+}
 
 /**
  * Landing surface for a newly-created project that hasn't armed its
@@ -50,15 +64,20 @@ export function ProjectSetupCTA({
   projectId,
   projectName,
   appUrl,
-  initialGithubReady,
+  initialIntegrations,
   onDispatched,
 }: {
   projectId: string;
   projectName: string;
   appUrl: string;
-  /** Server-rendered GitHub readiness — avoids a first-paint flicker where the
-   *  button is incorrectly disabled before the client fetch resolves. */
-  initialGithubReady: boolean;
+  /**
+   * Server-rendered integration statuses. Seeds local state so each card
+   * paints with its true status (Connected / Not connected) on first
+   * paint, instead of all cards flashing "Not connected" until the client
+   * fetch resolves a moment later. Also drives the "Continue" button's
+   * `githubReady` gate, replacing the older `initialGithubReady` prop.
+   */
+  initialIntegrations: ProjectIntegrationStatus[];
   /**
    * Called after `bootstrap_dispatched_at` has been armed server-side.
    * The second argument is the CTA's live, client-known GitHub readiness
@@ -72,9 +91,20 @@ export function ProjectSetupCTA({
 }) {
   const { refreshProjects } = useWorkspace();
 
-  const [integrations, setIntegrations] = useState<IntegrationStatus[]>([]);
+  // `IntegrationStatus` is a structural subset of `ProjectIntegrationStatus`
+  // — the SSR helper returns the API-shape with `createdAt`/`updatedAt`,
+  // which we don't need here. The cast is safe since we only read the
+  // shared fields (id/type/status/meta).
+  const seedIntegrations = initialIntegrations as IntegrationStatus[];
+  const [integrations, setIntegrations] =
+    useState<IntegrationStatus[]>(seedIntegrations);
   const [continuing, setContinuing] = useState(false);
-  const lastIntegrationsKeyRef = useRef<string>("");
+  // Seed the de-dupe key with the server-rendered list so the initial
+  // post-mount fetch — which returns the same data — does not trigger a
+  // redundant re-render.
+  const lastIntegrationsKeyRef = useRef<string>(
+    integrationsKey(seedIntegrations),
+  );
 
   const loadIntegrations = useCallback(async () => {
     try {
@@ -82,17 +112,15 @@ export function ProjectSetupCTA({
       if (!res.ok) return;
       const data = await res.json();
       const next = (data.integrations || []) as IntegrationStatus[];
-      const key = next
-        .map((i) => `${i.id}:${i.status}:${JSON.stringify(i.meta ?? {})}`)
-        .sort()
-        .join("|");
+      const key = integrationsKey(next);
       if (key !== lastIntegrationsKeyRef.current) {
         lastIntegrationsKeyRef.current = key;
         setIntegrations(next);
       }
     } catch {
-      /* ignore — initial render already has SSR-derived `initialGithubReady`,
-         and the visibility/focus listeners below will retry on re-engagement */
+      /* ignore — initial render already has the SSR-rendered list seeded
+         into state, and the visibility/focus listeners below will retry on
+         re-engagement */
     }
   }, [projectId]);
 
@@ -119,12 +147,11 @@ export function ProjectSetupCTA({
   }, [loadIntegrations]);
 
   // `isGitHubComplete` checks both presence AND that a repo has been picked.
-  // Fall back to the SSR-derived value until the first fetch lands, so the
-  // Continue button isn't incorrectly disabled on initial paint for users
-  // arriving from a working setup.
-  const clientGithubReady = isGitHubComplete(integrations);
-  const githubReady =
-    integrations.length === 0 ? initialGithubReady : clientGithubReady;
+  // `integrations` is seeded from the SSR-rendered list (see
+  // `initialIntegrations`), so this is authoritative from first paint
+  // through every refresh — we no longer need `initialGithubReady` as a
+  // "haven't fetched yet" fallback the way the old code did.
+  const githubReady = isGitHubComplete(integrations);
 
   const getStatus = useCallback(
     (type: string) =>
