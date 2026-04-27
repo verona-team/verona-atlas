@@ -1,4 +1,4 @@
-# Atlas — Autonomous QA Testing Platform
+# Verona Atlas
 
 Connect your app, GitHub repo, PostHog project, and Slack workspace. Atlas spins up cloud browsers, runs AI-driven test flows, and reports back.
 
