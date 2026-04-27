@@ -113,12 +113,12 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
                 const video = e.currentTarget
                 const d = video.duration
                 if (Number.isFinite(d)) setTotalTime(d * 1000)
-                // Seek a couple seconds in so the still shows the loaded
-                // UI rather than the blank/white frame the recorder
-                // captures while the page is still booting.
-                if (video.currentTime === 0) {
-                  video.currentTime = Math.min(2, Math.max(0.001, (d || 0) - 0.1))
-                }
+                // Nudge currentTime so the browser decodes and paints
+                // the first frame as the still — `preload="metadata"`
+                // alone leaves the frame area blank until the user
+                // hits play. The backend trims the boot-up blank
+                // intro, so the first frame is already meaningful.
+                if (video.currentTime === 0) video.currentTime = 0.001
               }}
               onLoadedData={() => setStatus((s) => s === 'loading' ? 'ready' : s)}
               onError={() => {

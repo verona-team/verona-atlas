@@ -9,6 +9,7 @@ lowest-common-denominator format every browser will play in a
 """
 import asyncio
 import os
+import re
 import time
 from pathlib import Path
 from typing import Optional
@@ -64,6 +65,22 @@ async def save_session_recording(
     mp4_path = str(Path(webm_path).with_suffix(".mp4"))
 
     try:
+        # The recorder begins capturing before the page has rendered,
+        # so every webm starts with a frozen blank/white viewport.
+        # Detect that intro freeze and pass its end timestamp as
+        # ``-ss`` to the transcode so the mp4 starts at the loaded UI:
+        # the chat-side still frame is meaningful and users don't sit
+        # through dead air when they hit play.
+        trim_s = await _detect_intro_trim_s(webm_path)
+        if trim_s and trim_s > 0:
+            test_log(
+                "debug",
+                "recording_intro_trim",
+                test_run_id=test_run_id,
+                template_name=template_name,
+                trim_s=round(trim_s, 3),
+            )
+
         # ``-preset veryfast`` keeps wall-clock low without ballooning
         # file size; ``-pix_fmt yuv420p`` is required for QuickTime /
         # iOS Safari compatibility; ``-movflags +faststart`` moves the
@@ -71,16 +88,22 @@ async def save_session_recording(
         # playback before the file fully downloads (huge UX win for
         # long recordings).
         transcode_t0 = time.time()
-        proc = await asyncio.create_subprocess_exec(
-            "ffmpeg",
-            "-y",
-            "-i", webm_path,
+        # ``-ss`` after ``-i`` so the seek is frame-accurate — we
+        # re-encode anyway, so the speed cost vs. pre-input ``-ss`` is
+        # small and worth the precision.
+        ffmpeg_args = ["ffmpeg", "-y", "-i", webm_path]
+        if trim_s and trim_s > 0:
+            ffmpeg_args += ["-ss", f"{trim_s:.3f}"]
+        ffmpeg_args += [
             "-c:v", "libx264",
             "-preset", "veryfast",
             "-pix_fmt", "yuv420p",
             "-movflags", "+faststart",
             "-an",
             mp4_path,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *ffmpeg_args,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -189,3 +212,70 @@ def _best_effort_unlink(path: str) -> None:
         Path(path).unlink(missing_ok=True)
     except Exception:
         pass
+
+
+# Cap on how much intro we'll chop off. A recording where the page
+# never loads would otherwise have its entire content trimmed away.
+_MAX_INTRO_TRIM_S = 5.0
+
+# Minimum freeze duration that counts as an intro freeze. The boot-up
+# blank lasts on the order of seconds, so anything shorter than this
+# is probably ordinary frame-to-frame stillness, not a stalled page.
+_MIN_INTRO_FREEZE_S = 0.3
+
+# How tolerant we are of pixel noise when deciding two frames are
+# "the same". Tighter than freezedetect's default (0.001) because
+# the blank viewport really is flat — a higher threshold risks
+# matching genuinely static UI as a freeze.
+_FREEZE_NOISE = 0.003
+
+
+async def _detect_intro_trim_s(webm_path: str) -> Optional[float]:
+    """Probe the start of ``webm_path`` for a frozen blank-viewport
+    intro and return the timestamp at which the freeze ends, capped at
+    :data:`_MAX_INTRO_TRIM_S`.
+
+    Returns ``None`` if the probe fails, no qualifying freeze is
+    found, or the first freeze begins noticeably after t=0 (i.e. it's
+    a mid-recording stall, not an intro). The caller should treat a
+    ``None`` return as "don't trim, transcode the whole file".
+
+    Implementation: we run ffmpeg with the ``freezedetect`` filter and
+    parse its ``freeze_start`` / ``freeze_end`` log lines. Input is
+    capped at slightly more than :data:`_MAX_INTRO_TRIM_S` so the
+    probe doesn't have to decode the whole recording.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg",
+            "-hide_banner",
+            "-t", f"{_MAX_INTRO_TRIM_S + 1:.1f}",
+            "-i", webm_path,
+            "-vf", f"freezedetect=n={_FREEZE_NOISE}:d={_MIN_INTRO_FREEZE_S}",
+            "-map", "0:v:0",
+            "-f", "null",
+            "-",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+    except Exception:
+        return None
+
+    if proc.returncode != 0:
+        return None
+
+    text = (stderr or b"").decode("utf-8", errors="replace")
+    starts = re.findall(r"freeze_start:\s*(\d+(?:\.\d+)?)", text)
+    ends = re.findall(r"freeze_end:\s*(\d+(?:\.\d+)?)", text)
+    if not starts or not ends:
+        return None
+
+    first_start = float(starts[0])
+    first_end = float(ends[0])
+    # A freeze that doesn't start at the very beginning is a
+    # mid-recording stall (e.g. a long-running test step), not the
+    # boot-up intro we want to chop.
+    if first_start > 0.2:
+        return None
+    return min(first_end, _MAX_INTRO_TRIM_S)
