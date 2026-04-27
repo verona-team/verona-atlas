@@ -110,8 +110,13 @@ export function RecordingPlayer({ recordingUrl, className }: RecordingPlayerProp
               playsInline
               className="absolute inset-0 h-full w-full object-contain"
               onLoadedMetadata={(e) => {
-                const d = e.currentTarget.duration
+                const video = e.currentTarget
+                const d = video.duration
                 if (Number.isFinite(d)) setTotalTime(d * 1000)
+                // Nudge currentTime so the browser decodes and paints the
+                // first frame as the still — `preload="metadata"` alone
+                // leaves the frame area blank until the user hits play.
+                if (video.currentTime === 0) video.currentTime = 0.001
               }}
               onLoadedData={() => setStatus((s) => s === 'loading' ? 'ready' : s)}
               onError={() => {
