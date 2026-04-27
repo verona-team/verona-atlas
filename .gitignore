@@ -50,3 +50,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 __pycache__/
+
+# local agent instructions (may contain personal info)
+AGENTS.md
+CLAUDE.md
