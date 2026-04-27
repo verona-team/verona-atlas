@@ -4,7 +4,7 @@ Connect your GitHub repo + observability platforms. Verona spins up cloud browse
 
 ## Stack
 
-Next.js 16 · Supabase · Modal · Browserbase · Stagehand · Gemini + Claude
+Next.js 16 · Supabase · Modal · Browserbase · Stagehand · LangGraph · LangChain · Gemini + Claude
 
 ## Getting Started
 
