@@ -1,9 +1,13 @@
 """Unit tests for `runner.research.synthesizer`.
 
 Covers the deterministic parts (transcript rendering + eviction) and
-the fallback paths of the two LLM-backed calls. The LLM calls
-themselves are mocked via a fake `get_gemini_pro` structured-output
-object so we don't hit the network.
+the fallback paths of the two LLM-backed calls. The LLM calls are
+mocked by patching the model factories on the `synthesizer` module:
+`get_gemini_pro` for the codebase-exploration synthesis call (still
+on Gemini for its long context window), and
+`get_claude_opus_flow_synthesis` for the unified flow-synthesis call
+(now on Opus 4.7). The shared `_FakeModel` / `_RaisingModel` classes
+support both factories' `with_structured_output(...)` shape.
 
 Runnable standalone:
 
@@ -392,7 +396,10 @@ class _FakeModel:
     def __init__(self, result: object):
         self._result = result
 
-    def with_structured_output(self, _schema: object, method: str = "json_schema"):
+    def with_structured_output(self, _schema: object, method: str | None = None):
+        # Accepts the optional `method` kwarg the Gemini path passes
+        # (`method="json_schema"`) while also tolerating the Anthropic
+        # path which omits it.
         return _FakeStructured(self._result)
 
 
@@ -408,7 +415,7 @@ class _RaisingModel:
     def __init__(self, exc: Exception):
         self._exc = exc
 
-    def with_structured_output(self, _schema: object, method: str = "json_schema"):
+    def with_structured_output(self, _schema: object, method: str | None = None):
         return _RaisingStructured(self._exc)
 
 
@@ -541,14 +548,14 @@ def test_flow_synthesis_projection() -> None:
         drillInHighlights=["Sentry SHEETS-1234: 482 events last 7d."],
     )
 
-    original_get = synthesizer.get_gemini_pro
-    synthesizer.get_gemini_pro = lambda: _FakeModel(fake_output)  # type: ignore[assignment]
+    original_get = synthesizer.get_claude_opus_flow_synthesis
+    synthesizer.get_claude_opus_flow_synthesis = lambda: _FakeModel(fake_output)  # type: ignore[assignment]
     try:
         cb = _empty_cb()
         intg = _empty_intg()
         output = asyncio.run(generate_flow_report(cb, intg, app_url="https://acme.dev"))
     finally:
-        synthesizer.get_gemini_pro = original_get  # type: ignore[assignment]
+        synthesizer.get_claude_opus_flow_synthesis = original_get  # type: ignore[assignment]
 
     assert output.summary == "Biggest risk is the sheet editor."
     assert len(output.coreFlows) == 1
@@ -568,8 +575,8 @@ def test_flow_synthesis_projection() -> None:
 
 def test_flow_synthesis_fallback_on_error() -> None:
     """On structured-output error, returns canned smoke-test fallback."""
-    original_get = synthesizer.get_gemini_pro
-    synthesizer.get_gemini_pro = lambda: _RaisingModel(  # type: ignore[assignment]
+    original_get = synthesizer.get_claude_opus_flow_synthesis
+    synthesizer.get_claude_opus_flow_synthesis = lambda: _RaisingModel(  # type: ignore[assignment]
         RuntimeError("500 server error")
     )
     try:
@@ -577,7 +584,7 @@ def test_flow_synthesis_fallback_on_error() -> None:
         intg = _empty_intg()
         output = asyncio.run(generate_flow_report(cb, intg, app_url="https://acme.dev"))
     finally:
-        synthesizer.get_gemini_pro = original_get  # type: ignore[assignment]
+        synthesizer.get_claude_opus_flow_synthesis = original_get  # type: ignore[assignment]
 
     assert "flow synthesis failed" in output.summary.lower()
     assert len(output.coreFlows) >= 1

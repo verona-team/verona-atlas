@@ -10,58 +10,101 @@ All LLM calls from the Modal runner MUST go through these helpers so that:
 
 ## Model selection rules
 
-- **Gemini 3.1 Pro** (`gemini-3.1-pro-preview`) is used for the main
-  reasoning workloads that stay on Google: chat orchestrator,
-  integration-research orchestrator, codebase exploration agent,
-  research synthesis (codebase exploration + flow synthesis), and
-  flow-proposal generator.
+The pipeline splits responsibilities along the line between **agentic /
+exploratory tool use** (Anthropic Opus 4.7) and **summarization +
+structured output over long context** (Gemini 3.1 Pro / 3 Flash).
 
-- **Gemini 3 Flash** (`gemini-3-flash-preview`) is the workhorse for the
-  lighter-weight, well-scoped summarization tasks: rolling-context
-  compaction and the post-run Slack executive summary.
+- **Claude Opus 4.7** (`claude-opus-4-7`, via Anthropic) drives every
+  agentic / tool-use surface in the runner. Opus is empirically much
+  better than Gemini at relentless ReAct loops, narrating reasoning
+  between tool calls (which our codebase-exploration → synthesis
+  pipeline depends on for the "Investigator reasoning" aggregate), and
+  treating numerical minima in prompts as contractual rather than
+  aspirational. Five distinct workloads:
 
-- **Claude Opus 4.7** (`claude-opus-4-7`, via Anthropic) drives two
-  separate workloads:
+  1. The outer QA test-executor ReAct loop inside `execute_test_run`
+     (`get_claude_opus_outer()`). Drives `browser_action` /
+     `navigate_to_url` / `observe_dom` / `click_selector` /
+     `fill_selector` / etc. Does NOT collide with Stagehand's CUA
+     `computer_20250124` issue because this layer uses our own custom
+     tool schema, not Anthropic's native computer-use tool.
 
-  1. The outer QA test-executor ReAct loop inside `execute_test_run` —
-     the agent that observes screenshots, reasons about page state,
-     and decides which of our `browser_action` / `navigate_to_url` /
-     `observe_dom` / `check_email` / `save_credentials` /
-     `complete_test` tools to call next. Opus 4.7 is the current
-     Anthropic flagship for agentic tool use and screenshot reasoning
-     and does NOT collide with the Stagehand CUA `computer_20250124`
-     issue because this layer uses our own custom tool schema, not
-     Anthropic's native computer-use tool. Exposed via
-     `get_claude_opus_outer()`.
-
-  2. The integration-research code writer inside
-     `runner.research.code_writer`, which translates a
-     natural-language research goal into a focused Python httpx
-     script for the Modal sandbox. We pin code generation to Opus 4.7
-     because it produces noticeably more correct provider-API code
+  2. The integration-research code writer
+     (`get_claude_opus_code_writer()`). Translates a natural-language
+     research goal into a focused Python httpx script for the Modal
+     sandbox. Empirically produces more correct provider-API code
      (defensive `.get()` access, proper auth headers, bounded result
-     slicing) than Gemini did in practice — fewer wasted sandbox
-     execs from KeyError tracebacks or oversized stdout. The
-     orchestrator that decides WHAT to investigate stays on Gemini
-     3.1 Pro; only the script-writing role uses Opus. Exposed via
-     `get_claude_opus_code_writer()`.
+     slicing) than Gemini, which directly translates to fewer wasted
+     sandbox execs.
 
-- **Claude Opus 4.6** (`claude-opus-4-6`, via Anthropic) is used ONLY for
-  the Stagehand browser agent (session + inner execute agent). Stagehand's
-  CUA mode is currently tuned for Claude-family models, and Stagehand v3's
-  supported CUA-model list
-  (https://docs.stagehand.dev/v3/configuration/models) tops out at Opus 4.6
-  — the SDK still emits the legacy `computer_20250124` tool schema, which
-  Opus 4.7 refuses. The model id is defined in `runner/prompts.py` because
-  the Stagehand SDK wants the raw `provider/model-id` string, not a
-  LangChain `BaseChatModel`. `get_claude_opus()` below returns a LangChain
-  wrapper around this same 4.6 id for any future non-Stagehand, CUA-adjacent
-  path that wants to run on the same model as the inner browser agent.
+  3. The codebase exploration agent
+     (`get_claude_opus_codebase_agent()`). Walks the linked GitHub
+     repo via `get_repo_ref` / `list_repo_paths` /
+     `search_repo_paths` / `get_file_content` over up to 200 tool
+     calls per run. Opus is significantly better than Gemini at
+     broad exploratory ReAct (file reads + import-following + search
+     recovery from 404s) and at narrating reasoning between tool
+     calls.
 
-If a future task needs something even stronger or a new provider, add a
-helper here and keep the call sites declarative (`get_gemini_pro()` /
-`get_gemini_flash()` / `get_claude_opus()` / `get_claude_opus_outer()`),
-not model-name-sprinkled.
+  4. The integration research orchestrator
+     (`get_claude_opus_integration_orchestrator()`). Decides what to
+     investigate across connected providers via natural-language
+     `purpose` strings to `execute_code`. Same broad-exploration
+     advantage as the codebase agent.
+
+  5. The unified flow synthesizer
+     (`get_claude_opus_flow_synthesis()`). Reads BOTH research
+     transcripts (codebase + integration) and emits the structured
+     `FlowSynthOutput` (CORE flows + RISK-ANCHORED flows + findings
+     + drillInHighlights). Note: combined rendered transcripts can
+     approach Opus's 200K input ceiling on rich runs, which is why
+     `runner.research.synthesizer.generate_flow_report` passes a
+     tighter `soft_token_cap` to keep total input under that limit.
+
+- **Gemini 3.1 Pro** (`gemini-3.1-pro-preview`) is used where the task
+  is summarization or structured output over a LONG transcript that
+  would not fit comfortably under Opus's 200K input cap. Two
+  workloads:
+
+  1. The chat orchestrator agent_turn (`runner/chat/nodes.py`) — the
+     LLM the user "talks to" in the chat UI. High request volume,
+     latency-sensitive, modest context.
+
+  2. The codebase-exploration synthesis call
+     (`runner.research.synthesizer.generate_codebase_exploration`).
+     This single LLM call reads the entire codebase transcript
+     (which can exceed 300K tokens after a thorough Opus-driven
+     investigation) and emits a structured `CodebaseExploration`.
+     Gemini's 1M+ context window is the right tool here.
+
+  3. The flow-proposal generator (`runner.chat.flow_generator`). Emits
+     the 1–3 approval-card flow objects via Gemini's JSON-schema
+     structured-output mode.
+
+- **Gemini 3 Flash** (`gemini-3-flash-preview`) is the workhorse for
+  the light, well-scoped summarization tasks: rolling-context
+  compaction (`runner.chat.context`), the post-run Slack executive
+  summary (`runner.reporter`), and short UX copy when a test run is
+  kicked off (`runner.chat.nodes._run_kicked_off_copy`).
+
+- **Claude Opus 4.6** (`claude-opus-4-6`, via Anthropic) is used ONLY
+  for the Stagehand browser agent (session + inner execute agent).
+  Stagehand v3's supported CUA-model list tops out at Opus 4.6 — the
+  SDK still emits the legacy `computer_20250124` tool schema, which
+  Opus 4.7 refuses. The model id is defined in `runner/prompts.py`
+  because the Stagehand SDK wants the raw `provider/model-id` string,
+  not a LangChain `BaseChatModel`. `get_claude_opus()` below returns
+  a LangChain wrapper around this same 4.6 id for any future
+  non-Stagehand path that wants to run on the inner browser agent's
+  model.
+
+If a future task needs something different, add a helper here and
+keep the call sites declarative (`get_gemini_pro()` /
+`get_gemini_flash()` / `get_claude_opus()` /
+`get_claude_opus_outer()` / `get_claude_opus_code_writer()` /
+`get_claude_opus_codebase_agent()` /
+`get_claude_opus_integration_orchestrator()` /
+`get_claude_opus_flow_synthesis()`), not model-name-sprinkled.
 
 ## A note on temperature
 
@@ -96,12 +139,16 @@ def get_gemini_pro(
     timeout: float | None = 300.0,
     max_retries: int = 2,
 ) -> "ChatGoogleGenerativeAI":
-    """Gemini 3.1 Pro — the main Google-side reasoning model.
+    """Gemini 3.1 Pro — Google-side reasoning model for long-context tasks.
 
-    Used for the chat orchestrator, research orchestrator, research code
-    writer, codebase explorer, and flow-proposal generator. The outer QA
-    test-executor ReAct loop lives on Anthropic Opus 4.7 via
-    `get_claude_opus_outer()` instead.
+    Used for the chat orchestrator (`runner.chat.nodes`), the
+    codebase-exploration synthesizer
+    (`runner.research.synthesizer.generate_codebase_exploration`), and
+    the flow-proposal generator (`runner.chat.flow_generator`). The
+    research-side agentic loops (codebase exploration agent +
+    integration research orchestrator) and the unified flow
+    synthesizer all live on Anthropic Opus 4.7 — see the helpers
+    further down this module.
 
     Defaults are set to the model's full envelope rather than a
     conservative fraction of it:
@@ -238,6 +285,170 @@ def get_claude_opus_code_writer(
     - **No `temperature` kwarg:** Opus 4.7 does not accept `temperature`
       (`langchain-anthropic` model profile `"temperature": False`).
       Setting it raises at request time.
+    """
+    from langchain_anthropic import ChatAnthropic
+
+    return ChatAnthropic(
+        model=CLAUDE_OPUS_OUTER_MODEL,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        max_retries=max_retries,
+    )
+
+
+def get_claude_opus_codebase_agent(
+    *,
+    max_tokens: int = 32_000,
+    timeout: float = 300.0,
+    max_retries: int = 2,
+) -> "ChatAnthropic":
+    """Claude Opus 4.7 — the codebase exploration ReAct agent.
+
+    Drives `runner.research.codebase_agent.run_codebase_exploration_transcript`.
+    The agent walks the linked GitHub repo via `get_repo_ref`,
+    `list_repo_paths`, `search_repo_paths`, `get_file_content`, and
+    `suggest_important_paths` with a hard 200-step ceiling and an
+    explicit "thoroughness is your single most important goal" prompt.
+
+    Why Opus 4.7 here instead of Gemini:
+
+    - Empirically much better at broad, exploratory ReAct loops
+      (file reads + import-following + search recovery) where the
+      decision tree is wide. Gemini was observed stopping at 21
+      tool calls in production despite the prompt's explicit
+      ≥60-tool floor.
+    - Reliably emits text blocks alongside tool calls — the
+      "narrate as you go" directive in the prompt is what feeds
+      the synthesizer's "Investigator reasoning" aggregate.
+      Gemini routinely returned AIMessages with empty text content
+      when bound to tools, starving that aggregate.
+    - Treats numerical minima ("≥40 file reads", "≥5 searches") as
+      contractual rather than aspirational.
+
+    Defaults rationale:
+
+    - `max_tokens=32_000`: per-turn output cap. A single ReAct turn
+      typically emits a short narration block + one or two tool
+      calls; 32k gives adaptive thinking plenty of room without
+      letting a runaway turn burn the budget.
+    - `timeout=300.0` (5 minutes): matches the reasoning-model
+      budget the rest of the runner uses. A turn that reasons hard
+      across many prior tool results before picking the next file
+      to read can legitimately take a minute or two.
+    - **No `temperature` kwarg:** Opus 4.7 does not accept
+      `temperature` (`langchain-anthropic` model profile
+      `"temperature": False`). Setting it raises at request time.
+
+    Note on context window: Opus 4.7's standard input cap is 200K
+    tokens. The codebase agent's running message history can grow
+    large after many file reads; individual file contents are
+    capped by `get_text_file_content` and the agent's path index
+    is cached, so per-turn input typically stays well under 200K
+    even on a 100+ tool run. If we ever observe truncation in
+    production, the right next move is to add eviction inside the
+    agent loop itself (similar to what the synthesizer does today)
+    rather than to lower the step cap.
+    """
+    from langchain_anthropic import ChatAnthropic
+
+    return ChatAnthropic(
+        model=CLAUDE_OPUS_OUTER_MODEL,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        max_retries=max_retries,
+    )
+
+
+def get_claude_opus_integration_orchestrator(
+    *,
+    max_tokens: int = 32_000,
+    timeout: float = 300.0,
+    max_retries: int = 2,
+) -> "ChatAnthropic":
+    """Claude Opus 4.7 — the integration research orchestrator.
+
+    Drives `runner.research.integration_agent._run_research_loop`. The
+    orchestrator decides WHAT to investigate across connected
+    providers by issuing natural-language `purpose` strings to its
+    single `execute_code` tool; the code-writer (also Opus 4.7) turns
+    each purpose into a focused Python script and runs it in a Modal
+    sandbox.
+
+    Same Opus-vs-Gemini rationale as `get_claude_opus_codebase_agent`:
+    Opus is empirically stronger at multi-step ReAct over a tool with
+    a broad decision space (which provider to query next, which
+    finding to drill into, when to correlate cross-source) and at
+    narrating its reasoning between calls so the synthesizer's
+    "Investigator reasoning" aggregate has real content.
+
+    Defaults rationale: same per-turn output cap and timeout as
+    `get_claude_opus_codebase_agent`. No `temperature` kwarg per
+    Opus 4.7's profile.
+    """
+    from langchain_anthropic import ChatAnthropic
+
+    return ChatAnthropic(
+        model=CLAUDE_OPUS_OUTER_MODEL,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        max_retries=max_retries,
+    )
+
+
+def get_claude_opus_flow_synthesis(
+    *,
+    max_tokens: int = 32_000,
+    timeout: float = 600.0,
+    max_retries: int = 2,
+) -> "ChatAnthropic":
+    """Claude Opus 4.7 — the unified flow synthesis call.
+
+    Drives `runner.research.synthesizer.generate_flow_report`. This
+    single LLM call reads BOTH research transcripts (codebase +
+    integration) and emits the structured `FlowSynthOutput` with
+    `coreFlows`, `riskFocusedFlows`, `findings`, and
+    `drillInHighlights`. It is the most consequential synthesis step
+    in the research-to-flows pipeline — every flow our autonomous
+    browser agent ever bug-bashes traces back to this call's output.
+
+    Why Opus 4.7 here:
+
+    - The flow synthesizer is the one place where evidence from the
+      two ReAct agents (also on Opus 4.7) gets combined into the
+      final flow ideas. Keeping the same model family across the
+      research → synthesis → flow generation chain reduces
+      style/format mismatch and lets us iterate prompts coherently.
+    - Anthropic's structured-output reliability (via the
+      tool-calling shim that `with_structured_output` uses) is
+      strong on multi-section payloads with required fields, which
+      matches `FlowSynthOutput`'s shape.
+    - In production, Gemini was observed silently dropping
+      `keyEvidence` to 0 on rich (147K-token) transcripts —
+      `min_length` schema constraints are the right structural fix,
+      but model strength on long-context structured generation
+      matters too.
+
+    Defaults rationale:
+
+    - `max_tokens=32_000`: full output ceiling for the structured
+      response. The flow synthesizer's output is moderately large
+      (3 core flows × multi-step prose + 3 risk flows × multi-step
+      prose + 4-8 findings + drill-in highlights) and adaptive
+      thinking burns through tokens before emitting the structured
+      payload — 32k is comfortable.
+    - `timeout=600.0` (10 minutes): a flow-synthesis call against a
+      ~180K-token combined transcript can take noticeably longer
+      than a ReAct-loop per-turn call. The longer ceiling avoids
+      tail-timeouts that would surface to the user as a research
+      failure.
+    - **No `temperature` kwarg:** Opus 4.7's profile.
+
+    Context-window note: Opus 4.7's standard input cap is 200K
+    tokens. The flow synthesizer's caller passes a tighter
+    `soft_token_cap` to `render_*_transcript` so combined input
+    (codebase render + integration render + system prompt + output
+    budget) stays comfortably below 200K. See
+    `runner.research.synthesizer._FLOW_SYNTHESIS_PER_TRACK_CAP`.
     """
     from langchain_anthropic import ChatAnthropic
 

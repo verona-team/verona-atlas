@@ -7,7 +7,7 @@ phases:
        obvious first-layer signal (recent PRs, top rage-click URLs,
        top unresolved issues, etc.).
 
-    2. **Research loop (ReAct over Modal Sandbox).** A Gemini 3.1 Pro
+    2. **Research loop (ReAct over Modal Sandbox).** A Claude Opus 4.7
        orchestrator iteratively calls one tool, `execute_code(purpose)`,
        with a natural-language goal. The tool delegates CODE GENERATION
        to a separate Claude Opus 4.7 code writer (see `code_writer.py`),
@@ -20,11 +20,13 @@ phases:
        #4). Loops up to `RESEARCH_INTEGRATION_MAX_STEPS` (default 20)
        times.
 
-       The orchestrator + code-writer split deliberately uses two
-       different model families: Gemini 3.1 Pro for cross-provider
-       reasoning over a long-running message log, and Opus 4.7 for
-       focused single-script generation where Anthropic's strength at
-       defensive code shows up.
+       Both the orchestrator and the code writer run on Opus 4.7 but
+       in different roles: the orchestrator decides WHAT to investigate
+       (cross-provider reasoning over a long-running message log) and
+       the code writer generates the focused per-call Python script.
+       Keeping them on the same model family produces consistent
+       reasoning style across the chain; splitting the role keeps each
+       prompt tight (see `code_writer.py` for that rationale).
 
 The agent no longer runs its own synthesis pass. Instead it returns the
 full investigation transcript (preflight + all tool calls + every
@@ -86,7 +88,7 @@ from langchain.tools import tool
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from runner.chat.logging import chat_log
-from runner.chat.models import get_gemini_pro
+from runner.chat.models import get_claude_opus_integration_orchestrator
 from runner.encryption import decrypt
 from runner.research.code_writer import (
     CodeWriterOutput,
@@ -128,7 +130,11 @@ from runner.research.types import (
 _ORCH_STDOUT_CAP = 4_000
 _ORCH_STDERR_CAP = 1_000
 
-# What the synthesizer sees once. Generous — Gemini 1M context window.
+# What the synthesizer sees once. Generous — the synthesizer LLM
+# (`generate_codebase_exploration` on Gemini, `generate_flow_report` on
+# Opus 4.7) reads the full transcript via `render_*_transcript` which
+# applies its own per-track soft caps to keep total input under each
+# model's input ceiling.
 _TRANSCRIPT_STDOUT_CAP = 60_000
 _TRANSCRIPT_STDERR_CAP = 4_000
 # `code` is un-truncated in the transcript; kept small by construction
@@ -324,7 +330,7 @@ def _build_orchestrator_system_prompt(
     app_url: str,
     integrations_covered: list[str],
 ) -> str:
-    """System prompt for the Gemini 3.1 Pro orchestrator.
+    """System prompt for the Claude Opus 4.7 orchestrator.
 
     The orchestrator does NOT write Python. It issues natural-language
     research goals via `execute_code(purpose=...)`; a separate code
@@ -691,7 +697,7 @@ async def _run_research_loop(
 
     step_budget_exhausted = False
     try:
-        model = get_gemini_pro().bind_tools([execute_code])
+        model = get_claude_opus_integration_orchestrator().bind_tools([execute_code])
 
         preflight_block = "\n\n".join(
             f"## {t.upper()} preflight\n\n```json\n{json.dumps(preflight_results[t], indent=2, default=str)}\n```"

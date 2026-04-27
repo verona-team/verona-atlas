@@ -1,9 +1,20 @@
 """Codebase exploration sub-agent.
 
-A Gemini 3.1 Pro ReAct-style loop that walks the linked GitHub repo and
-produces a `CodebaseTranscript` — the raw investigation log that the
-synthesis stage (`runner.research.synthesizer`) later turns into the
-structured `CodebaseExplorationResult` on `ResearchReport`.
+A Claude Opus 4.7 ReAct-style loop that walks the linked GitHub repo
+and produces a `CodebaseTranscript` — the raw investigation log that
+the synthesis stage (`runner.research.synthesizer`) later turns into
+the structured `CodebaseExplorationResult` on `ResearchReport`.
+
+Opus 4.7 (rather than Gemini 3.1 Pro) drives this loop because it is
+empirically much better at:
+- Broad exploratory ReAct over a 5-tool decision space
+  (list / search / read / file / dir).
+- Treating numerical minima in the prompt ("≥40 file reads",
+  "≥5 searches", "≥60 total tool calls") as contractual.
+- Emitting text blocks alongside tool calls, which feeds the
+  downstream synthesizer's "Investigator reasoning" aggregate. In
+  production, Gemini routinely emitted AIMessages with empty text
+  content when bound to tools, starving that aggregate.
 
 ## Design
 
@@ -64,7 +75,7 @@ from langchain.tools import tool
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from runner.chat.logging import chat_log
-from runner.chat.models import get_gemini_pro
+from runner.chat.models import get_claude_opus_codebase_agent
 from runner.research.github_client import get_installation_token
 from runner.research.prompts_common import SYSTEM_PURPOSE_OVERVIEW
 from runner.research.github_repo_explorer import (
@@ -437,7 +448,7 @@ async def run_codebase_exploration_transcript(
     Steps:
 
     1. Resolve an installation token.
-    2. Build a Gemini 3.1 Pro ChatGoogleGenerativeAI bound to our
+    2. Build a Claude Opus 4.7 ChatAnthropic bound to our
        closure-backed tools.
     3. Loop: invoke(messages) -> if tool_calls, execute them and append
        ToolMessages; else the loop ends and we capture the final
@@ -577,7 +588,7 @@ async def run_codebase_exploration_transcript(
         ]
         tools_by_name = {t.name: t for t in tools}
 
-        model = get_gemini_pro().bind_tools(tools)
+        model = get_claude_opus_codebase_agent().bind_tools(tools)
 
         seed_text_parts: list[str] = [
             f"Explore {repo_full_name} to map the real, long-horizon UI flows "

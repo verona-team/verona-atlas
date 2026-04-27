@@ -7,12 +7,20 @@ orchestrator stitches into `ResearchReport`:
     1. `generate_codebase_exploration(cb)` — one Gemini 3.1 Pro call
        scoped to the codebase transcript only, producing a
        `CodebaseExplorationResult` (architecture, flows, testing
-       implications, keyEvidence, confidence, etc.).
+       implications, keyEvidence, confidence, etc.). On Gemini because
+       the codebase transcript can exceed Opus 4.7's 200K input window
+       on thorough Opus-driven investigations, and Gemini 3.1 Pro's
+       1M+ context comfortably absorbs it.
 
-    2. `generate_flow_report(cb, intg, app_url)` — one Gemini 3.1 Pro
+    2. `generate_flow_report(cb, intg, app_url)` — one Claude Opus 4.7
        call over BOTH transcripts + preflight, producing a flow-focused
        structured output (summary, findings, coreFlows, riskFocusedFlows,
-       drillInHighlights).
+       drillInHighlights). On Opus 4.7 because the research-side ReAct
+       agents now run on Opus 4.7, and keeping the same model family
+       across the research → flow-synthesis → flow-generation chain
+       reduces style/format mismatch and was empirically more reliable
+       on multi-section structured output (Gemini was observed silently
+       dropping `keyEvidence` to 0 on rich transcripts in production).
 
 Both calls are run concurrently from the orchestrator via
 `asyncio.gather`. They don't depend on each other — neither reads the
@@ -42,15 +50,28 @@ Transcripts can be large (up to 20 integration execs × 60K stdout, or
 30 file reads × 30K chars each). `render_transcript(track)` turns a
 `CodebaseTranscript` or `IntegrationTranscript` into a deterministic
 Markdown block, evicting oldest high-cost entries if the rendered
-output would exceed `PER_TRACK_SOFT_TOKEN_CAP` (300K tokens). The
-eviction policy pins small / high-signal entries (thoughts,
-listing/metadata calls, the N most-recent high-cost entries) and drops
-oldest high-cost entries first.
+output would exceed a per-track soft cap. The cap depends on the
+downstream model:
+
+- **`PER_TRACK_SOFT_TOKEN_CAP`** (300K) is used by the codebase-
+  exploration synthesis call. Gemini 3.1 Pro has a ~1M input window
+  so 300K per track leaves ample headroom.
+- **`_FLOW_SYNTHESIS_PER_TRACK_CAP`** (80K) is used by the flow-
+  synthesis call. Opus 4.7 has a 200K input ceiling, so combined
+  rendered transcripts must stay below ~170K (leaving room for the
+  system prompt, output budget, and model overhead). 80K per track
+  hits that envelope while preserving most evidence we'd actually
+  use.
+
+The eviction policy pins small / high-signal entries (thoughts,
+listing/metadata calls, the N most-recent high-cost entries) and
+drops oldest high-cost entries first.
 
 Token estimation uses `len(s) / _CHARS_PER_TOKEN` with
-`_CHARS_PER_TOKEN = 3.3` — a rule-of-thumb fit for Gemini's tokenizer
-on JSON-heavy mixed content. Post-call we also log the model's
-reported input-token count so the heuristic can be calibrated.
+`_CHARS_PER_TOKEN = 3.3` — a rule-of-thumb fit for both providers'
+tokenizers on JSON-heavy mixed content. Post-call we also log the
+model's reported input-token count so the heuristic can be
+calibrated.
 """
 from __future__ import annotations
 
@@ -59,7 +80,7 @@ from dataclasses import replace
 from typing import Any
 
 from runner.chat.logging import chat_log
-from runner.chat.models import get_gemini_pro
+from runner.chat.models import get_claude_opus_flow_synthesis, get_gemini_pro
 from runner.research.prompts_common import SYSTEM_PURPOSE_OVERVIEW
 from runner.research.types import (
     CodebaseEvidenceSnippet,
@@ -78,16 +99,31 @@ from runner.research.types import (
 # Constants
 # ---------------------------------------------------------------------------
 
-# Rough chars-per-token heuristic for Gemini 3.1 Pro on the mixed
-# JSON/code/prose content our transcripts carry. Intentionally
-# conservative (estimate denser than reality) so the soft cap kicks in
-# slightly earlier than the model's real token count would.
+# Rough chars-per-token heuristic on the mixed JSON/code/prose content
+# our transcripts carry. Intentionally conservative (estimate denser
+# than reality) so the soft cap kicks in slightly earlier than the
+# model's real token count would.
 _CHARS_PER_TOKEN = 3.3
 
-# Per-track soft cap on rendered transcript tokens. Both tracks combined
-# stay well under the 1M context window leaving room for system prompt,
-# preflight block, output budget, and model overhead.
+# Per-track soft cap on rendered transcript tokens, used by the
+# CODEBASE-EXPLORATION synthesis call (which runs on Gemini 3.1 Pro
+# with a ~1M input window). Both tracks combined stay well under that
+# leaving room for system prompt, preflight block, output budget, and
+# model overhead.
 PER_TRACK_SOFT_TOKEN_CAP = 300_000
+
+# Per-track soft cap on rendered transcript tokens, used by the
+# FLOW-SYNTHESIS call. The flow synthesizer runs on Claude Opus 4.7,
+# whose standard input cap is 200K tokens. With both transcripts
+# (codebase + integration), system prompt, output budget, and Opus
+# overhead all sharing that 200K window, we cap each track at 80K
+# tokens so the combined render stays under ~170K and leaves headroom
+# for the structured output and any model-side overhead. The cap
+# matches the heaviest-but-still-comfortable point we've observed in
+# production runs (Trace A's combined render was ~187K tokens at the
+# old cap, right at Opus's ceiling — that's the case this tightening
+# protects against).
+_FLOW_SYNTHESIS_PER_TRACK_CAP = 80_000
 
 # How many recent high-cost entries to pin (never evict).
 # "High-cost entries" means get_file_content (codebase) and execute_code
@@ -801,12 +837,24 @@ async def generate_flow_report(
 ) -> FlowSynthOutput:
     """Second synthesis-stage LLM call: both transcripts -> flow-focused output.
 
+    Runs on Claude Opus 4.7. Combined transcript input must stay under
+    Opus's 200K input ceiling, so we render each track with the
+    tighter `_FLOW_SYNTHESIS_PER_TRACK_CAP` (80K tokens) — this kicks
+    in the eviction policy more aggressively than the codebase
+    synthesizer's 300K cap, but the caps are model-tied so the two
+    calls converge on the right behaviour for their respective input
+    windows.
+
     On failure, returns a minimal `FlowSynthOutput` with orientations
     stitched into `summary`, canned smoke-test core flows, and empty
     findings/highlights. Never raises.
     """
-    cb_rendered, cb_evictions = render_codebase_transcript(cb)
-    intg_rendered, intg_evictions = render_integration_transcript(intg)
+    cb_rendered, cb_evictions = render_codebase_transcript(
+        cb, soft_token_cap=_FLOW_SYNTHESIS_PER_TRACK_CAP
+    )
+    intg_rendered, intg_evictions = render_integration_transcript(
+        intg, soft_token_cap=_FLOW_SYNTHESIS_PER_TRACK_CAP
+    )
 
     user_content = f"{cb_rendered}\n\n---\n\n{intg_rendered}\n\n---\n\nProduce the flow-focused research report now."
 
@@ -826,10 +874,16 @@ async def generate_flow_report(
         cb_thought_total_chars=sum(len(e.text or "") for e in cb_thoughts),
         intg_thought_count=len(intg_thoughts),
         intg_thought_total_chars=sum(len(e.text or "") for e in intg_thoughts),
+        per_track_soft_token_cap=_FLOW_SYNTHESIS_PER_TRACK_CAP,
+        synthesis_model="claude-opus-4-7",
     )
 
-    model = get_gemini_pro()
-    structured = model.with_structured_output(FlowSynthOutput, method="json_schema")
+    # `langchain-anthropic`'s `with_structured_output` uses Anthropic's
+    # tool-calling shim under the hood and does NOT accept the
+    # `method="json_schema"` kwarg the Gemini path takes — pass the
+    # schema only.
+    model = get_claude_opus_flow_synthesis()
+    structured = model.with_structured_output(FlowSynthOutput)
 
     try:
         output: FlowSynthOutput = await structured.ainvoke(
