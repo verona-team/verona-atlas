@@ -2,7 +2,6 @@
 Test run reporter — aggregates results and sends Slack notifications
 enriched with observability data from Sentry, LangSmith, Braintrust, and PostHog.
 """
-import os
 import json
 from typing import Any
 
@@ -81,46 +80,68 @@ def _summarize_observability_counts(data: dict[str, list[dict]]) -> dict[str, in
     return {key: len(items) for key, items in data.items() if items}
 
 
+def _compact_results_for_summary(results: list[dict]) -> list[dict]:
+    """Strip heavy fields so the model stays brief; full data is already in Slack blocks."""
+    out: list[dict] = []
+    for r in results:
+        err_raw = str(r.get("error_message") or "").strip()
+        out.append(
+            {
+                "template_id": r.get("test_template_id"),
+                "status": r.get("status"),
+                "error": (err_raw[:240] if err_raw else None),
+            }
+        )
+    return out
+
+
 async def generate_ai_summary(
     project: dict,
     results: list[dict],
     summary: dict,
     observability_data: dict[str, list[dict]] | None = None,
 ) -> str:
-    """Use Gemini 3 Flash to generate an executive summary of the test run."""
+    """Use Gemini 3 Flash to generate a short executive blurb for the test run."""
     try:
         obs_section = ""
         if observability_data:
             obs_parts = []
             if observability_data.get("sentry_events"):
-                obs_parts.append(f"Sentry Errors ({len(observability_data['sentry_events'])}):\n{json.dumps(observability_data['sentry_events'][:5], indent=2, default=str)}")
+                obs_parts.append(
+                    f"Sentry ({len(observability_data['sentry_events'])}): "
+                    f"{json.dumps(observability_data['sentry_events'][:2], default=str)}"
+                )
             if observability_data.get("posthog_errors"):
-                obs_parts.append(f"PostHog Exceptions ({len(observability_data['posthog_errors'])}):\n{json.dumps(observability_data['posthog_errors'][:5], indent=2, default=str)}")
+                obs_parts.append(
+                    f"PostHog ({len(observability_data['posthog_errors'])}): "
+                    f"{json.dumps(observability_data['posthog_errors'][:2], default=str)}"
+                )
             if observability_data.get("langsmith_errors"):
-                obs_parts.append(f"LangSmith Failed LLM Runs ({len(observability_data['langsmith_errors'])}):\n{json.dumps(observability_data['langsmith_errors'][:5], indent=2, default=str)}")
+                obs_parts.append(
+                    f"LangSmith ({len(observability_data['langsmith_errors'])}): "
+                    f"{json.dumps(observability_data['langsmith_errors'][:2], default=str)}"
+                )
             if observability_data.get("braintrust_errors"):
-                obs_parts.append(f"Braintrust Evaluation Failures ({len(observability_data['braintrust_errors'])}):\n{json.dumps(observability_data['braintrust_errors'][:5], indent=2, default=str)}")
+                obs_parts.append(
+                    f"Braintrust ({len(observability_data['braintrust_errors'])}): "
+                    f"{json.dumps(observability_data['braintrust_errors'][:2], default=str)}"
+                )
             if obs_parts:
-                obs_section = "\n\nObservability Errors Detected During Test Run:\n" + "\n\n".join(obs_parts)
+                obs_section = "\nObservability (samples):\n" + "\n".join(obs_parts)
 
-        prompt = f"""Analyze this QA test run for the web application at {project.get('app_url', 'unknown')}.
+        compact = _compact_results_for_summary(results)
+        prompt = f"""You write Slack-friendly QA run blurbs. App: {project.get('app_url', 'unknown')}.
 
-Test Results Summary:
-- Total: {summary.get('total', 0)}
-- Passed: {summary.get('passed', 0)}
-- Failed: {summary.get('failed', 0)}
-- Errors: {summary.get('errors', 0)}
+Counts: passed {summary.get('passed', 0)}, failed {summary.get('failed', 0)}, errors {summary.get('errors', 0)}, total {summary.get('total', 0)}.
 
-Individual Results:
-{json.dumps(results, indent=2, default=str)}{obs_section}
+Per-template: {json.dumps(compact, default=str)}{obs_section}
 
-Provide a concise summary including:
-1. Executive summary (1-2 sentences)
-2. Any bugs found with reproduction steps
-3. Observability errors detected (Sentry, PostHog, LangSmith, Braintrust) and their severity
-4. Recommended fixes (if failures detected)
-5. Severity assessment for each issue
-Keep it under 500 words."""
+Rules:
+- Maximum 80 words. Plain text, no markdown headings, no numbered lists longer than 3 short bullets.
+- One line: overall pass/fail verdict.
+- If anything failed: one line on the worst issue (template id + cause). Skip reproduction steps.
+- If observability samples exist: one short phrase only (e.g. "Sentry: N errors seen during run").
+- If all passed and no observability issues: say so in one sentence. No filler."""
 
         # No max_tokens override: the prompt asks for "under 500 words" but
         # Gemini 3 Flash burns output tokens on reasoning BEFORE emitting
@@ -173,9 +194,6 @@ async def send_slack_report(
     observability_data: dict[str, list[dict]] | None = None,
 ):
     """Format and send Slack Block Kit message with observability enrichment."""
-    app_url = os.environ.get("NEXT_PUBLIC_APP_URL", "https://atlas.app")
-    dashboard_url = f"{app_url}/projects/{project['id']}/runs/{test_run_id}"
-
     failed_count = summary.get("failed", 0) + summary.get("errors", 0)
     has_obs_errors = bool(observability_data and any(observability_data.values()))
     status_emoji = "✅" if failed_count == 0 and not has_obs_errors else "⚠️"
@@ -184,7 +202,7 @@ async def send_slack_report(
     blocks: list[dict] = [
         {
             "type": "header",
-            "text": {"type": "plain_text", "text": f"{status_emoji} Atlas Test Run — {project['name']}"},
+            "text": {"type": "plain_text", "text": f"{status_emoji} Test run — {project['name']}"},
         },
         {
             "type": "section",
@@ -204,20 +222,22 @@ async def send_slack_report(
     failed_tests = [r for r in results if r.get("status") in ("failed", "error")]
     if failed_tests:
         blocks.append({"type": "divider"})
-        failed_text = "*Failed Tests:*\n"
-        for t in failed_tests[:5]:
-            name = t.get("test_template_id", "Unknown")[:20]
-            error = (t.get("error_message") or "Unknown error")[:100]
-            failed_text += f"• {name}: {error}\n"
+        failed_text = "*Failed:*\n"
+        for t in failed_tests[:3]:
+            name = str(t.get("test_template_id", "Unknown"))[:24]
+            error = (t.get("error_message") or "Unknown error")[:72]
+            failed_text += f"• `{name}` — {error}\n"
+        if len(failed_tests) > 3:
+            failed_text += f"_…+{len(failed_tests) - 3} more_\n"
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": failed_text}})
 
     if observability_data:
         sentry_events = observability_data.get("sentry_events", [])
         if sentry_events:
             blocks.append({"type": "divider"})
-            sentry_text = f"*🔴 Sentry Errors ({len(sentry_events)}):*\n"
-            for err in sentry_events[:5]:
-                title = err.get("title", "Unknown error")[:80]
+            sentry_text = f"*Sentry ({len(sentry_events)}):*\n"
+            for err in sentry_events[:3]:
+                title = err.get("title", "Unknown error")[:60]
                 level = err.get("level", "error")
                 sentry_text += f"• *{title}* ({level})\n"
             blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": sentry_text}})
@@ -225,16 +245,12 @@ async def send_slack_report(
         posthog_errors = observability_data.get("posthog_errors", [])
         if posthog_errors:
             blocks.append({"type": "divider"})
-            ph_text = f"*🟠 PostHog Exceptions ({len(posthog_errors)}):*\n"
-            for err in posthog_errors[:5]:
+            ph_text = f"*PostHog ({len(posthog_errors)}):*\n"
+            for err in posthog_errors[:3]:
                 props = err.get("properties", err)
                 exc_type = props.get("exception_type", "Unknown")
-                exc_msg = str(props.get("exception_message", ""))[:80]
-                url = props.get("url", "")
-                ph_text += f"• *{exc_type}*: {exc_msg}"
-                if url:
-                    ph_text += f" — {url}"
-                ph_text += "\n"
+                exc_msg = str(props.get("exception_message", ""))[:60]
+                ph_text += f"• *{exc_type}*: {exc_msg}\n"
             blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": ph_text}})
 
         llm_errors = (
@@ -243,23 +259,17 @@ async def send_slack_report(
         )
         if llm_errors:
             blocks.append({"type": "divider"})
-            llm_text = f"*🤖 LLM Trace Failures ({len(llm_errors)}):*\n"
-            for err in llm_errors[:5]:
-                name = err.get("name", "Unknown")[:40]
-                error_msg = str(err.get("error", "Failed"))[:80]
+            llm_text = f"*LLM traces ({len(llm_errors)}):*\n"
+            for err in llm_errors[:3]:
+                name = err.get("name", "Unknown")[:32]
+                error_msg = str(err.get("error", "Failed"))[:60]
                 llm_text += f"• *{name}*: {error_msg}\n"
             blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": llm_text}})
 
     if ai_summary:
         blocks.append({"type": "divider"})
-        truncated = ai_summary[:2900]
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*AI Analysis:*\n{truncated}"}})
-
-    blocks.append({"type": "divider"})
-    blocks.append({
-        "type": "section",
-        "text": {"type": "mrkdwn", "text": f"<{dashboard_url}|View full report in Atlas →>"},
-    })
+        truncated = ai_summary[:900]
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Summary:*\n{truncated}"}})
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -271,7 +281,10 @@ async def send_slack_report(
             json={
                 "channel": channel_id,
                 "blocks": blocks,
-                "text": f"Atlas Test Run — {project['name']}: {status_text}",
+                "text": (
+                    f"Test run — {project['name']}: {status_text} "
+                    f"({test_run_id[:8]}…)"
+                ),
             },
         )
         data = response.json()
