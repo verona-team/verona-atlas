@@ -160,8 +160,6 @@ export function GitHubRepoPicker({ projectId, onSaved }: Props) {
         onChange={(v) => void handleChange(v)}
         items={items}
         placeholder="Select a repository…"
-        searchPlaceholder="Search repositories..."
-        emptyText="No repositories found."
       />
     </div>
   )
