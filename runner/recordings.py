@@ -99,6 +99,7 @@ async def save_session_recording(
                 elapsed_s=round(transcode_elapsed, 3),
             )
             _best_effort_unlink(webm_path)
+            _best_effort_unlink(mp4_path)
             return None
 
         if not Path(mp4_path).exists():
