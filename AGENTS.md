@@ -11,7 +11,7 @@ When creating or modifying a database migration file in `supabase/migrations/`, 
 1. **Create the migration file** in `supabase/migrations/` with the next sequential number.
 2. **Link the project** (if not already linked):
    ```
-   npx supabase link --project-ref jhtrpaplixdjwepyings
+   npx supabase link --project-ref <YOUR_SUPABASE_PROJECT_REF>
    ```
 3. **Apply the migration** to the remote database:
    ```
