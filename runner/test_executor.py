@@ -426,6 +426,60 @@ async def execute_fill_selector(
     }
 
 
+_WAIT_MAX_SECONDS = 30.0
+
+
+async def execute_wait(
+    page,
+    seconds: float,
+    *,
+    reason: str | None = None,
+) -> dict:
+    """Pause for `seconds` (capped at _WAIT_MAX_SECONDS) and return a fresh page state.
+
+    This is a non-AI-driven wait — pure `asyncio.sleep` followed by a
+    Playwright screenshot. Always preferred over routing waits through
+    `browser_action`, which spins up a multi-step Stagehand perception
+    loop and routinely costs 10× the requested duration.
+    """
+    try:
+        requested = float(seconds)
+    except (TypeError, ValueError):
+        requested = 0.0
+    capped = max(0.0, min(requested, _WAIT_MAX_SECONDS))
+
+    t0 = time.time()
+    try:
+        await asyncio.sleep(capped)
+        elapsed = time.time() - t0
+        test_log(
+            "info",
+            "executor_wait_ok",
+            elapsed_s=round(elapsed, 3),
+            requested_seconds=requested,
+            capped_seconds=capped,
+            reason=(reason or "")[:200],
+        )
+    except Exception as e:
+        elapsed = time.time() - t0
+        test_log(
+            "warn",
+            "executor_wait_failed",
+            elapsed_s=round(elapsed, 3),
+            err_type=type(e).__name__,
+            err=str(e),
+        )
+
+    page_state = await capture_page_state(page)
+    return {
+        "success": True,
+        "error": None,
+        "capped_seconds": capped,
+        "requested_seconds": requested,
+        "page_state": page_state,
+    }
+
+
 async def execute_press_key(
     page,
     key: str,
@@ -1413,6 +1467,60 @@ async def execute_template(
                         name=tool_name,
                     )
                 )
+
+            elif tool_name == "wait":
+                wait_seconds = tool_input.get("seconds", 0)
+                wait_reason = tool_input.get("reason") or None
+                test_log(
+                    "info",
+                    "executor_tool_call",
+                    template_name=tpl_name,
+                    iteration=iteration,
+                    tool=tool_name,
+                    requested_seconds=wait_seconds,
+                    reason=(wait_reason or "")[:200],
+                )
+
+                result = await execute_wait(page, wait_seconds, reason=wait_reason)
+                action_record["success"] = result["success"]
+                action_record["url_after"] = result["page_state"]["url"]
+                action_record["requested_seconds"] = result["requested_seconds"]
+                action_record["capped_seconds"] = result["capped_seconds"]
+                if wait_reason:
+                    action_record["reason"] = wait_reason
+
+                capped = result["capped_seconds"]
+                requested = result["requested_seconds"]
+                if requested != capped:
+                    result_text = (
+                        f"Waited {capped}s (requested {requested}s; capped at "
+                        f"{_WAIT_MAX_SECONDS}s)."
+                    )
+                else:
+                    result_text = f"Waited {capped}s."
+
+                messages.append(
+                    ToolMessage(
+                        content=result_text,
+                        tool_call_id=tool_id,
+                        name=tool_name,
+                    )
+                )
+                followups.append(
+                    _screenshot_message(
+                        url=result["page_state"]["url"],
+                        screenshot_b64=result["page_state"]["screenshot_base64"],
+                        note=f"Result of {tool_name}: {result_text}",
+                    )
+                )
+
+                if result["page_state"]["screenshot_base64"]:
+                    screenshots.append({
+                        "label": f"iter_{iteration}_{tool_name}",
+                        "base64": result["page_state"]["screenshot_base64"],
+                        "url": result["page_state"]["url"],
+                        "timestamp": result["page_state"]["timestamp"],
+                    })
 
             elif tool_name == "complete_test":
                 test_passed = tool_input.get("passed", False)

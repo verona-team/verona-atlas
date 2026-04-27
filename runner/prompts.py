@@ -273,6 +273,41 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "wait",
+        "description": (
+            "Pause execution for a fixed duration without invoking the AI browser "
+            "agent. Use this for asynchronous boundaries that resolve on their own "
+            "(autosave flush, network fetch debounce, animation completion, "
+            "background job progress, post-redirect settling). After the wait you "
+            "receive a fresh screenshot of the current page state. ALWAYS prefer "
+            "this over asking `browser_action` to wait — `browser_action` runs a "
+            "multi-step AI perception loop and is much slower for waits."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "seconds": {
+                    "type": "number",
+                    "description": (
+                        "How long to wait, in seconds. Use the smallest duration "
+                        "that's likely to satisfy the boundary you're waiting for. "
+                        "Capped at 30 seconds — for longer waits, split across "
+                        "multiple `wait` calls so you can re-observe in between."
+                    ),
+                },
+                "reason": {
+                    "type": "string",
+                    "description": (
+                        "Short explanation of what async boundary you are waiting "
+                        "for (e.g. 'autosave flush', 'enrichment job to complete', "
+                        "'modal close animation'). Logged for observability."
+                    ),
+                },
+            },
+            "required": ["seconds"],
+        },
+    },
+    {
         "name": "complete_test",
         "description": (
             "Signal that the test flow execution is complete. Call this when you "
@@ -536,12 +571,19 @@ def build_system_prompt(
         instruction = step.get("instruction", "")
         expected = step.get("expected", "")
         url = step.get("url", "")
+        timeout_ms = step.get("timeout")
 
         line = f"{i}. [{step_type.upper()}] {instruction}"
         if url:
             line += f"  (URL: {url})"
         if expected:
             line += f"  — Expected: {expected}"
+        # For wait steps, surface the suggested duration in SECONDS so
+        # the agent knows what to pass to the `wait` tool. Step timeouts
+        # are stored in milliseconds by the flow generator.
+        if step_type == "wait" and isinstance(timeout_ms, (int, float)) and timeout_ms > 0:
+            seconds = max(1, round(float(timeout_ms) / 1000.0))
+            line += f"  — Suggested wait: {seconds}s (use the `wait` tool, NOT browser_action)"
         plan_lines.append(line)
 
     test_plan = "\n".join(plan_lines) if plan_lines else "(No steps defined)"
@@ -602,6 +644,7 @@ Repeat this observe → reason → act cycle until the entire test flow is compl
 - **click_selector / fill_selector / press_key** — Deterministic Playwright fallbacks that bypass the AI browser agent and act directly on the DOM. Use these when `browser_action` has failed twice in a row on the same target. The `xpath=` selectors returned by `observe_dom` work as-is for `click_selector` / `fill_selector`. `press_key` is for keystroke-only interactions (Enter to submit, Escape to dismiss, Tab to focus next field, arrow keys, etc.). Do not log passwords in your reasoning text — the value of `fill_selector` is recorded by length only.
 - **save_credentials** — Save the email and password you used to create an account on the target platform. Call this immediately after successful signup so you can reuse the credentials on future runs. Only call this after you have confirmed the account works.
 - **check_email** — Check your email inbox for recent messages (verification codes, confirmation links, etc.). Use this when the platform sends a verification email during signup or login.
+- **wait** — Pause for a fixed duration (capped at 30 seconds) and receive a fresh screenshot. Use for any "wait for autosave / wait for animation / wait for background job" boundary. Always prefer this over asking `browser_action` to wait — `browser_action` runs an AI perception loop and is much slower.
 - **complete_test** — Signal that the test is finished. Call this once all steps are done and verified, or when you encounter an unrecoverable blocking issue.
 
 ## Resilience and UI exploration (this is critical — read carefully)
@@ -662,7 +705,7 @@ After you have explored, you will almost always know what to do next. Resume the
 - **Escalate from natural language to selectors when the AI agent fails.** If a `browser_action` instruction fails twice in a row on the same UI element (e.g. clicking a button or typing into a field), do not keep retrying with rephrased natural language. Call `observe_dom` to get a selector, then use `click_selector`, `fill_selector`, or `press_key`. These act directly via the DOM and succeed in cases where visual perception or coordinate clicking is unreliable — for example, small custom checkbox-like buttons, fields with autocomplete overlays, or any element with subtle toggled-state visual feedback.
 - **Verify assertions visually.** When the test plan includes assertion steps (checking that something is visible or correct), use the screenshot as your **primary** verification method. Only use observe_dom when you need precise programmatic confirmation of DOM-level details.
 - **Report real bugs.** If you observe behavior that is an actual application defect (not just a UI change or transient issue you can work around), record it in your final complete_test call. Clearly distinguish between "the UI changed and I adapted" versus "the application has a defect."
-- **Handle loading states.** After navigation or form submissions the page may take a moment to load. If a screenshot shows a loading/spinner state, you may need to wait and re-check."""
+- **Handle loading states.** After navigation or form submissions the page may take a moment to load. If a screenshot shows a loading/spinner state, use the dedicated `wait` tool — never ask `browser_action` to wait."""
 
 
 # `build_tool_result_content` was previously exported here for the raw
