@@ -146,7 +146,13 @@ export function ExpandableContainer({
           className,
           expanded
             ? cn(
-                'fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 w-[92vw] max-w-[1600px] h-[88vh] rounded-xl shadow-2xl ring-1 ring-white/10',
+                // Maintain a 16:9 frame in expanded mode, sized as the
+                // largest 16:9 rectangle that fits within 92vw × 88vh
+                // (capped at 1600px wide). The Browserbase fullscreen
+                // embed and recordings are both 16:9 — when the
+                // surrounding frame matches that aspect, the content
+                // fills the modal with no letterbox/pillarbox bars.
+                'fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 w-[min(92vw,calc(88vh*16/9),1600px)] aspect-[16/9] rounded-xl shadow-2xl ring-1 ring-white/10',
                 expandedClassName,
               )
             : cn('w-full', collapsedClassName),
