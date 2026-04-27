@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   CheckCircle2,
   XCircle,
@@ -125,14 +125,7 @@ export function LiveSessionCard({ metadata }: LiveSessionCardProps) {
         >
           {({ ExpandToggle }) => (
             <>
-              <iframe
-                title={`Live browser session — ${templateName}`}
-                src={liveViewUrl}
-                sandbox="allow-same-origin allow-scripts"
-                allow="clipboard-read; clipboard-write"
-                className="absolute inset-0 h-full w-full border-0"
-                style={{ pointerEvents: 'none' }}
-              />
+              <ScaledLiveIframe src={liveViewUrl} title={templateName} />
               <div className="absolute left-2 top-2 flex items-center gap-1.5 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white">
                 <span className="size-1.5 rounded-full bg-red-500 animate-pulse" />
                 Live
@@ -206,6 +199,76 @@ export function LiveSessionCard({ metadata }: LiveSessionCardProps) {
           </p>
         </div>
       )}
+    </div>
+  )
+}
+
+// Native size of the embedded Browserbase live-view iframe. The cross-origin
+// embed always sees this exact viewport, regardless of how the wrapper is
+// sized on screen — we scale the iframe visually with `transform: scale` so
+// the embed never re-runs layout when the chat card expands or collapses.
+// Re-layouts produce a visible flash (cut-off frames, weird internal borders)
+// because the embed reflows its stream rendering for the new dimensions.
+//
+// 1280×720 matches the screen recorder's capture resolution
+// (`runner/screen_recorder.py`), so the live and recorded views look
+// identical at the same effective scale.
+const LIVE_IFRAME_WIDTH = 1280
+const LIVE_IFRAME_HEIGHT = 720
+
+interface ScaledLiveIframeProps {
+  src: string
+  title: string
+}
+
+function ScaledLiveIframe({ src, title }: ScaledLiveIframeProps) {
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+
+  // Drive the scale via direct DOM mutation in a ResizeObserver. Going
+  // through React state would batch the update into a later commit, so
+  // the iframe would render at the previous scale for one frame after
+  // the wrapper jumps to its new collapsed/expanded dimensions —
+  // visually that's exactly the "flash" we're trying to remove.
+  // Mutating the inline transform style synchronously means the iframe
+  // is in sync with the wrapper on the same paint.
+  useLayoutEffect(() => {
+    const wrapper = wrapperRef.current
+    const iframe = iframeRef.current
+    if (!wrapper || !iframe) return
+
+    function update() {
+      if (!wrapper || !iframe) return
+      const { width } = wrapper.getBoundingClientRect()
+      if (width > 0) {
+        iframe.style.transform = `scale(${width / LIVE_IFRAME_WIDTH})`
+      }
+    }
+
+    update()
+
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(update)
+    ro.observe(wrapper)
+    return () => ro.disconnect()
+  }, [])
+
+  return (
+    <div ref={wrapperRef} className="absolute inset-0 overflow-hidden">
+      <iframe
+        ref={iframeRef}
+        title={`Live browser session — ${title}`}
+        src={src}
+        sandbox="allow-same-origin allow-scripts"
+        allow="clipboard-read; clipboard-write"
+        className="absolute left-0 top-0 border-0"
+        style={{
+          width: `${LIVE_IFRAME_WIDTH}px`,
+          height: `${LIVE_IFRAME_HEIGHT}px`,
+          transformOrigin: 'top left',
+          pointerEvents: 'none',
+        }}
+      />
     </div>
   )
 }
