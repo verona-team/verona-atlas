@@ -119,7 +119,7 @@ async def execute_test_run(test_run_id: str, project_id: str):
 
 
 # -----------------------------------------------------------------------------
-# Image 2: chat runner (LangGraph + LangChain + Google Gemini)
+# Image 2: chat runner (LangGraph + LangChain + Google Gemini + Anthropic Opus)
 # -----------------------------------------------------------------------------
 # Separate image because:
 #   * The chat workload doesn't need Playwright/Chromium/Stagehand.
@@ -130,10 +130,20 @@ async def execute_test_run(test_run_id: str, project_id: str):
 # Version pinning: we pin the LangChain family to a known-good minor range
 # so upgrades are a conscious decision. langgraph 1.0.x, langchain 1.0.x,
 # langchain-google-genai 3.1.x all compose cleanly as of this writing.
-# `langchain-anthropic` is still included because `runner.chat.models`
-# exposes a `get_claude_opus()` helper for Anthropic-backed paths (the
-# Stagehand browser agent lives in the runner_image, but `get_claude_opus`
-# may be reached from chat-side helpers during future work).
+# `langchain-anthropic` is required because the research pipeline runs
+# four distinct Claude Opus 4.7 calls inside `process_chat_turn`:
+#   1. The codebase exploration agent
+#      (`runner.research.codebase_agent`).
+#   2. The integration research orchestrator
+#      (`runner.research.integration_agent`).
+#   3. The integration sandbox code writer
+#      (`runner.research.code_writer`).
+#   4. The unified flow synthesizer
+#      (`runner.research.synthesizer.generate_flow_report`).
+# Gemini 3.1 Pro is still used inside this image for the chat
+# orchestrator, the codebase-exploration synthesis call, and the flow
+# proposal generator — see `runner.chat.models` for the model-selection
+# rationale.
 chat_image = (
     modal.Image.debian_slim(python_version="3.13")
     .pip_install(
