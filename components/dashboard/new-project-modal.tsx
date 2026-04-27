@@ -8,7 +8,7 @@ import {
   type SyntheticEvent,
 } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Lock } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -21,6 +21,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   AdvancedIntegrationsSection,
   BraintrustCard,
@@ -354,12 +359,7 @@ export function NewProjectModal() {
               </DialogDescription>
             </DialogHeader>
 
-            <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-              <Lock className="h-3 w-3" aria-hidden />
-              <span>Tokens and API keys are encrypted at rest.</span>
-            </div>
-
-            <div className="space-y-3 mt-2">
+            <div className="space-y-3 mt-4">
               <GitHubCard
                 projectId={projectId!}
                 integration={getStatus("github")}
@@ -397,26 +397,40 @@ export function NewProjectModal() {
             </div>
 
             <div className="pt-3">
-              <Button
-                onClick={handleContinueToChat}
-                disabled={!githubComplete || continuing}
-                size="lg"
-                className="w-full h-11 text-sm"
-              >
-                {continuing ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Opening chat...
-                  </>
-                ) : (
-                  <>Continue</>
-                )}
-              </Button>
-              {!githubComplete && !continuing && (
-                <p className="text-xs text-muted-foreground mt-2 text-center">
-                  GitHub is required.
-                </p>
-              )}
+              {(() => {
+                const continueButton = (
+                  <Button
+                    onClick={handleContinueToChat}
+                    disabled={!githubComplete || continuing}
+                    size="lg"
+                    className="w-full h-11 text-sm"
+                  >
+                    {continuing ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Opening chat...
+                      </>
+                    ) : (
+                      <>Continue</>
+                    )}
+                  </Button>
+                );
+                // Disabled native buttons don't fire pointer events, so wrap
+                // in a div trigger to surface the tooltip explaining why the
+                // button is unactionable. Only render the tooltip when the
+                // block is the missing-GitHub case — not while submitting.
+                if (githubComplete || continuing) return continueButton;
+                return (
+                  <Tooltip>
+                    <TooltipTrigger render={<div className="block w-full" />}>
+                      {continueButton}
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="center">
+                      Connect GitHub to continue.
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })()}
             </div>
           </>
         )}

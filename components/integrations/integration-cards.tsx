@@ -1,7 +1,7 @@
 'use client'
 
 import { Children, useEffect, useRef, useState } from 'react'
-import { ChevronDown, Loader2 } from 'lucide-react'
+import { ChevronDown, Loader2, Lock } from 'lucide-react'
 import { toast } from 'sonner'
 import { GitHubRepoPicker } from '@/components/integrations/github-repo-picker'
 import { GitHubInstallationPicker } from '@/components/integrations/github-installation-picker'
@@ -50,6 +50,22 @@ function useOAuthPopupListener(
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
   }, [enabled, integrationType, onMatch])
+}
+
+/* ------------------------------------------------------------------ */
+/*  Shared helpers                                                     */
+/* ------------------------------------------------------------------ */
+
+// Inline reassurance shown directly under credential inputs so the
+// "encrypted at rest" promise lands at the moment the user is pasting a
+// secret, instead of as a banner floating above the integration list.
+function EncryptedAtRestHint() {
+  return (
+    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <Lock className="size-3" aria-hidden />
+      <span>Encrypted at rest.</span>
+    </p>
+  )
 }
 
 /* ------------------------------------------------------------------ */
@@ -394,6 +410,7 @@ export function PostHogCard({
           <div className="space-y-1.5">
             <Label htmlFor="ph-api-key">Personal API key</Label>
             <Input id="ph-api-key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="phx_..." type="password" />
+            <EncryptedAtRestHint />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="ph-project-id">PostHog Project ID</Label>
@@ -466,6 +483,7 @@ export function SentryCard({
           <div className="space-y-1.5">
             <Label htmlFor="sentry-token">Auth token</Label>
             <Input id="sentry-token" value={authToken} onChange={(e) => setAuthToken(e.target.value)} placeholder="sntryu_..." type="password" />
+            <EncryptedAtRestHint />
             <p className="text-xs text-muted-foreground">
               Create a <a href="https://sentry.io/settings/account/api/auth-tokens/" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-foreground">User Auth Token</a> with <code className="rounded bg-muted px-1 py-0.5 text-[11px]">project:read</code> and <code className="rounded bg-muted px-1 py-0.5 text-[11px]">event:read</code> scopes.
             </p>
@@ -536,6 +554,7 @@ export function LangSmithCard({
           <div className="space-y-1.5">
             <Label htmlFor="ls-api-key">LangSmith API key</Label>
             <Input id="ls-api-key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="lsv2_..." type="password" />
+            <EncryptedAtRestHint />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="ls-project">Project name (optional)</Label>
@@ -599,6 +618,7 @@ export function BraintrustCard({
           <div className="space-y-1.5">
             <Label htmlFor="bt-api-key">Braintrust API key</Label>
             <Input id="bt-api-key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." type="password" />
+            <EncryptedAtRestHint />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="bt-project">Project name (optional)</Label>
