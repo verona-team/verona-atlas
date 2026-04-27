@@ -56,10 +56,10 @@ structured output over long context** (Gemini 3.1 Pro / 3 Flash).
      (`get_claude_opus_flow_synthesis()`). Reads BOTH research
      transcripts (codebase + integration) and emits the structured
      `FlowSynthOutput` (CORE flows + RISK-ANCHORED flows + findings
-     + drillInHighlights). Note: combined rendered transcripts can
-     approach Opus's 200K input ceiling on rich runs, which is why
-     `runner.research.synthesizer.generate_flow_report` passes a
-     tighter `soft_token_cap` to keep total input under that limit.
+     + drillInHighlights). Opus 4.7's 1M-token input window
+     comfortably absorbs the combined rendered transcripts at the
+     shared 300K-per-track soft cap, so no special context handling
+     is needed at this call site.
 
 - **Gemini 3.1 Pro** (`gemini-3.1-pro-preview`) is used where the task
   is summarization or structured output over a LONG transcript that
@@ -339,15 +339,12 @@ def get_claude_opus_codebase_agent(
       `temperature` (`langchain-anthropic` model profile
       `"temperature": False`). Setting it raises at request time.
 
-    Note on context window: Opus 4.7's standard input cap is 200K
-    tokens. The codebase agent's running message history can grow
-    large after many file reads; individual file contents are
+    Note on context window: Opus 4.7 has a 1M-token input window,
+    which is comfortably larger than the codebase agent's running
+    message history will reach. Individual file contents are
     capped by `get_text_file_content` and the agent's path index
-    is cached, so per-turn input typically stays well under 200K
-    even on a 100+ tool run. If we ever observe truncation in
-    production, the right next move is to add eviction inside the
-    agent loop itself (similar to what the synthesizer does today)
-    rather than to lower the step cap.
+    is cached, so per-turn input stays well under that limit even
+    on a 100+ tool run.
     """
     from langchain_anthropic import ChatAnthropic
 
@@ -443,12 +440,11 @@ def get_claude_opus_flow_synthesis(
       failure.
     - **No `temperature` kwarg:** Opus 4.7's profile.
 
-    Context-window note: Opus 4.7's standard input cap is 200K
-    tokens. The flow synthesizer's caller passes a tighter
-    `soft_token_cap` to `render_*_transcript` so combined input
-    (codebase render + integration render + system prompt + output
-    budget) stays comfortably below 200K. See
-    `runner.research.synthesizer._FLOW_SYNTHESIS_PER_TRACK_CAP`.
+    Context-window note: Opus 4.7 has a 1M-token input window, so
+    the combined rendered input (both transcripts × the shared 300K
+    `PER_TRACK_SOFT_TOKEN_CAP` + system prompt + structured-output
+    budget) fits comfortably without any special handling at this
+    call site.
     """
     from langchain_anthropic import ChatAnthropic
 
