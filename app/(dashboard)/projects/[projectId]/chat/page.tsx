@@ -6,6 +6,7 @@ import { ProjectChatGate } from '@/components/chat/project-chat-gate'
 import { SettingsQueryOpener } from '@/components/dashboard/settings-query-opener'
 import { SettingsPrefetcher } from '@/components/dashboard/settings-prefetcher'
 import { getGithubIntegrationReady } from '@/lib/github-integration-guard'
+import { listProjectIntegrations } from '@/lib/integrations/list-project'
 
 type PageProps = {
   params: Promise<{ projectId: string }>
@@ -39,6 +40,11 @@ export default async function ChatPage({ params, searchParams }: PageProps) {
   if (!project) notFound()
 
   const gh = await getGithubIntegrationReady(supabase, projectId)
+  // SSR the full integration list so the bootstrap CTA's cards render with
+  // their true statuses on first paint. Without this, the CTA initializes
+  // `integrations` to `[]` and every card briefly flashes "Not connected"
+  // until the client-side `loadIntegrations()` fetch resolves (~200–1000ms).
+  const initialIntegrations = await listProjectIntegrations(supabase, projectId)
   const session = await getOrCreateSession(supabase, projectId)
 
   const { data: messages } = await supabase
@@ -88,6 +94,7 @@ export default async function ChatPage({ params, searchParams }: PageProps) {
       <ProjectChatGate
         bootstrapDispatched={bootstrapDispatched}
         initialMessages={messages ?? []}
+        initialIntegrations={initialIntegrations}
         chatProps={{
           projectId,
           sessionId: session.id,

@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getServerUser } from '@/lib/supabase/server-user'
-import type { Json } from '@/lib/supabase/types'
-import { parseGithubLinkedRepo } from '@/lib/github-integration-config'
+import { listProjectIntegrations } from '@/lib/integrations/list-project'
 
 type RouteContext = { params: Promise<{ projectId: string }> }
 
@@ -35,71 +34,7 @@ export async function GET(
   if (!project)
     return NextResponse.json({ error: 'Project not found' }, { status: 404 })
 
-  const { data: integrations } = await supabase
-    .from('integrations')
-    .select('id, type, status, config, created_at, updated_at')
-    .eq('project_id', projectId)
+  const integrations = await listProjectIntegrations(supabase, projectId)
 
-  const sanitized = (integrations || []).map((i) => {
-    const config = i.config as Record<string, Json>
-    return {
-      id: i.id,
-      type: i.type,
-      status: i.status,
-      createdAt: i.created_at,
-      updatedAt: i.updated_at,
-      meta: sanitizeConfig(i.type, config),
-    }
-  })
-
-  return NextResponse.json({ integrations: sanitized })
-}
-
-function sanitizeConfig(
-  type: string,
-  config: Record<string, Json>,
-): Record<string, Json> {
-  switch (type) {
-    case 'github': {
-      const repo = parseGithubLinkedRepo(config)
-      return {
-        installation_id: config.installation_id ?? null,
-        repo: repo
-          ? {
-              full_name: repo.full_name,
-              private: repo.private ?? null,
-              default_branch: repo.default_branch ?? null,
-            }
-          : null,
-      }
-    }
-    case 'posthog':
-      return {
-        posthog_project_id: config.posthog_project_id ?? null,
-        api_host: config.api_host ?? null,
-      }
-    case 'sentry':
-      return {
-        organization_slug: config.organization_slug ?? null,
-        project_slug: config.project_slug ?? null,
-      }
-    case 'langsmith':
-      return {
-        project_name: config.project_name ?? null,
-        api_url: config.api_url ?? null,
-      }
-    case 'braintrust':
-      return {
-        project_name: config.project_name ?? null,
-        api_url: config.api_url ?? null,
-      }
-    case 'slack':
-      return {
-        team_name: config.team_name ?? null,
-        channel_id: config.channel_id ?? null,
-        channel_name: config.channel_name ?? null,
-      }
-    default:
-      return {}
-  }
+  return NextResponse.json({ integrations })
 }
