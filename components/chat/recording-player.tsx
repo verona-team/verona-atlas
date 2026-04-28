@@ -23,7 +23,7 @@ interface RecordingPlayerProps {
   className?: string
 }
 
-const SPEED_OPTIONS = [0.5, 1, 2, 4]
+const SPEED_OPTIONS = [0.5, 1, 2, 4, 8]
 
 function formatTime(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) ms = 0
