@@ -4,6 +4,7 @@ import { getServerUser } from '@/lib/supabase/server-user'
 import { encrypt } from '@/lib/encryption'
 import { exchangeCodeForToken } from '@/lib/slack'
 import type { Json } from '@/lib/supabase/types'
+import { getPostHogClient } from '@/lib/posthog-server'
 
 export async function GET(request: NextRequest) {
   const errorParam = request.nextUrl.searchParams.get('error')
@@ -101,6 +102,17 @@ export async function GET(request: NextRequest) {
     if (error)
       return NextResponse.json({ error: error.message }, { status: 500 })
   }
+
+  getPostHogClient().capture({
+    distinctId: user.id,
+    event: 'slack_connected',
+    properties: {
+      project_id: projectId,
+      team_id: slack.teamId ?? null,
+      team_name: slack.teamName ?? null,
+      reconnected: !!existing,
+    },
+  })
 
   const redirectPath = returnTo || `/projects/${projectId}/chat?settings=1`
   const redirect = new URL(redirectPath, request.nextUrl.origin)

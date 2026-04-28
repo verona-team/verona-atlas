@@ -16,6 +16,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Loader2, ArrowUp, ArrowDown, X as XIcon, Plus } from 'lucide-react'
+import posthog from 'posthog-js'
 
 type StepType = 'navigate' | 'action' | 'assertion' | 'extract' | 'wait'
 
@@ -55,11 +56,18 @@ export default function TemplatesPage() {
       const method = editingTemplate ? 'PATCH' : 'POST'
       const body = editingTemplate ? { name: formName, description: formDescription || null, steps } : { project_id: projectId, name: formName, description: formDescription || undefined, steps, source: 'manual' }
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      if (res.ok) { setEditDialogOpen(false); fetchTemplates() }
+      if (res.ok) {
+        if (editingTemplate) {
+          posthog.capture('template_updated', { project_id: projectId, template_id: editingTemplate.id, name: formName, step_count: formSteps.length })
+        } else {
+          posthog.capture('template_created', { project_id: projectId, name: formName, step_count: formSteps.length })
+        }
+        setEditDialogOpen(false); fetchTemplates()
+      }
     } finally { setSaving(false) }
   }
 
-  async function handleDelete(id: string) { const res = await fetch(`/api/templates/${id}`, { method: 'DELETE' }); if (res.ok || res.status === 204) fetchTemplates() }
+  async function handleDelete(id: string) { const res = await fetch(`/api/templates/${id}`, { method: 'DELETE' }); if (res.ok || res.status === 204) { posthog.capture('template_deleted', { project_id: projectId, template_id: id }); fetchTemplates() } }
   async function handleToggleActive(t: Template) { const res = await fetch(`/api/templates/${t.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_active: !t.is_active }) }); if (res.ok) fetchTemplates() }
 
   function updateStep(i: number, u: Partial<TemplateStep>) { setFormSteps(p => p.map((s, j) => j === i ? { ...s, ...u } : s)) }

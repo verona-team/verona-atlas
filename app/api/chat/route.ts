@@ -6,6 +6,7 @@ import { getOrCreateSession } from '@/lib/chat/session'
 import { getGithubIntegrationReady } from '@/lib/github-integration-guard'
 import { chatServerLog } from '@/lib/chat/server-log'
 import { triggerChatTurn } from '@/lib/modal'
+import { getPostHogClient } from '@/lib/posthog-server'
 
 /**
  * This route used to run the entire chat turn — research agent, LLM,
@@ -402,6 +403,16 @@ export async function POST(request: NextRequest) {
       userId: user.id,
       functionCallId,
       clientMessageId: message.id,
+    })
+
+    getPostHogClient().capture({
+      distinctId: user.id,
+      event: 'chat_message_sent',
+      properties: {
+        project_id: projectId,
+        session_id: session.id,
+        message_length: text.length,
+      },
     })
 
     return NextResponse.json(

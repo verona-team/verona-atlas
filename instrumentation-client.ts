@@ -7,17 +7,17 @@
 import posthog from "posthog-js";
 
 const posthogKey = process.env.NEXT_PUBLIC_POSTHOG_KEY;
-const posthogHost =
-  process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://us.i.posthog.com";
 
 if (posthogKey) {
   posthog.init(posthogKey, {
-    api_host: posthogHost,
+    api_host: "/ingest",
+    ui_host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
     // Opts into PostHog's recommended modern config bundle: autocapture,
     // session recording, exception capture, web vitals, and history-change
     // pageviews (so app-router navigations are tracked automatically). Pinning
     // the date prevents future SDK updates from silently changing behavior.
     defaults: "2026-01-30",
+    capture_exceptions: true,
     loaded: (ph) => {
       if (process.env.NODE_ENV === "development") {
         ph.debug();

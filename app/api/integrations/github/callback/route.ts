@@ -13,6 +13,7 @@ import {
 } from '@/lib/github'
 import { encrypt } from '@/lib/encryption'
 import { chatServerLog } from '@/lib/chat/server-log'
+import { getPostHogClient } from '@/lib/posthog-server'
 
 /**
  * Post-install / post-authorize callback for the Verona GitHub App.
@@ -259,6 +260,17 @@ export async function GET(request: NextRequest) {
     installationId: resolvedInstallationId,
     setupAction,
     githubLogin: ghUser.login,
+  })
+
+  getPostHogClient().capture({
+    distinctId: user.id,
+    event: 'github_connected',
+    properties: {
+      project_id: projectId,
+      installation_id: resolvedInstallationId,
+      github_login: ghUser.login,
+      reconnected: !!existing,
+    },
   })
 
   const redirectPath = returnTo || `/projects/${projectId}/chat?settings=1`

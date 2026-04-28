@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import posthog from "posthog-js";
 export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [confirmEmail, setConfirmEmail] = useState<string | null>(null);
@@ -33,7 +34,10 @@ export default function SignupPage() {
         toast.error(result.error);
         setLoading(false);
       } else if (result?.success) {
-        setConfirmEmail(result.email ?? (formData.get("email") as string));
+        const email = result.email ?? (formData.get("email") as string);
+        posthog.identify(email, { email });
+        posthog.capture("user_signed_up", { email });
+        setConfirmEmail(email);
       } else {
         setLoading(false);
       }

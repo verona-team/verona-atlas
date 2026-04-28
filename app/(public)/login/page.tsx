@@ -11,6 +11,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+import posthog from 'posthog-js'
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false)
@@ -20,11 +21,15 @@ export default function LoginPage() {
     if (loading) return
     setLoading(true)
     const formData = new FormData(e.currentTarget)
+    const email = formData.get('email') as string
     try {
       const result = await signIn(formData)
       if (result?.error) {
         toast.error(result.error)
         setLoading(false)
+      } else {
+        posthog.identify(email, { email })
+        posthog.capture('user_signed_in', { email })
       }
     } catch (err) {
       unstable_rethrow(err)

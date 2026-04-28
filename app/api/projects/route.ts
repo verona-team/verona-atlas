@@ -4,6 +4,7 @@ import { getServerUser } from '@/lib/supabase/server-user'
 import { createProjectInbox } from '@/lib/agentmail'
 import { normalizeProjectUrl } from '@/lib/project-url'
 import { z } from 'zod'
+import { getPostHogClient } from '@/lib/posthog-server'
 
 const CreateProjectSchema = z.object({
   name: z.string().min(1).max(100),
@@ -103,6 +104,17 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  getPostHogClient().capture({
+    distinctId: user.id,
+    event: 'project_created',
+    properties: {
+      project_id: project.id,
+      project_name: project.name,
+      app_url: project.app_url,
+      agentmail_provisioned: !!agentmailInboxId,
+    },
+  })
 
   const responseBody: Record<string, unknown> = { ...project }
   if (agentmailWarning) {

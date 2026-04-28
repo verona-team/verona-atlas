@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getServerUser } from '@/lib/supabase/server-user'
+import { getPostHogClient } from '@/lib/posthog-server'
 
 type RouteContext = { params: Promise<{ projectId: string }> }
 
@@ -64,6 +65,14 @@ export async function POST(_request: NextRequest, context: RouteContext) {
 
   if (error)
     return NextResponse.json({ error: error.message }, { status: 500 })
+
+  if (updated) {
+    getPostHogClient().capture({
+      distinctId: user.id,
+      event: 'project_bootstrapped',
+      properties: { project_id: projectId },
+    })
+  }
 
   return NextResponse.json({
     dispatchedAt: updated?.bootstrap_dispatched_at ?? nowIso,
