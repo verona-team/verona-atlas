@@ -80,6 +80,36 @@ def _summarize_observability_counts(data: dict[str, list[dict]]) -> dict[str, in
     return {key: len(items) for key, items in data.items() if items}
 
 
+# Slack rejects section `text` fields longer than 3000 chars; leave headroom
+# for trailing content we may concatenate (e.g. continuation hints).
+SLACK_SECTION_TEXT_LIMIT = 2900
+
+
+def _chunk_section_blocks(text: str) -> list[dict]:
+    """Split a long mrkdwn string into one or more section blocks so the Slack
+    API accepts the message without us truncating user-visible content."""
+    if len(text) <= SLACK_SECTION_TEXT_LIMIT:
+        return [{"type": "section", "text": {"type": "mrkdwn", "text": text}}]
+
+    blocks: list[dict] = []
+    current = ""
+    for line in text.splitlines(keepends=True):
+        while len(line) > SLACK_SECTION_TEXT_LIMIT:
+            if current:
+                blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": current}})
+                current = ""
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": line[:SLACK_SECTION_TEXT_LIMIT]}})
+            line = line[SLACK_SECTION_TEXT_LIMIT:]
+        if len(current) + len(line) > SLACK_SECTION_TEXT_LIMIT:
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": current}})
+            current = line
+        else:
+            current += line
+    if current:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": current}})
+    return blocks
+
+
 def _compact_results_for_summary(results: list[dict]) -> list[dict]:
     """Strip heavy fields so the model stays brief; full data is already in Slack blocks."""
     out: list[dict] = []
@@ -223,35 +253,33 @@ async def send_slack_report(
     if failed_tests:
         blocks.append({"type": "divider"})
         failed_text = "*Failed:*\n"
-        for t in failed_tests[:3]:
-            name = str(t.get("test_template_id", "Unknown"))[:24]
-            error = (t.get("error_message") or "Unknown error")[:72]
+        for t in failed_tests:
+            name = str(t.get("test_template_id", "Unknown"))
+            error = t.get("error_message") or "Unknown error"
             failed_text += f"• `{name}` — {error}\n"
-        if len(failed_tests) > 3:
-            failed_text += f"_…+{len(failed_tests) - 3} more_\n"
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": failed_text}})
+        blocks.extend(_chunk_section_blocks(failed_text))
 
     if observability_data:
         sentry_events = observability_data.get("sentry_events", [])
         if sentry_events:
             blocks.append({"type": "divider"})
             sentry_text = f"*Sentry ({len(sentry_events)}):*\n"
-            for err in sentry_events[:3]:
-                title = err.get("title", "Unknown error")[:60]
+            for err in sentry_events:
+                title = err.get("title", "Unknown error")
                 level = err.get("level", "error")
                 sentry_text += f"• *{title}* ({level})\n"
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": sentry_text}})
+            blocks.extend(_chunk_section_blocks(sentry_text))
 
         posthog_errors = observability_data.get("posthog_errors", [])
         if posthog_errors:
             blocks.append({"type": "divider"})
             ph_text = f"*PostHog ({len(posthog_errors)}):*\n"
-            for err in posthog_errors[:3]:
+            for err in posthog_errors:
                 props = err.get("properties", err)
                 exc_type = props.get("exception_type", "Unknown")
-                exc_msg = str(props.get("exception_message", ""))[:60]
+                exc_msg = str(props.get("exception_message", ""))
                 ph_text += f"• *{exc_type}*: {exc_msg}\n"
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": ph_text}})
+            blocks.extend(_chunk_section_blocks(ph_text))
 
         llm_errors = (
             observability_data.get("langsmith_errors", [])
@@ -260,16 +288,15 @@ async def send_slack_report(
         if llm_errors:
             blocks.append({"type": "divider"})
             llm_text = f"*LLM traces ({len(llm_errors)}):*\n"
-            for err in llm_errors[:3]:
-                name = err.get("name", "Unknown")[:32]
-                error_msg = str(err.get("error", "Failed"))[:60]
+            for err in llm_errors:
+                name = err.get("name", "Unknown")
+                error_msg = str(err.get("error", "Failed"))
                 llm_text += f"• *{name}*: {error_msg}\n"
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": llm_text}})
+            blocks.extend(_chunk_section_blocks(llm_text))
 
     if ai_summary:
         blocks.append({"type": "divider"})
-        truncated = ai_summary[:900]
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Summary:*\n{truncated}"}})
+        blocks.extend(_chunk_section_blocks(f"*Summary:*\n{ai_summary}"))
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
