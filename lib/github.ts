@@ -74,7 +74,7 @@ export async function getAppSlug(): Promise<string> {
     console.warn("Failed to fetch GitHub App slug from API:", e)
   }
 
-  return "atlas-qa"
+  return "verona-atlas"
 }
 
 export async function getInstallationToken(installationId: number): Promise<string> {
