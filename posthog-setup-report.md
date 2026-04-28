@@ -1,44 +1,32 @@
 <wizard-report>
 # PostHog post-wizard report
 
-The wizard has completed a deep integration of PostHog analytics into Verona. Here is a summary of all changes made:
-
-**SDK setup:**
-- `instrumentation-client.ts` — updated to use the `/ingest` reverse proxy, `capture_exceptions: true`, and the `defaults: "2026-01-30"` bundle (autocapture, session replay, web vitals, history-change pageviews).
-- `next.config.ts` — added PostHog reverse-proxy rewrites (`/ingest/*` → PostHog ingestion host, `/ingest/static/*` and `/ingest/array/*` → assets host) and `skipTrailingSlashRedirect: true`.
-- `lib/posthog-server.ts` — new server-side singleton using `posthog-node` for API route event capture.
-- `.env.local` — `NEXT_PUBLIC_POSTHOG_KEY` and `NEXT_PUBLIC_POSTHOG_HOST` written via wizard-tools.
-
-**Event tracking:**
+The wizard has completed a deep integration of your project. PostHog was already initialized via `instrumentation-client.ts` with a reverse proxy configured in `next.config.ts`. The existing setup included `posthog-js` and `posthog-node`, a server-side client in `lib/posthog-server.ts`, and several events already tracked (`user_signed_in`, `user_signed_up`, `project_created`, `github_connected`, `slack_connected`, `project_bootstrapped`, `chat_message_sent`). The wizard supplemented those with 8 new events across 5 files, covering additional integration connects, project deletion, flow proposal decisions, and the project setup CTA view.
 
 | Event | Description | File |
-|---|---|---|
-| `user_signed_up` | User submitted the signup form successfully (email confirmation triggered). Calls `posthog.identify()` with email. | `app/(public)/signup/page.tsx` |
-| `user_signed_in` | User signed in via the login form. Calls `posthog.identify()` with email. | `app/(public)/login/page.tsx` |
-| `project_created` | New project created via the API (includes agentmail provisioning status). | `app/api/projects/route.ts` |
-| `chat_message_sent` | Chat message successfully dispatched to Modal AI worker. | `app/api/chat/route.ts` |
-| `github_connected` | GitHub App installation linked to a project (includes reconnect flag). | `app/api/integrations/github/callback/route.ts` |
-| `slack_connected` | Slack workspace linked to a project (includes team name and reconnect flag). | `app/api/integrations/slack/callback/route.ts` |
-| `project_bootstrapped` | Project bootstrap dispatched for the first time (triggers initial AI setup turn). | `app/api/projects/[projectId]/dispatch-bootstrap/route.ts` |
-| `template_created` | User manually created a new test template (includes step count). | `app/(dashboard)/projects/[projectId]/templates/page.tsx` |
-| `template_updated` | User updated an existing test template. | `app/(dashboard)/projects/[projectId]/templates/page.tsx` |
-| `template_deleted` | User deleted a test template. | `app/(dashboard)/projects/[projectId]/templates/page.tsx` |
+|-------|-------------|------|
+| `posthog_integration_connected` | User successfully connects their PostHog integration to a project | `app/api/integrations/posthog/connect/route.ts` |
+| `sentry_integration_connected` | User successfully connects their Sentry integration to a project | `app/api/integrations/sentry/connect/route.ts` |
+| `langsmith_integration_connected` | User successfully connects their LangSmith integration to a project | `app/api/integrations/langsmith/connect/route.ts` |
+| `braintrust_integration_connected` | User successfully connects their Braintrust integration to a project | `app/api/integrations/braintrust/connect/route.ts` |
+| `project_deleted` | User deletes a project | `app/api/projects/[projectId]/route.ts` |
+| `flow_proposal_approved` | User approves a proposed test flow from the agent | `components/chat/flow-proposal-card.tsx` |
+| `flow_proposal_rejected` | User rejects a proposed test flow from the agent | `components/chat/flow-proposal-card.tsx` |
+| `project_setup_cta_viewed` | User views the project setup CTA page (top of bootstrap conversion funnel) | `components/chat/project-setup-cta.tsx` |
 
 ## Next steps
 
-We've built a dashboard and five insights to keep an eye on user behavior:
+We've built some insights and a dashboard for you to keep an eye on user behavior, based on the events we just instrumented:
 
-**Dashboard:** https://us.posthog.com/project/398853/dashboard/1518101
-
-**Insights:**
-- [User acquisition funnel](https://us.posthog.com/project/398853/insights/Hz1GM2MK) — Signup → project created → bootstrapped → first chat message
-- [New signups over time](https://us.posthog.com/project/398853/insights/4qC26E7i) — Daily signup volume
-- [Chat engagement — messages sent per day](https://us.posthog.com/project/398853/insights/l4jDbCHS) — Daily message volume and unique active users
-- [Integration connections](https://us.posthog.com/project/398853/insights/0rgiVuDt) — GitHub and Slack connection events over time
-- [Template activity](https://us.posthog.com/project/398853/insights/BdXo59J8) — Weekly template create/update/delete volume
+- **Dashboard — Analytics basics**: https://us.posthog.com/project/398853/dashboard/1518157
+- **Signup to First Chat Funnel** (5-step activation funnel): https://us.posthog.com/project/398853/insights/45Ni9xqj
+- **New Signups Over Time** (daily trend): https://us.posthog.com/project/398853/insights/sYUpBMKz
+- **Daily Chat Activity** (engagement metric): https://us.posthog.com/project/398853/insights/WjHoQ1zp
+- **Flow Proposal Approval vs Rejection** (agent quality signal): https://us.posthog.com/project/398853/insights/HKXKqdU9
+- **Integration Adoption** (which integrations users connect): https://us.posthog.com/project/398853/insights/vVB8Kckq
 
 ### Agent skill
 
-We've left an agent skill folder in your project. You can use this context for further agent development when using Claude Code. This will help ensure the model provides the most up-to-date approaches for integrating PostHog.
+We've left an agent skill folder in your project at `.claude/skills/integration-nextjs-app-router/`. You can use this context for further agent development when using Claude Code. This will help ensure the model provides the most up-to-date approaches for integrating PostHog.
 
 </wizard-report>

@@ -5,6 +5,7 @@ import { encrypt } from '@/lib/encryption'
 import { validateBraintrustConnection } from '@/lib/braintrust'
 import { z } from 'zod'
 import type { Json } from '@/lib/supabase/types'
+import { getPostHogClient } from '@/lib/posthog-server'
 
 const BraintrustConnectSchema = z.object({
   projectId: z.string().uuid(),
@@ -85,6 +86,15 @@ export async function POST(request: NextRequest) {
     if (error)
       return NextResponse.json({ error: error.message }, { status: 500 })
   }
+
+  getPostHogClient().capture({
+    distinctId: user.id,
+    event: 'braintrust_integration_connected',
+    properties: {
+      project_id: projectId,
+      reconnected: !!existing,
+    },
+  })
 
   return NextResponse.json({ success: true })
 }

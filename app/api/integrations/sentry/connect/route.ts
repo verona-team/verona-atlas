@@ -5,6 +5,7 @@ import { encrypt } from '@/lib/encryption'
 import { validateSentryConnection } from '@/lib/sentry'
 import { z } from 'zod'
 import type { Json } from '@/lib/supabase/types'
+import { getPostHogClient } from '@/lib/posthog-server'
 
 const SentryConnectSchema = z.object({
   projectId: z.string().uuid(),
@@ -90,6 +91,17 @@ export async function POST(request: NextRequest) {
     if (error)
       return NextResponse.json({ error: error.message }, { status: 500 })
   }
+
+  getPostHogClient().capture({
+    distinctId: user.id,
+    event: 'sentry_integration_connected',
+    properties: {
+      project_id: projectId,
+      organization_slug: organizationSlug,
+      project_slug: projectSlug,
+      reconnected: !!existing,
+    },
+  })
 
   return NextResponse.json({ success: true })
 }

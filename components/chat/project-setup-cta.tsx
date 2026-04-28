@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import posthog from "posthog-js";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -105,6 +106,10 @@ export function ProjectSetupCTA({
   const lastIntegrationsKeyRef = useRef<string>(
     integrationsKey(seedIntegrations),
   );
+
+  useEffect(() => {
+    posthog.capture('project_setup_cta_viewed', { project_id: projectId })
+  }, [projectId])
 
   const loadIntegrations = useCallback(async () => {
     try {

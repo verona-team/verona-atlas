@@ -4,6 +4,7 @@ import { getServerUser } from '@/lib/supabase/server-user'
 import { encrypt } from '@/lib/encryption'
 import { z } from 'zod'
 import type { Json } from '@/lib/supabase/types'
+import { getPostHogClient } from '@/lib/posthog-server'
 
 const PostHogConnectSchema = z.object({
   projectId: z.string().uuid(),
@@ -110,6 +111,17 @@ export async function POST(request: NextRequest) {
     if (error)
       return NextResponse.json({ error: error.message }, { status: 500 })
   }
+
+  getPostHogClient().capture({
+    distinctId: user.id,
+    event: 'posthog_integration_connected',
+    properties: {
+      project_id: projectId,
+      posthog_project_id: posthogProjectId,
+      api_host: resolvedHost,
+      reconnected: !!existing,
+    },
+  })
 
   return NextResponse.json({ success: true })
 }

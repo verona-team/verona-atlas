@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getServerUser } from '@/lib/supabase/server-user'
+import { getPostHogClient } from '@/lib/posthog-server'
 
 type RouteContext = { params: Promise<{ projectId: string }> }
 
@@ -55,6 +56,16 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
 
   const { error } = await supabase.from('projects').delete().eq('id', projectId)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  getPostHogClient().capture({
+    distinctId: user.id,
+    event: 'project_deleted',
+    properties: {
+      project_id: projectId,
+      project_name: project.name,
+      app_url: project.app_url,
+    },
+  })
 
   return new NextResponse(null, { status: 204 })
 }

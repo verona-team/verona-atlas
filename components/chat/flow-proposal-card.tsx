@@ -10,6 +10,7 @@ import {
   CollapsibleTrigger,
   CollapsibleContent,
 } from '@/components/ui/collapsible'
+import posthog from 'posthog-js'
 
 export interface FlowStep {
   order: number
@@ -86,7 +87,15 @@ export function FlowProposalCard({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => onApprove(flow.id)}
+                onClick={() => {
+                  posthog.capture('flow_proposal_approved', {
+                    flow_id: flow.id,
+                    flow_name: flow.name,
+                    flow_priority: flow.priority,
+                    step_count: flow.steps.length,
+                  })
+                  onApprove(flow.id)
+                }}
                 disabled={disabled}
                 className="border-border hover:border-green-500/40 hover:text-green-700 hover:bg-green-500/5"
               >
@@ -96,7 +105,15 @@ export function FlowProposalCard({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => onReject(flow.id)}
+                onClick={() => {
+                  posthog.capture('flow_proposal_rejected', {
+                    flow_id: flow.id,
+                    flow_name: flow.name,
+                    flow_priority: flow.priority,
+                    step_count: flow.steps.length,
+                  })
+                  onReject(flow.id)
+                }}
                 disabled={disabled}
                 className="border-border hover:border-red-500/40 hover:text-red-700 hover:bg-red-500/5"
               >
