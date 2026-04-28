@@ -25,6 +25,7 @@ interface MessageBubbleProps {
   flowStates?: Record<string, 'pending' | 'approved' | 'rejected'>
   onApproveFlow?: (messageId: string, flowId: string) => void
   onRejectFlow?: (messageId: string, flowId: string) => void
+  flowActionsDisabled?: boolean
   isStreaming?: boolean
 }
 
@@ -37,6 +38,7 @@ export function MessageBubble({
   flowStates,
   onApproveFlow,
   onRejectFlow,
+  flowActionsDisabled,
   isStreaming,
 }: MessageBubbleProps) {
   const isUser = role === 'user'
@@ -82,6 +84,7 @@ export function MessageBubble({
           superseded={isSuperseded}
           onApproveFlow={onApproveFlow}
           onRejectFlow={onRejectFlow}
+          flowActionsDisabled={flowActionsDisabled}
         />
       )}
     </div>
@@ -95,6 +98,7 @@ interface SupersedableProposalsProps {
   superseded: boolean
   onApproveFlow?: (messageId: string, flowId: string) => void
   onRejectFlow?: (messageId: string, flowId: string) => void
+  flowActionsDisabled?: boolean
 }
 
 /**
@@ -111,6 +115,7 @@ function SupersedableProposals({
   superseded,
   onApproveFlow,
   onRejectFlow,
+  flowActionsDisabled,
 }: SupersedableProposalsProps) {
   const [expanded, setExpanded] = useState(false)
 
@@ -185,6 +190,7 @@ function SupersedableProposals({
             state={flowStates?.[flow.id] ?? 'pending'}
             onApprove={handleApprove}
             onReject={handleReject}
+            disabled={flowActionsDisabled}
           />
         ))}
       </div>

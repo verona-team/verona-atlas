@@ -981,6 +981,7 @@ export function ChatInterface({
               flowStates={flowStatesByMessageId[msg.id]}
               onApproveFlow={handleApproveFlow}
               onRejectFlow={handleRejectFlow}
+              flowActionsDisabled={isProcessing}
               isStreaming={false}
             />
           ))}
